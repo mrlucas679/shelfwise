@@ -639,6 +639,68 @@ button {
   line-height: 1.45;
 }
 
+.rail-warning {
+  color: var(--warn) !important;
+}
+
+.decision-log {
+  display: grid;
+  gap: 0;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.decision-row.is-current {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+  padding-left: 8px;
+}
+
+.decision-copy {
+  min-width: 0;
+}
+
+.decision-copy strong,
+.decision-copy small,
+.decision-meta span {
+  display: block;
+}
+
+.decision-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.decision-copy small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decision-meta {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: right;
+  text-transform: uppercase;
+}
+
 .priority-list {
   margin: 10px 0 0;
 }

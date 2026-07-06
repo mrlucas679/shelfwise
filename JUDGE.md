@@ -44,6 +44,7 @@ http://localhost:8000/demo/critic-rejection
 - The UI leads with one recommended action, then reveals the agent chain only when requested.
 - The header switch shows both the approval case and a Critic rejection case without crowding the
   main conversation.
+- The side rail includes a decision log row so the audit trail is visible during the demo.
 - The side rail shows numeric proof: FEFO sell-first units, normal units, delivery gap, supplier
   action, and outcome-learning signal.
 - The golden cascade reads the planted store scenario from `data/datasets/*.csv`, exposed through

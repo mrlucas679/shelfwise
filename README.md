@@ -76,7 +76,7 @@ Built now:
   threshold adjustments.
 - Offline-safe OpenAI-compatible inference gateway for Fireworks/vLLM.
 - React/Vite ops console with one executive answer, numeric proof rail, compact agent chain,
-  drill-down evidence, scenario switch, inference routing, learning note, and HITL approval.
+  drill-down evidence, scenario switch, decision log, inference routing, learning note, and HITL approval.
 - Tests for the golden cascade and store-intelligence skills.
 - Backend and frontend Dockerfiles plus Compose services.
 - GitHub Actions CI for lint, backend tests, frontend build, and Compose validation.

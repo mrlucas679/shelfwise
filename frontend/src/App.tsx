@@ -22,6 +22,15 @@ type Decision = {
   action?: RecommendedAction
   caused_by?: string[]
   summary?: string
+  role?: string
+  critic_verdict?: string
+  created_at?: string
+  updated_at?: string
+  review?: {
+    reviewer?: string
+    status?: string
+    reviewed_at?: string
+  } | null
   outcome?: {
     units_cleared?: number
     waste_units?: number
@@ -93,6 +102,7 @@ type GoldenDemo = {
   store_intelligence?: StoreIntelligence
 }
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
+type DecisionLogResponse = { decisions?: Decision[] }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type ScenarioMode = 'approval' | 'critic'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
@@ -151,6 +161,11 @@ async function fetchJson<T>(path: string, init: RequestInit, signal: AbortSignal
 
 const fetchDemo = (path: string, signal: AbortSignal) =>
   fetchJson<GoldenDemo>(path, { method: 'GET' }, signal)
+
+async function fetchDecisionLog(signal: AbortSignal): Promise<Decision[]> {
+  const payload = await fetchJson<DecisionLogResponse>('/decisions', { method: 'GET' }, signal)
+  return payload.decisions ?? []
+}
 
 async function postTransition(
   id: string,
@@ -236,6 +251,31 @@ function statusTone(status?: string): Tone {
   if (s === 'rejected' || s === 'error' || s === 'timeout') return 'risk'
   if (s === 'pending' || s === 'degraded') return 'warn'
   return 'mute'
+}
+
+function decisionTime(decision?: Decision): string {
+  const raw = decision?.updated_at ?? decision?.created_at
+  if (!raw) return '-'
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return raw
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function decisionSortKey(decision: Decision): number {
+  const raw = decision.updated_at ?? decision.created_at ?? ''
+  const value = Date.parse(raw)
+  return Number.isNaN(value) ? 0 : value
+}
+
+function sortDecisions(decisions: Decision[]): Decision[] {
+  return [...decisions].sort((a, b) => decisionSortKey(b) - decisionSortKey(a))
+}
+
+function upsertDecisionLog(decisions: Decision[], next: Decision): Decision[] {
+  if (!next.id) return sortDecisions(decisions)
+  const byId = new Map(decisions.map((item) => [item.id, item]))
+  byId.set(next.id, next)
+  return sortDecisions(Array.from(byId.values()))
 }
 
 const GLYPH: Record<Tone, string> = { ok: '●', warn: '◆', risk: '▲', info: '■', mute: '◐', accent: '●' }
@@ -682,10 +722,19 @@ function Conversation({
 // ---------------------------------------------------------------------------
 // Side rail
 // ---------------------------------------------------------------------------
-function SideRail({ data }: { data: GoldenDemo }) {
+function SideRail({
+  data,
+  decisions,
+  decisionLogError,
+}: {
+  data: GoldenDemo
+  decisions?: Decision[]
+  decisionLogError: string | null
+}) {
   return (
     <aside className="side-rail panel" aria-label="Approval and system summary">
       <ApprovalSummary data={data} />
+      <DecisionLogPanel decisions={decisions} currentId={data.decision?.id} error={decisionLogError} />
       <PriorityList priorities={buildPriorities(data)} />
       <StoreIntelligencePanel intelligence={data.store_intelligence} />
       <TraceSummaryPanel trace={data.trace} inference={data.inference} />
@@ -694,15 +743,72 @@ function SideRail({ data }: { data: GoldenDemo }) {
   )
 }
 
-function ApprovalSummary({ data }: { data: GoldenDemo }) {
-  const status = data.decision?.status ?? 'pending'
-  const outcome = data.decision?.outcome
-  const writeBack = data.decision?.write_back
+function DecisionLogPanel({
+  decisions,
+  currentId,
+  error,
+}: {
+  decisions?: Decision[]
+  currentId?: string
+  error: string | null
+}) {
+  const recent = sortDecisions(decisions ?? []).slice(0, 5)
+
   return (
     <section className="rail-section">
       <div className="rail-heading">
         <div>
-          <div className="section-kicker">Pending approval</div>
+          <div className="section-kicker">Decision log</div>
+          <h2>Audit trail</h2>
+        </div>
+        <span className="section-count tnum">{recent.length}</span>
+      </div>
+
+      {error ? <p className="rail-warning">{error}</p> : null}
+
+      {recent.length > 0 ? (
+        <ol className="decision-log">
+          {recent.map((decision) => {
+            const status = decision.status ?? 'unknown'
+            const tone = statusTone(status)
+            const isCurrent = Boolean(currentId && decision.id === currentId)
+            return (
+              <li
+                className={`decision-row ${isCurrent ? 'is-current' : ''}`}
+                key={decision.id ?? decision.summary}
+              >
+                <span className={`glyph-shape tone-${tone}`} aria-hidden>
+                  {GLYPH[tone]}
+                </span>
+                <span className="decision-copy">
+                  <strong>{describeAction(decision.action)}</strong>
+                  <small>{decision.summary ?? decision.id ?? 'No decision summary.'}</small>
+                </span>
+                <span className="decision-meta">
+                  <span>{formatLabel(status)}</span>
+                  <span className="tnum">{decisionTime(decision)}</span>
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      ) : (
+        <p>No decisions logged yet.</p>
+      )}
+    </section>
+  )
+}
+
+function ApprovalSummary({ data }: { data: GoldenDemo }) {
+  const status = data.decision?.status ?? 'pending'
+  const outcome = data.decision?.outcome
+  const writeBack = data.decision?.write_back
+  const label = status.toLowerCase() === 'pending' ? 'Pending approval' : 'Decision status'
+  return (
+    <section className="rail-section">
+      <div className="rail-heading">
+        <div>
+          <div className="section-kicker">{label}</div>
           <h2>{data.decision?.id ?? 'No decision id'}</h2>
         </div>
         <StatusGlyph tone={statusTone(status)} label={formatLabel(status)} />
@@ -921,6 +1027,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [scenarioMode, setScenarioMode] = useState<ScenarioMode>('approval')
+  const [decisions, setDecisions] = useState<Decision[]>([])
+  const [decisionLogError, setDecisionLogError] = useState<string | null>(null)
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const transitionCtrl = useRef<AbortController | null>(null)
@@ -930,13 +1038,28 @@ function App() {
     const controller = new AbortController()
     setLoadState('loading')
     setError(null)
-    fetchDemo(activePath, controller.signal)
-      .then((payload) => {
-        setData(payload)
-        setBusy(null)
-        setTransitionError(null)
-        setLoadState('ready')
-      })
+    setDecisionLogError(null)
+
+    async function loadDemo() {
+      const payload = await fetchDemo(activePath, controller.signal)
+      let log = payload.decision ? [payload.decision] : []
+      try {
+        log = await fetchDecisionLog(controller.signal)
+      } catch (logError) {
+        if (controller.signal.aborted) return
+        setDecisionLogError(
+          `Decision log unavailable: ${logError instanceof Error ? logError.message : String(logError)}`,
+        )
+      }
+      if (controller.signal.aborted) return
+      setDecisions(sortDecisions(log))
+      setData(payload)
+      setBusy(null)
+      setTransitionError(null)
+      setLoadState('ready')
+    }
+
+    loadDemo()
       .catch((e) => {
         if (controller.signal.aborted) return
         setError(e instanceof Error ? e.message : String(e))
@@ -985,6 +1108,7 @@ function App() {
               }
             : cur,
         )
+        setDecisions((cur) => upsertDecisionLog(cur, result.decision))
         setBusy(null)
       })
       .catch((e) => {
@@ -1045,7 +1169,7 @@ function App() {
                 onApprove={() => transition('approve')}
                 onReject={() => transition('reject')}
               />
-              <SideRail data={data} />
+              <SideRail data={data} decisions={decisions} decisionLogError={decisionLogError} />
             </div>
           </ErrorBoundary>
         ) : null}

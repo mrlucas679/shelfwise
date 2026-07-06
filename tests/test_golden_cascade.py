@@ -130,6 +130,22 @@ def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> Non
     assert body["learning_event"] is None
 
 
+def test_decisions_endpoint_lists_demo_decisions() -> None:
+    client = TestClient(app)
+    run_response = client.get("/demo/golden")
+    assert run_response.status_code == 200
+    decision = run_response.json()["decision"]
+
+    response = client.get("/decisions")
+
+    assert response.status_code == 200
+    decisions = response.json()["decisions"]
+    assert any(item["id"] == decision["id"] for item in decisions)
+    listed = next(item for item in decisions if item["id"] == decision["id"])
+    assert listed["status"] == "pending"
+    assert listed["action"]["type"] == "apply_markdown"
+
+
 def test_readiness_endpoint_reports_backend_ready() -> None:
     client = TestClient(app)
     response = client.get("/readiness")
