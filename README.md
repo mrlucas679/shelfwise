@@ -52,6 +52,10 @@ Useful API endpoints:
 ./scripts/smoke.ps1
 ```
 
+## Demo
+
+Use [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) for the local demo flow, judge story, and cloud proof checks.
+
 ## Container
 
 ```bash
