@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -43,7 +43,7 @@ class Money:
     currency: str = "ZAR"
 
     @classmethod
-    def zar(cls, rand: object) -> "Money":
+    def zar(cls, rand: object) -> Money:
         cents = (_decimal(rand) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         return cls(minor_units=int(cents), currency="ZAR")
 
@@ -55,19 +55,19 @@ class Money:
     def cents(self) -> int:
         return self.minor_units
 
-    def _same_currency(self, other: "Money") -> None:
+    def _same_currency(self, other: Money) -> None:
         if self.currency != other.currency:
             raise ValueError(f"currency mismatch: {self.currency} vs {other.currency}")
 
-    def __add__(self, other: "Money") -> "Money":
+    def __add__(self, other: Money) -> Money:
         self._same_currency(other)
         return Money(self.minor_units + other.minor_units, self.currency)
 
-    def __sub__(self, other: "Money") -> "Money":
+    def __sub__(self, other: Money) -> Money:
         self._same_currency(other)
         return Money(self.minor_units - other.minor_units, self.currency)
 
-    def __mul__(self, factor: object) -> "Money":
+    def __mul__(self, factor: object) -> Money:
         cents = (Decimal(self.minor_units) * _decimal(factor)).quantize(
             Decimal("1"), rounding=ROUND_HALF_UP
         )
@@ -91,11 +91,11 @@ class SourceRef:
     locator: str | None = None
 
     @classmethod
-    def dataset(cls, ref: str, locator: str | None = None) -> "SourceRef":
+    def dataset(cls, ref: str, locator: str | None = None) -> SourceRef:
         return cls(kind="dataset", ref=ref, locator=locator)
 
     @classmethod
-    def tool(cls, ref: str, locator: str | None = None) -> "SourceRef":
+    def tool(cls, ref: str, locator: str | None = None) -> SourceRef:
         return cls(kind="tool", ref=ref, locator=locator)
 
     def to_dict(self) -> dict[str, Any]:

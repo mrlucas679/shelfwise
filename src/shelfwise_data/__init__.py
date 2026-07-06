@@ -1,2 +1,33 @@
-# SA FMCG data ingestion stub
-__all__ = []
+from .store_intelligence import (
+    BatchPosition,
+    DecisionOutcome,
+    DeliveryReceipt,
+    DeliveryReconciliation,
+    FefoStockSplit,
+    OutcomeSummary,
+    StockBatch,
+    SupplierCoverPlan,
+    SupplierCoverRequest,
+    build_store_intelligence_demo,
+    plan_supplier_cover,
+    reconcile_delivery,
+    split_stock_by_fefo,
+    summarize_outcome,
+)
+
+__all__ = [
+    "BatchPosition",
+    "DecisionOutcome",
+    "DeliveryReceipt",
+    "DeliveryReconciliation",
+    "FefoStockSplit",
+    "OutcomeSummary",
+    "StockBatch",
+    "SupplierCoverPlan",
+    "SupplierCoverRequest",
+    "build_store_intelligence_demo",
+    "plan_supplier_cover",
+    "reconcile_delivery",
+    "split_stock_by_fefo",
+    "summarize_outcome",
+]

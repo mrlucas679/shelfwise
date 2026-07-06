@@ -7,7 +7,8 @@ runs a seeded South African supply-chain scenario:
 
 `scan -> inventory -> expiry risk -> demand -> opportunity -> simulation -> critic -> executive -> HITL`
 
-The current implementation is the first runnable scaffold extracted from the project domain specs.
+The current implementation is a runnable MVP slice: a chat-first operations console backed by
+deterministic store-intelligence tools and human approval.
 
 ## Quick Start
 
@@ -56,13 +57,17 @@ Built now:
 
 - Money/source/evidence/decision contracts.
 - Deterministic decision-science tools.
+- Store-intelligence tools for FEFO batch splits, delivery reconciliation, supplier cover, and
+  outcome learning.
 - Golden cascade runner.
 - FastAPI health and demo endpoints.
 - HITL approve/reject endpoints.
 - Offline-safe OpenAI-compatible inference gateway for Fireworks/vLLM.
-- React/Vite ops console with evidence, trace, inference routing, learning note, and HITL approval.
-- Tests for the golden cascade.
+- React/Vite ops console with one executive answer, numeric proof rail, compact agent chain,
+  drill-down evidence, inference routing, learning note, and HITL approval.
+- Tests for the golden cascade and store-intelligence skills.
 - Backend and frontend Dockerfiles plus Compose services.
+- GitHub Actions CI for lint, backend tests, frontend build, and Compose validation.
 
 Next:
 

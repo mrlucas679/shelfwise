@@ -3,9 +3,10 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .cascade import run_golden_cascade
 from shelfwise_action import DecisionStore
 from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
+
+from .cascade import run_golden_cascade
 
 app = FastAPI(title="ShelfWise", version="0.1.0")
 app.add_middleware(
@@ -34,13 +35,16 @@ def health() -> dict[str, object]:
 @app.get("/readiness")
 def readiness() -> dict[str, object]:
     inference = load_inference_config().to_public_dict()
+    gateway_status = (
+        "offline-safe" if inference["provider"] == "offline" else "configured"
+    )
     return {
         "ready": True,
         "checks": {
             "backend": "ok",
             "golden_cascade": "ok",
             "hitl": "ok",
-            "inference_gateway": "offline-safe" if inference["provider"] == "offline" else "configured",
+            "inference_gateway": gateway_status,
         },
         "next_external_checks": [
             "Fireworks credential smoke",

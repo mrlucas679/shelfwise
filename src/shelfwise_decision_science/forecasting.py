@@ -26,9 +26,19 @@ def forecast_demand(
     if horizon_days <= 0:
         raise ValueError("horizon_days must be positive")
     if not recent_daily_units:
-        return DemandForecast(sku, Decimal("0"), horizon_days, Decimal("0"), "no_sales_history", Decimal("0.2"))
+        return DemandForecast(
+            sku,
+            Decimal("0"),
+            horizon_days,
+            Decimal("0"),
+            "no_sales_history",
+            Decimal("0.2"),
+        )
 
-    base = sum((decimal(x) for x in recent_daily_units), Decimal("0")) / Decimal(len(recent_daily_units))
+    base = sum(
+        (decimal(x) for x in recent_daily_units),
+        Decimal("0"),
+    ) / Decimal(len(recent_daily_units))
     daily = base * payday_multiplier
     support = min(Decimal(len(recent_daily_units)) / Decimal("14"), Decimal("1"))
     confidence = q2(Decimal("0.55") + support * Decimal("0.35"))

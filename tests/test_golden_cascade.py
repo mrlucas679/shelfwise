@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import app
 from shelfwise_backend import run_golden_cascade
+from shelfwise_backend.app import app
 from shelfwise_inference import OpenAICompatibleInferenceClient
 
 
@@ -37,7 +37,10 @@ def test_golden_cascade_is_math_backed_and_traceable() -> None:
     assert "decision_science.forecast_demand" in trace_names
     assert "decision_science.score_expiry_risk" in trace_names
     assert "decision_science.simulate_markdown" in trace_names
-    assert any(fact["fact"] == "incremental_profit" for fact in support)
+    profit_fact = next(fact for fact in support if fact["fact"] == "incremental_profit")
+    critic_fact = next(fact for fact in support if fact["fact"] == "critic_passed")
+    assert profit_fact["value"] != "ZAR 0.00"
+    assert critic_fact["value"] == "True"
     assert all(evidence["sources"] for evidence in result["evidence"])
 
 
@@ -64,6 +67,19 @@ def test_hitl_approve_flow() -> None:
 
     assert approved["status"] == "approved"
     assert approved["review"]["status"] == "approved"
+
+
+def test_demo_golden_exposes_store_intelligence_numbers() -> None:
+    client = TestClient(app)
+    response = client.get("/demo/golden")
+
+    assert response.status_code == 200
+    intelligence = response.json()["store_intelligence"]
+    assert intelligence["batch_split"]["priority_sell_units"] == 10
+    assert intelligence["batch_split"]["normal_units"] == 20
+    assert intelligence["delivery_reconciliation"]["missing_units"] == 12
+    assert intelligence["supplier_cover"]["recommended_action"] == "transfer"
+    assert intelligence["learning_summary"]["sell_through_delta_units"] == 6
 
 
 def test_readiness_endpoint_reports_backend_ready() -> None:

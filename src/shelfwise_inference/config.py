@@ -16,6 +16,9 @@ class ModelTier(StrEnum):
     STRONG = "strong"
 
 
+STRONG_AGENT_NAMES = {"critic", "executive", "orchestrator"}
+
+
 @dataclass(frozen=True, slots=True)
 class InferenceConfig:
     """Provider/model routing for ShelfWise.
@@ -33,10 +36,10 @@ class InferenceConfig:
     api_key_present: bool
 
     def model_for_agent(self, agent: str) -> str:
-        return self.strong_model if agent in {"critic", "executive", "orchestrator"} else self.routine_model
+        return self.strong_model if agent in STRONG_AGENT_NAMES else self.routine_model
 
     def tier_for_agent(self, agent: str) -> ModelTier:
-        return ModelTier.STRONG if agent in {"critic", "executive", "orchestrator"} else ModelTier.SMALL
+        return ModelTier.STRONG if agent in STRONG_AGENT_NAMES else ModelTier.SMALL
 
     def to_public_dict(self) -> dict[str, object]:
         return {
@@ -52,7 +55,10 @@ class InferenceConfig:
         }
 
     def chat_completions_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}/chat/completions" if self.base_url.endswith("/v1") else f"{self.base_url.rstrip('/')}/v1/chat/completions"
+        base_url = self.base_url.rstrip("/")
+        if base_url.endswith("/v1"):
+            return f"{base_url}/chat/completions"
+        return f"{base_url}/v1/chat/completions"
 
 
 def _detect_provider(base_url: str) -> ProviderKind:

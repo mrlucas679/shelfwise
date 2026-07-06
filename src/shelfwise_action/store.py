@@ -9,8 +9,9 @@ from typing import Any
 class DecisionStore:
     """Tiny in-memory HITL store for the hackathon demo.
 
-    The durable Postgres journal is a later slice. For the demo we need a clear approval loop that is
-    deterministic, idempotent enough for repeat clicks, and visible to the frontend.
+    The durable Postgres journal is a later slice. For the demo we need a
+    clear approval loop that is deterministic, idempotent enough for repeat
+    clicks, and visible to the frontend.
     """
 
     def __init__(self) -> None:
@@ -57,7 +58,11 @@ class DecisionStore:
             updated = deepcopy(item)
             updated["status"] = status
             updated["updated_at"] = _now()
-            updated["review"] = {"reviewer": reviewer, "status": status, "reviewed_at": updated["updated_at"]}
+            updated["review"] = {
+                "reviewer": reviewer,
+                "status": status,
+                "reviewed_at": updated["updated_at"],
+            }
             self._decisions[decision_id] = updated
             return deepcopy(updated)
 

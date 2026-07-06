@@ -3,14 +3,15 @@
 ## What This Project Shows
 
 ShelfWise demonstrates a math-backed, agent-reviewed retail operations cascade. A seeded
-load-shedding and payday scenario produces evidence-backed recommendations for reducing food waste.
+load-shedding and payday scenario produces evidence-backed recommendations for reducing food waste,
+while a store-intelligence slice handles batch age, delivery mismatch, supplier cover, and learning.
 
 ## Run Locally
 
 ```powershell
 $env:PYTHONPATH="src"
 python -m pytest -q
-python -m shelfwise_backend
+python -m uvicorn shelfwise_backend.app:app --host 127.0.0.1 --port 8000
 ```
 
 Open:
@@ -38,8 +39,13 @@ http://localhost:8000/demo/golden
 ## What To Look For
 
 - The cascade emits Inventory, Demand, Expiry, Opportunity, Simulation, Critic, and Executive evidence.
+- The UI leads with one recommended action, then reveals the agent chain only when requested.
+- The side rail shows numeric proof: FEFO sell-first units, normal units, delivery gap, supplier
+  action, and outcome-learning signal.
 - Every recommendation includes sources and supporting data.
 - The action is high-risk and remains `pending` for human approval.
 - The action can be approved or rejected through the UI or HITL endpoints.
 - Trace spans show the deterministic decision-science tools behind the recommendation.
+- `/demo/golden` exposes `store_intelligence` for batch split, delivery reconciliation, supplier
+  cover, and learning summary.
 - `/inference/smoke` shows whether the app is offline, using Fireworks, or using MI300X/vLLM.
