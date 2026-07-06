@@ -35,6 +35,10 @@ Useful API endpoints:
 - `GET http://localhost:8000/health`
 - `GET http://localhost:8000/readiness`
 - `GET http://localhost:8000/demo/golden`
+- `POST http://localhost:8000/intelligence/stock/fefo-split`
+- `POST http://localhost:8000/intelligence/deliveries/reconcile`
+- `POST http://localhost:8000/intelligence/suppliers/cover-plan`
+- `POST http://localhost:8000/intelligence/outcomes/summarize`
 - `GET http://localhost:8000/inference/smoke`
 - `POST http://localhost:8000/decisions/{decision_id}/approve`
 - `POST http://localhost:8000/decisions/{decision_id}/reject`
@@ -58,7 +62,7 @@ Built now:
 - Money/source/evidence/decision contracts.
 - Deterministic decision-science tools.
 - Store-intelligence tools for FEFO batch splits, delivery reconciliation, supplier cover, and
-  outcome learning.
+  outcome learning, exposed as executable API endpoints.
 - Golden cascade runner.
 - FastAPI health and demo endpoints.
 - HITL approve/reject endpoints.

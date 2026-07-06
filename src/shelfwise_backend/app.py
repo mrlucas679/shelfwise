@@ -7,6 +7,7 @@ from shelfwise_action import DecisionStore
 from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
 
 from .cascade import run_golden_cascade
+from .intelligence_api import router as intelligence_router
 
 app = FastAPI(title="ShelfWise", version="0.1.0")
 app.add_middleware(
@@ -19,6 +20,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(intelligence_router)
 decision_store = DecisionStore()
 
 
@@ -44,6 +46,7 @@ def readiness() -> dict[str, object]:
             "backend": "ok",
             "golden_cascade": "ok",
             "hitl": "ok",
+            "store_intelligence": "ok",
             "inference_gateway": gateway_status,
         },
         "next_external_checks": [

@@ -48,4 +48,5 @@ http://localhost:8000/demo/golden
 - Trace spans show the deterministic decision-science tools behind the recommendation.
 - `/demo/golden` exposes `store_intelligence` for batch split, delivery reconciliation, supplier
   cover, and learning summary.
+- `/intelligence/*` endpoints let those same store skills run against new request payloads.
 - `/inference/smoke` shows whether the app is offline, using Fireworks, or using MI300X/vLLM.
