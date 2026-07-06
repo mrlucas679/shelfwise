@@ -44,6 +44,17 @@ class DecisionStore:
             item = self._decisions.get(decision_id)
             return deepcopy(item) if item else None
 
+    def annotate(self, decision_id: str, **fields: Any) -> dict[str, Any] | None:
+        with self._lock:
+            item = self._decisions.get(decision_id)
+            if item is None:
+                return None
+            updated = deepcopy(item)
+            updated.update(deepcopy(fields))
+            updated["updated_at"] = _now()
+            self._decisions[decision_id] = updated
+            return deepcopy(updated)
+
     def approve(self, decision_id: str, *, reviewer: str = "demo_manager") -> dict[str, Any] | None:
         return self._transition(decision_id, "approved", reviewer)
 

@@ -36,6 +36,7 @@ Useful API endpoints:
 - `GET http://localhost:8000/readiness`
 - `GET http://localhost:8000/demo/golden`
 - `GET http://localhost:8000/data/seed/summary`
+- `GET http://localhost:8000/learning`
 - `POST http://localhost:8000/intelligence/stock/fefo-split`
 - `POST http://localhost:8000/intelligence/deliveries/reconcile`
 - `POST http://localhost:8000/intelligence/suppliers/cover-plan`
@@ -69,6 +70,8 @@ Built now:
 - Golden cascade runner.
 - FastAPI health and demo endpoints.
 - HITL approve/reject endpoints.
+- In-memory learning store that records approved outcomes, mocked write-back receipts, and visible
+  threshold adjustments.
 - Offline-safe OpenAI-compatible inference gateway for Fireworks/vLLM.
 - React/Vite ops console with one executive answer, numeric proof rail, compact agent chain,
   drill-down evidence, inference routing, learning note, and HITL approval.

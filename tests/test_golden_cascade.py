@@ -66,9 +66,16 @@ def test_hitl_approve_flow() -> None:
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     assert approve_response.status_code == 200
     approved = approve_response.json()["decision"]
+    learning_event = approve_response.json()["learning_event"]
 
     assert approved["status"] == "approved"
     assert approved["review"]["status"] == "approved"
+    assert approved["write_back"]["status"] == "mocked_success"
+    assert approved["outcome"]["units_cleared"] == 75
+    assert approved["outcome"]["rand_recovered"]["amount"] == "109.56"
+    assert approved["learning_event"]["updated_threshold"] >= 75
+    assert learning_event["updated_threshold"] >= learning_event["previous_threshold"]
+    assert "Threshold adjusted" in learning_event["message"]
 
 
 def test_demo_golden_exposes_store_intelligence_numbers() -> None:
@@ -93,7 +100,23 @@ def test_readiness_endpoint_reports_backend_ready() -> None:
     assert body["ready"] is True
     assert body["checks"]["golden_cascade"] == "ok"
     assert body["checks"]["hitl"] == "ok"
+    assert body["checks"]["learning"] == "ok"
     assert body["checks"]["seed_data"] == "ok"
+
+
+def test_learning_endpoint_reports_threshold_events() -> None:
+    client = TestClient(app)
+    run_response = client.get("/demo/golden")
+    decision = run_response.json()["decision"]
+    approve_response = client.post(f"/decisions/{decision['id']}/approve")
+    assert approve_response.status_code == 200
+
+    response = client.get("/learning")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["thresholds"]["4011:markdown_sell_through_target_units"] >= 75
+    assert any(event["decision_id"] == decision["id"] for event in body["events"])
 
 
 def test_seed_summary_endpoint_returns_loaded_csv_context() -> None:

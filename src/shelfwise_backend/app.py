@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from shelfwise_action import DecisionStore
 from shelfwise_data import load_seeded_scenario
 from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
+from shelfwise_memory import LearningStore
 
 from .cascade import run_golden_cascade
 from .intelligence_api import router as intelligence_router
@@ -23,6 +24,7 @@ app.add_middleware(
 )
 app.include_router(intelligence_router)
 decision_store = DecisionStore()
+learning_store = LearningStore()
 
 
 @app.get("/health")
@@ -53,6 +55,7 @@ def readiness() -> dict[str, object]:
             "backend": "ok",
             "golden_cascade": "ok",
             "hitl": "ok",
+            "learning": "ok",
             "store_intelligence": "ok",
             "seed_data": seed_status,
             "inference_gateway": gateway_status,
@@ -106,6 +109,14 @@ def list_decisions() -> dict[str, object]:
     return {"decisions": decision_store.list()}
 
 
+@app.get("/learning")
+def learning_summary() -> dict[str, object]:
+    return {
+        "thresholds": learning_store.thresholds(),
+        "events": learning_store.list_events(),
+    }
+
+
 @app.get("/decisions/{decision_id}")
 def get_decision(decision_id: str) -> dict[str, object]:
     decision = decision_store.get(decision_id)
@@ -119,7 +130,22 @@ def approve_decision(decision_id: str) -> dict[str, object]:
     decision = decision_store.approve(decision_id)
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
-    return {"decision": decision}
+    learning_event = learning_store.record_approved_decision(decision)
+    write_back = decision.get("write_back") or {
+        "status": "mocked_success",
+        "target": "demo_write_back",
+        "idempotency_key": f"writeback:{decision_id}",
+        "applied_at": learning_event["created_at"],
+    }
+    updated = decision_store.annotate(
+        decision_id,
+        outcome=learning_event["outcome"],
+        learning_event=learning_event,
+        write_back=write_back,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return {"decision": updated, "learning_event": learning_event}
 
 
 @app.post("/decisions/{decision_id}/reject")
@@ -127,4 +153,4 @@ def reject_decision(decision_id: str) -> dict[str, object]:
     decision = decision_store.reject(decision_id)
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
-    return {"decision": decision}
+    return {"decision": decision, "learning_event": None}

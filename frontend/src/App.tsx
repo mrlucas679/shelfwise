@@ -22,6 +22,14 @@ type Decision = {
   action?: RecommendedAction
   caused_by?: string[]
   summary?: string
+  outcome?: {
+    units_cleared?: number
+    waste_units?: number
+    rand_recovered?: unknown
+    success_score?: string
+  }
+  learning_event?: LearningEvent
+  write_back?: { status?: string; target?: string }
 }
 type TraceSpan = { name?: string; status?: string; ms?: number; detail?: Record<string, unknown> }
 type InferenceConfig = {
@@ -63,6 +71,17 @@ type StoreIntelligence = {
     lesson?: string
   }
 }
+type LearningEvent = {
+  id?: string
+  decision_id?: string
+  sku?: string
+  metric?: string
+  previous_threshold?: number
+  updated_threshold?: number
+  delta_units?: number
+  outcome?: Decision['outcome']
+  message?: string
+}
 type GoldenDemo = {
   correlation_id?: string
   scenario?: string
@@ -73,6 +92,7 @@ type GoldenDemo = {
   learning?: { status?: string; message?: string }
   store_intelligence?: StoreIntelligence
 }
+type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
 type Metric = { label: string; value: string; tone?: Tone }
@@ -132,14 +152,14 @@ async function postTransition(
   id: string,
   transition: 'approve' | 'reject',
   signal: AbortSignal,
-): Promise<Decision> {
-  const payload = await fetchJson<{ decision?: Decision }>(
+): Promise<TransitionResult> {
+  const payload = await fetchJson<{ decision?: Decision; learning_event?: LearningEvent | null }>(
     `/decisions/${encodeURIComponent(id)}/${transition}`,
     { method: 'POST' },
     signal,
   )
   if (!payload.decision) throw new Error('Transition response did not include a decision.')
-  return payload.decision
+  return { decision: payload.decision, learning_event: payload.learning_event ?? null }
 }
 
 // ---------------------------------------------------------------------------
@@ -672,6 +692,8 @@ function SideRail({ data }: { data: GoldenDemo }) {
 
 function ApprovalSummary({ data }: { data: GoldenDemo }) {
   const status = data.decision?.status ?? 'pending'
+  const outcome = data.decision?.outcome
+  const writeBack = data.decision?.write_back
   return (
     <section className="rail-section">
       <div className="rail-heading">
@@ -682,6 +704,23 @@ function ApprovalSummary({ data }: { data: GoldenDemo }) {
         <StatusGlyph tone={statusTone(status)} label={formatLabel(status)} />
       </div>
       <p>{data.decision?.summary ?? 'No approval summary returned.'}</p>
+      {outcome ? (
+        <dl className="trace-kv">
+          <div>
+            <dt>Units cleared</dt>
+            <dd className="tnum">{formatValue(outcome.units_cleared)}</dd>
+          </div>
+          <div>
+            <dt>Recovered</dt>
+            <dd className="tnum">{formatValue(outcome.rand_recovered)}</dd>
+          </div>
+          <div>
+            <dt>Score</dt>
+            <dd className="tnum">{formatValue(outcome.success_score)}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {writeBack?.status ? <p>Write-back: {formatLabel(writeBack.status)}</p> : null}
     </section>
   )
 }
@@ -917,8 +956,21 @@ function App() {
     setBusy(kind)
     setTransitionError(null)
     postTransition(id, kind, controller.signal)
-      .then((decision) => {
-        setData((cur) => (cur ? { ...cur, decision } : cur))
+      .then((result) => {
+        setData((cur) =>
+          cur
+            ? {
+                ...cur,
+                decision: result.decision,
+                learning: result.learning_event
+                  ? {
+                      status: 'threshold_adjusted',
+                      message: result.learning_event.message,
+                    }
+                  : cur.learning,
+              }
+            : cur,
+        )
         setBusy(null)
       })
       .catch((e) => {

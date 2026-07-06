@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from time import perf_counter
 from typing import Any
 
@@ -95,6 +95,7 @@ def run_golden_cascade() -> dict[str, Any]:
         unit_cost=scenario.unit_cost,
         discount_pct=Decimal("0.20"),
     )
+    markdown_margin = (scenario.unit_price * Decimal("0.80")) - scenario.unit_cost
     spans.append(
         _span(
             "decision_science.simulate_markdown",
@@ -269,12 +270,22 @@ def run_golden_cascade() -> dict[str, Any]:
         caused_by=(correlation_id,),
         summary=f"Pending manager approval: 20% markdown for {product} at {scenario.location}.",
     )
+    decision_payload = decision.to_dict()
+    decision_payload["role"] = "store_manager"
+    decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["expected_outcome"] = {
+        "predicted_sell_through_units": _whole_units(simulation.markdown_units_sold),
+        "predicted_waste_units": _whole_units(simulation.markdown_waste_units),
+        "incremental_profit_minor_units": simulation.incremental_profit.minor_units,
+        "incremental_profit": simulation.incremental_profit.to_dict(),
+        "markdown_margin_minor_units": markdown_margin.minor_units,
+    }
 
     return {
         "correlation_id": correlation_id,
         "scenario": "stage4_loadshedding_x_payday_yoghurt",
         "evidence": [item.to_dict() for item in evidence],
-        "decision": decision.to_dict(),
+        "decision": decision_payload,
         "trace": [span.to_dict() for span in spans],
         "inference": inference.to_public_dict(),
         "seed_data": scenario.to_dict(),
@@ -284,3 +295,7 @@ def run_golden_cascade() -> dict[str, Any]:
             "message": "After approval, compare actual sell-through with simulated sell-through.",
         },
     }
+
+
+def _whole_units(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))

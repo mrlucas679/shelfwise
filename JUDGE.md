@@ -47,6 +47,8 @@ http://localhost:8000/demo/golden
 - Every recommendation includes sources and supporting data.
 - The action is high-risk and remains `pending` for human approval.
 - The action can be approved or rejected through the UI or HITL endpoints.
+- Approval records a mocked write-back receipt, measured outcome, and visible threshold-adjustment
+  learning event.
 - Trace spans show the deterministic decision-science tools behind the recommendation.
 - `/demo/golden` exposes `store_intelligence` for batch split, delivery reconciliation, supplier
   cover, and learning summary.
