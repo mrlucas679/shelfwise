@@ -79,3 +79,7 @@ ShelfWise keeps one OpenAI-compatible inference contract and uses both AMD progr
 
 Routine agents can use a smaller model. Critic, Executive, and Orchestrator are routed to the stronger
 model tier because they review evidence, catch contradictions, and make the final recommendation.
+
+## License
+
+MIT
