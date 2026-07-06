@@ -9,14 +9,13 @@ from shelfwise_contracts import (
     Decision,
     DecisionStatus,
     EvidenceObject,
-    Money,
     RecommendedAction,
     RiskTier,
     SourceRef,
     TraceSpan,
     new_id,
 )
-from shelfwise_data import build_store_intelligence_demo
+from shelfwise_data import build_store_intelligence_demo, load_seeded_scenario
 from shelfwise_decision_science import (
     forecast_demand,
     score_cold_chain_risk,
@@ -42,11 +41,12 @@ def run_golden_cascade() -> dict[str, Any]:
     those facts into evidence; the critic checks them; the executive emits one pending HITL action.
     """
     correlation_id = new_id("cor")
-    sku = "4011"
-    product = "Amasi 2L"
-    source_stock = SourceRef.dataset("seed_inventory", "sku:4011")
-    source_sales = SourceRef.dataset("seed_sales", "sku:4011:last14")
-    source_outage = SourceRef.dataset("load_shedding", "store_12:fridge_a")
+    scenario = load_seeded_scenario()
+    sku = scenario.sku
+    product = scenario.product_name
+    source_stock = SourceRef.dataset("seed_stock", f"stock.csv:sku:{sku}")
+    source_sales = SourceRef.dataset("seed_sales", f"sales.csv:sku:{sku}")
+    source_outage = SourceRef.dataset("load_shedding", f"{scenario.location}:fridge_a")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
     inference = load_inference_config()
@@ -54,13 +54,7 @@ def run_golden_cascade() -> dict[str, Any]:
     started = perf_counter()
     demand = forecast_demand(
         sku=sku,
-        recent_daily_units=[
-            Decimal("28"),
-            Decimal("31"),
-            Decimal("29"),
-            Decimal("34"),
-            Decimal("30"),
-        ],
+        recent_daily_units=list(scenario.recent_daily_units),
         horizon_days=3,
     )
     spans.append(
@@ -82,10 +76,10 @@ def run_golden_cascade() -> dict[str, Any]:
     started = perf_counter()
     expiry = score_expiry_risk(
         sku=sku,
-        units_on_hand=Decimal("240"),
-        days_to_expiry=Decimal("3"),
+        units_on_hand=Decimal(scenario.units_on_hand),
+        days_to_expiry=Decimal(scenario.days_to_expiry),
         forecast_daily_units=demand.daily_units,
-        unit_cost=Money.zar("18"),
+        unit_cost=scenario.unit_cost,
         cold_chain_risk=cold.risk,
         cold_chain_penalty_days=cold.penalty_days,
     )
@@ -94,11 +88,11 @@ def run_golden_cascade() -> dict[str, Any]:
     started = perf_counter()
     simulation = simulate_markdown(
         sku=sku,
-        units_on_hand=Decimal("240"),
+        units_on_hand=Decimal(scenario.units_on_hand),
         days_to_expiry=expiry.effective_days_to_expiry,
         base_daily_units=demand.daily_units,
-        unit_price=Money.zar("30"),
-        unit_cost=Money.zar("18"),
+        unit_price=scenario.unit_price,
+        unit_cost=scenario.unit_cost,
         discount_pct=Decimal("0.20"),
     )
     spans.append(
@@ -119,13 +113,16 @@ def run_golden_cascade() -> dict[str, Any]:
     evidence.append(
         EvidenceObject(
             agent=AgentName.INVENTORY,
-            conclusion=f"{product} has 240 units on hand in fridge_a.",
+            conclusion=(
+                f"{product} has {scenario.units_on_hand} units on hand "
+                f"at {scenario.location}."
+            ),
             supporting_data=[
                 _supporting_fact(
                     "units_on_hand",
-                    240,
+                    scenario.units_on_hand,
                     str(source_stock),
-                    "seed_inventory",
+                    "seed_stock_csv",
                 )
             ],
             confidence=Decimal("0.92"),
@@ -247,7 +244,7 @@ def run_golden_cascade() -> dict[str, Any]:
         EvidenceObject(
             agent=AgentName.EXECUTIVE,
             conclusion=(
-                "Approve a 20% markdown for SKU 4011 now, then review "
+                f"Approve a 20% markdown for SKU {sku} now, then review "
                 "outcome after 24 hours."
             ),
             supporting_data=[
@@ -270,7 +267,7 @@ def run_golden_cascade() -> dict[str, Any]:
         status=DecisionStatus.PENDING,
         action=markdown,
         caused_by=(correlation_id,),
-        summary="Pending manager approval: 20% markdown for Amasi 2L in fridge_a.",
+        summary=f"Pending manager approval: 20% markdown for {product} at {scenario.location}.",
     )
 
     return {
@@ -280,6 +277,7 @@ def run_golden_cascade() -> dict[str, Any]:
         "decision": decision.to_dict(),
         "trace": [span.to_dict() for span in spans],
         "inference": inference.to_public_dict(),
+        "seed_data": scenario.to_dict(),
         "store_intelligence": build_store_intelligence_demo(),
         "learning": {
             "status": "armed",

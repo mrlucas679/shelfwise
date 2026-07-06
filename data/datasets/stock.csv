@@ -1,0 +1,5 @@
+sku,location,on_hand,reorder_point,expiry_date
+4011,store_12,240,50,2026-07-09
+6001,store_12,40,30,2026-07-08
+3050,store_12,120,60,2026-09-30
+7200,store_12,80,40,2027-06-01

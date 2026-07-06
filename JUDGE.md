@@ -42,6 +42,8 @@ http://localhost:8000/demo/golden
 - The UI leads with one recommended action, then reveals the agent chain only when requested.
 - The side rail shows numeric proof: FEFO sell-first units, normal units, delivery gap, supplier
   action, and outcome-learning signal.
+- The golden cascade reads the planted store scenario from `data/datasets/*.csv`, exposed through
+  `/data/seed/summary`.
 - Every recommendation includes sources and supporting data.
 - The action is high-risk and remains `pending` for human approval.
 - The action can be approved or rejected through the UI or HITL endpoints.

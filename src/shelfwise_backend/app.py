@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from shelfwise_action import DecisionStore
+from shelfwise_data import load_seeded_scenario
 from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
 
 from .cascade import run_golden_cascade
@@ -40,6 +41,12 @@ def readiness() -> dict[str, object]:
     gateway_status = (
         "offline-safe" if inference["provider"] == "offline" else "configured"
     )
+    seed_status = "ok"
+    try:
+        load_seeded_scenario()
+    except (FileNotFoundError, ValueError):
+        seed_status = "error"
+
     return {
         "ready": True,
         "checks": {
@@ -47,6 +54,7 @@ def readiness() -> dict[str, object]:
             "golden_cascade": "ok",
             "hitl": "ok",
             "store_intelligence": "ok",
+            "seed_data": seed_status,
             "inference_gateway": gateway_status,
         },
         "next_external_checks": [
@@ -72,6 +80,11 @@ def inference_smoke() -> dict[str, object]:
         max_tokens=40,
     )
     return {"result": result.to_dict()}
+
+
+@app.get("/data/seed/summary")
+def seed_summary() -> dict[str, object]:
+    return {"seed_data": load_seeded_scenario().to_dict()}
 
 
 @app.post("/demo/golden")

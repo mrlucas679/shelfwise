@@ -35,6 +35,7 @@ Useful API endpoints:
 - `GET http://localhost:8000/health`
 - `GET http://localhost:8000/readiness`
 - `GET http://localhost:8000/demo/golden`
+- `GET http://localhost:8000/data/seed/summary`
 - `POST http://localhost:8000/intelligence/stock/fefo-split`
 - `POST http://localhost:8000/intelligence/deliveries/reconcile`
 - `POST http://localhost:8000/intelligence/suppliers/cover-plan`
@@ -63,6 +64,8 @@ Built now:
 - Deterministic decision-science tools.
 - Store-intelligence tools for FEFO batch splits, delivery reconciliation, supplier cover, and
   outcome learning, exposed as executable API endpoints.
+- CSV-backed SA retail seed data under `data/datasets`, with validation and a loaded golden
+  scenario consumed by the cascade.
 - Golden cascade runner.
 - FastAPI health and demo endpoints.
 - HITL approve/reject endpoints.

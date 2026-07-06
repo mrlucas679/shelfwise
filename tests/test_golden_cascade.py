@@ -42,6 +42,8 @@ def test_golden_cascade_is_math_backed_and_traceable() -> None:
     assert profit_fact["value"] != "ZAR 0.00"
     assert critic_fact["value"] == "True"
     assert all(evidence["sources"] for evidence in result["evidence"])
+    assert result["seed_data"]["recent_daily_units"] == ["28", "31", "29", "34", "30"]
+    assert result["seed_data"]["product_name"] == "Amasi 2L"
 
 
 def test_inference_routing_keeps_strong_model_for_critic_and_executive() -> None:
@@ -91,6 +93,18 @@ def test_readiness_endpoint_reports_backend_ready() -> None:
     assert body["ready"] is True
     assert body["checks"]["golden_cascade"] == "ok"
     assert body["checks"]["hitl"] == "ok"
+    assert body["checks"]["seed_data"] == "ok"
+
+
+def test_seed_summary_endpoint_returns_loaded_csv_context() -> None:
+    client = TestClient(app)
+    response = client.get("/data/seed/summary")
+
+    assert response.status_code == 200
+    seed = response.json()["seed_data"]
+    assert seed["sku"] == "4011"
+    assert seed["product_name"] == "Amasi 2L"
+    assert seed["units_on_hand"] == 240
 
 
 def test_inference_client_is_offline_safe() -> None:

@@ -1,0 +1,4 @@
+supplier,avg_lead_time_days,recent_delay
+DairyCo,3,false
+BakeWell,2,false
+GrainCorp,7,true
