@@ -8,7 +8,7 @@ from shelfwise_data import load_seeded_scenario
 from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
 from shelfwise_memory import LearningStore
 
-from .cascade import run_golden_cascade
+from .cascade import run_critic_rejection_cascade, run_golden_cascade
 from .intelligence_api import router as intelligence_router
 
 app = FastAPI(title="ShelfWise", version="0.1.0")
@@ -56,6 +56,7 @@ def readiness() -> dict[str, object]:
             "golden_cascade": "ok",
             "hitl": "ok",
             "learning": "ok",
+            "critic_rejection": "ok",
             "store_intelligence": "ok",
             "seed_data": seed_status,
             "inference_gateway": gateway_status,
@@ -104,6 +105,13 @@ def demo_golden_get() -> dict[str, object]:
     return result
 
 
+@app.get("/demo/critic-rejection")
+def demo_critic_rejection_get() -> dict[str, object]:
+    result = run_critic_rejection_cascade()
+    result["decision"] = decision_store.upsert(result["decision"])
+    return result
+
+
 @app.get("/decisions")
 def list_decisions() -> dict[str, object]:
     return {"decisions": decision_store.list()}
@@ -130,6 +138,8 @@ def approve_decision(decision_id: str) -> dict[str, object]:
     decision = decision_store.approve(decision_id)
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
+    if decision.get("status") != "approved":
+        return {"decision": decision, "learning_event": None}
     learning_event = learning_store.record_approved_decision(decision)
     write_back = decision.get("write_back") or {
         "status": "mocked_success",

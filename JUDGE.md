@@ -19,6 +19,7 @@ Open:
 ```text
 http://127.0.0.1:5173
 http://localhost:8000/demo/golden
+http://localhost:8000/demo/critic-rejection
 ```
 
 ## Run With Docker
@@ -34,12 +35,15 @@ http://localhost:5173
 http://localhost:8000/health
 http://localhost:8000/readiness
 http://localhost:8000/demo/golden
+http://localhost:8000/demo/critic-rejection
 ```
 
 ## What To Look For
 
 - The cascade emits Inventory, Demand, Expiry, Opportunity, Simulation, Critic, and Executive evidence.
 - The UI leads with one recommended action, then reveals the agent chain only when requested.
+- The header switch shows both the approval case and a Critic rejection case without crowding the
+  main conversation.
 - The side rail shows numeric proof: FEFO sell-first units, normal units, delivery gap, supplier
   action, and outcome-learning signal.
 - The golden cascade reads the planted store scenario from `data/datasets/*.csv`, exposed through
@@ -47,6 +51,8 @@ http://localhost:8000/demo/golden
 - Every recommendation includes sources and supporting data.
 - The action is high-risk and remains `pending` for human approval.
 - The action can be approved or rejected through the UI or HITL endpoints.
+- The Critic rejection scenario blocks an unsupported supplier-switch claim and downgrades it to
+  monitor until sourced backup-supplier evidence exists.
 - Approval records a mocked write-back receipt, measured outcome, and visible threshold-adjustment
   learning event.
 - Trace spans show the deterministic decision-science tools behind the recommendation.

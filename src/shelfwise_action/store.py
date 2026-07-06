@@ -66,6 +66,8 @@ class DecisionStore:
             item = self._decisions.get(decision_id)
             if item is None:
                 return None
+            if item.get("status") in {"approved", "rejected"}:
+                return deepcopy(item)
             updated = deepcopy(item)
             updated["status"] = status
             updated["updated_at"] = _now()

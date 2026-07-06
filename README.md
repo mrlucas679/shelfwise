@@ -35,6 +35,7 @@ Useful API endpoints:
 - `GET http://localhost:8000/health`
 - `GET http://localhost:8000/readiness`
 - `GET http://localhost:8000/demo/golden`
+- `GET http://localhost:8000/demo/critic-rejection`
 - `GET http://localhost:8000/data/seed/summary`
 - `GET http://localhost:8000/learning`
 - `POST http://localhost:8000/intelligence/stock/fefo-split`
@@ -68,13 +69,14 @@ Built now:
 - CSV-backed SA retail seed data under `data/datasets`, with validation and a loaded golden
   scenario consumed by the cascade.
 - Golden cascade runner.
+- Visible Critic rejection cascade that downgrades an unsupported supplier-switch claim to monitor.
 - FastAPI health and demo endpoints.
 - HITL approve/reject endpoints.
 - In-memory learning store that records approved outcomes, mocked write-back receipts, and visible
   threshold adjustments.
 - Offline-safe OpenAI-compatible inference gateway for Fireworks/vLLM.
 - React/Vite ops console with one executive answer, numeric proof rail, compact agent chain,
-  drill-down evidence, inference routing, learning note, and HITL approval.
+  drill-down evidence, scenario switch, inference routing, learning note, and HITL approval.
 - Tests for the golden cascade and store-intelligence skills.
 - Backend and frontend Dockerfiles plus Compose services.
 - GitHub Actions CI for lint, backend tests, frontend build, and Compose validation.

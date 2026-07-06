@@ -297,5 +297,140 @@ def run_golden_cascade() -> dict[str, Any]:
     }
 
 
+def run_critic_rejection_cascade() -> dict[str, Any]:
+    """Run the planted thin-evidence case the Critic must reject."""
+
+    correlation_id = new_id("cor")
+    scenario = load_seeded_scenario()
+    sku = scenario.sku
+    source_supplier = SourceRef.dataset("seed_suppliers", f"suppliers.csv:{scenario.supplier}")
+    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    supplier_switch = RecommendedAction(
+        "supplier_switch",
+        {
+            "sku": sku,
+            "from_supplier": scenario.supplier,
+            "to_supplier": "Unknown Backup Dairy",
+        },
+        RiskTier.HIGH,
+    )
+    evidence: list[EvidenceObject] = []
+    spans: list[TraceSpan] = []
+
+    started = perf_counter()
+    evidence.append(
+        EvidenceObject(
+            agent=AgentName.OPPORTUNITY,
+            conclusion=(
+                "Switch dairy supplier immediately because future delivery risk may rise."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "recent_delay",
+                    scenario.supplier_recent_delay,
+                    str(source_supplier),
+                    "seed_supplier_csv",
+                ),
+                _supporting_fact(
+                    "backup_supplier_fill_rate",
+                    "unknown",
+                    "missing_source",
+                    "not_available",
+                ),
+            ],
+            confidence=Decimal("0.41"),
+            recommended_action=supplier_switch,
+            sources=(source_supplier,),
+            requires_human_review=True,
+        )
+    )
+    spans.append(
+        _span(
+            "critic.check_supplier_switch_evidence",
+            started,
+            {"verdict": "rejected"},
+        )
+    )
+
+    evidence.append(
+        EvidenceObject(
+            agent=AgentName.CRITIC,
+            conclusion=(
+                "Critic rejected supplier switch: backup supplier evidence is missing "
+                "and current supplier has no recent delay."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "critic_passed",
+                    False,
+                    "critic_gate",
+                    "missing_backup_supplier_source",
+                ),
+                _supporting_fact(
+                    "source_required",
+                    "backup supplier fill rate",
+                    "critic_gate",
+                    "evidence_policy",
+                ),
+            ],
+            confidence=Decimal("0.93"),
+            recommended_action=monitor,
+            sources=(SourceRef.tool("critic_gate"), source_supplier),
+            requires_human_review=False,
+        )
+    )
+    evidence.append(
+        EvidenceObject(
+            agent=AgentName.EXECUTIVE,
+            conclusion=(
+                f"Do not switch suppliers now. Monitor {scenario.supplier} and request "
+                "sourced backup-supplier data before escalating."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "priority",
+                    "downgraded_to_monitor",
+                    "executive_policy",
+                    "critic_rejection",
+                )
+            ],
+            confidence=Decimal("0.90"),
+            recommended_action=monitor,
+            sources=(SourceRef.tool("executive_policy"), SourceRef.tool("critic_gate")),
+            requires_human_review=False,
+        )
+    )
+
+    decision = Decision(
+        id=new_id("dec"),
+        status=DecisionStatus.REJECTED,
+        action=monitor,
+        caused_by=(correlation_id,),
+        summary="Critic rejected supplier switch; monitor and request sourced supplier evidence.",
+    )
+    decision_payload = decision.to_dict()
+    decision_payload["role"] = "store_manager"
+    decision_payload["critic_verdict"] = "rejected"
+    decision_payload["rejected_action"] = supplier_switch.to_dict()
+
+    return {
+        "correlation_id": correlation_id,
+        "scenario": "critic_rejects_unsupported_supplier_switch",
+        "evidence": [item.to_dict() for item in evidence],
+        "decision": decision_payload,
+        "trace": [span.to_dict() for span in spans],
+        "inference": load_inference_config().to_public_dict(),
+        "seed_data": scenario.to_dict(),
+        "store_intelligence": build_store_intelligence_demo(),
+        "learning": {
+            "status": "critic_rejected",
+            "message": (
+                "No action was written back. The system downgraded to monitor until "
+                "backup supplier evidence is sourced."
+            ),
+        },
+    }
+
+
 def _whole_units(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))

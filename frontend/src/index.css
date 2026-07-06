@@ -122,6 +122,27 @@ button {
   gap: 8px;
 }
 
+.scenario-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.scenario-switch .btn {
+  min-height: 26px;
+  padding: 0 9px;
+  border-color: transparent;
+}
+
+.scenario-switch .btn.is-active {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
 .content {
   flex: 1;
   min-height: 0;
@@ -772,6 +793,11 @@ button {
 
 @media (max-width: 700px) {
   .header {
+    flex-wrap: wrap;
+  }
+
+  .header-right,
+  .scenario-switch {
     flex-wrap: wrap;
   }
 

@@ -94,6 +94,7 @@ type GoldenDemo = {
 }
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
+type ScenarioMode = 'approval' | 'critic'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
 type Metric = { label: string; value: string; tone?: Tone }
 type Priority = { label: string; value: string; tone: Tone }
@@ -102,7 +103,10 @@ type Priority = { label: string; value: string; tone: Tone }
 // API - same endpoints, with blueprint env-var compatibility + optional key.
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = 'http://localhost:8000'
-const DEMO_PATH = '/demo/golden'
+const DEMO_PATHS: Record<ScenarioMode, string> = {
+  approval: '/demo/golden',
+  critic: '/demo/critic-rejection',
+}
 
 function configuredBase(): string {
   const env = import.meta.env as Record<string, string | undefined>
@@ -145,8 +149,8 @@ async function fetchJson<T>(path: string, init: RequestInit, signal: AbortSignal
   throw new Error(`Could not reach ${path}. ${lastError}`)
 }
 
-const fetchGoldenDemo = (signal: AbortSignal) =>
-  fetchJson<GoldenDemo>(DEMO_PATH, { method: 'GET' }, signal)
+const fetchDemo = (path: string, signal: AbortSignal) =>
+  fetchJson<GoldenDemo>(path, { method: 'GET' }, signal)
 
 async function postTransition(
   id: string,
@@ -320,12 +324,12 @@ function storeIntelligenceMetrics(data?: GoldenDemo | null): Metric[] {
 function buildProofLine(evidence?: EvidenceObject[]): string {
   const names = (evidence ?? []).map((item) => formatLabel(item.agent)).filter(Boolean)
   if (names.length === 0) return 'No agent proof returned yet.'
-  return `${listWithAnd(names)} checks passed.`
+  return `${listWithAnd(names)} checks completed.`
 }
 
 function executiveAnswer(data: GoldenDemo | null): { heading: string; body: string } {
   if (!data) {
-    return { heading: 'Waiting for the golden cascade', body: 'ShelfWise will summarize the next decision here.' }
+    return { heading: 'Waiting for the demo cascade', body: 'ShelfWise will summarize the next decision here.' }
   }
   const action = recommendation(data)
   const evidence = firstActionEvidence(data.evidence, action?.type)
@@ -415,7 +419,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   return (
     <section className="panel alert" role="alert">
       <div className="section-kicker">API error</div>
-      <h2>Golden cascade unavailable</h2>
+      <h2>Demo cascade unavailable</h2>
       <p>{message}</p>
       <button className="btn btn-secondary" type="button" onClick={onRetry}>
         Retry
@@ -886,7 +890,7 @@ function LoadingShell({ endpoint }: { endpoint: string }) {
       <div className="chat-header">
         <div>
           <div className="section-kicker">Loading</div>
-          <h1>Fetching golden cascade</h1>
+          <h1>Fetching demo cascade</h1>
         </div>
         <span className="chat-meta">{endpoint}</span>
       </div>
@@ -916,15 +920,17 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [scenarioMode, setScenarioMode] = useState<ScenarioMode>('approval')
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const transitionCtrl = useRef<AbortController | null>(null)
+  const activePath = DEMO_PATHS[scenarioMode]
 
   useEffect(() => {
     const controller = new AbortController()
     setLoadState('loading')
     setError(null)
-    fetchGoldenDemo(controller.signal)
+    fetchDemo(activePath, controller.signal)
       .then((payload) => {
         setData(payload)
         setBusy(null)
@@ -937,12 +943,20 @@ function App() {
         setLoadState('error')
       })
     return () => controller.abort()
-  }, [reloadKey])
+  }, [reloadKey, activePath])
 
   useEffect(() => () => transitionCtrl.current?.abort(), [])
 
-  const endpoint = useMemo(() => joinUrl(configuredBase() || DEFAULT_API_BASE, DEMO_PATH), [])
+  const endpoint = useMemo(() => joinUrl(configuredBase() || DEFAULT_API_BASE, activePath), [activePath])
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
+
+  const selectScenario = (next: ScenarioMode) => {
+    if (next !== scenarioMode) setData(null)
+    transitionCtrl.current?.abort()
+    setScenarioMode(next)
+    setBusy(null)
+    setTransitionError(null)
+  }
 
   const transition = (kind: 'approve' | 'reject') => {
     const id = data?.decision?.id
@@ -991,6 +1005,24 @@ function App() {
         </span>
         {data?.scenario ? <span className="scenario">{data.scenario.replace(/_/g, ' ')}</span> : null}
         <div className="header-right">
+          <div className="scenario-switch" aria-label="Demo scenario">
+            <button
+              className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
+              type="button"
+              aria-pressed={scenarioMode === 'approval'}
+              onClick={() => selectScenario('approval')}
+            >
+              Approval case
+            </button>
+            <button
+              className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
+              type="button"
+              aria-pressed={scenarioMode === 'critic'}
+              onClick={() => selectScenario('critic')}
+            >
+              Critic rejection
+            </button>
+          </div>
           <button className="btn btn-secondary" type="button" onClick={() => setReloadKey((value) => value + 1)}>
             Reload
           </button>

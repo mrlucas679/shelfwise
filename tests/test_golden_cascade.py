@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend import run_golden_cascade
+from shelfwise_backend import run_critic_rejection_cascade, run_golden_cascade
 from shelfwise_backend.app import app
 from shelfwise_inference import OpenAICompatibleInferenceClient
 
@@ -44,6 +44,28 @@ def test_golden_cascade_is_math_backed_and_traceable() -> None:
     assert all(evidence["sources"] for evidence in result["evidence"])
     assert result["seed_data"]["recent_daily_units"] == ["28", "31", "29", "34", "30"]
     assert result["seed_data"]["product_name"] == "Amasi 2L"
+
+
+def test_critic_rejection_cascade_downgrades_unsupported_action() -> None:
+    result = run_critic_rejection_cascade()
+    support = [
+        fact
+        for evidence in result["evidence"]
+        for fact in evidence["supporting_data"]
+    ]
+    critic = next(evidence for evidence in result["evidence"] if evidence["agent"] == "critic")
+    opportunity = next(
+        evidence for evidence in result["evidence"] if evidence["agent"] == "opportunity"
+    )
+
+    assert result["scenario"] == "critic_rejects_unsupported_supplier_switch"
+    assert opportunity["recommended_action"]["type"] == "supplier_switch"
+    assert result["decision"]["status"] == "rejected"
+    assert result["decision"]["action"]["type"] == "monitor"
+    assert result["decision"]["critic_verdict"] == "rejected"
+    assert result["decision"]["rejected_action"]["type"] == "supplier_switch"
+    assert "Critic rejected" in critic["conclusion"]
+    assert any(fact["fact"] == "critic_passed" and fact["value"] == "False" for fact in support)
 
 
 def test_inference_routing_keeps_strong_model_for_critic_and_executive() -> None:
@@ -91,6 +113,23 @@ def test_demo_golden_exposes_store_intelligence_numbers() -> None:
     assert intelligence["learning_summary"]["sell_through_delta_units"] == 6
 
 
+def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> None:
+    client = TestClient(app)
+    response = client.get("/demo/critic-rejection")
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    assert decision["status"] == "rejected"
+    assert decision["action"]["type"] == "monitor"
+
+    approve_response = client.post(f"/decisions/{decision['id']}/approve")
+
+    assert approve_response.status_code == 200
+    body = approve_response.json()
+    assert body["decision"]["status"] == "rejected"
+    assert body["learning_event"] is None
+
+
 def test_readiness_endpoint_reports_backend_ready() -> None:
     client = TestClient(app)
     response = client.get("/readiness")
@@ -101,6 +140,7 @@ def test_readiness_endpoint_reports_backend_ready() -> None:
     assert body["checks"]["golden_cascade"] == "ok"
     assert body["checks"]["hitl"] == "ok"
     assert body["checks"]["learning"] == "ok"
+    assert body["checks"]["critic_rejection"] == "ok"
     assert body["checks"]["seed_data"] == "ok"
 
 
