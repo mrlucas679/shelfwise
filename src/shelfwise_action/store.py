@@ -39,6 +39,12 @@ class DecisionStore:
         with self._lock:
             return [deepcopy(item) for item in self._decisions.values()]
 
+    def clear(self) -> None:
+        """Reset to empty. Used between test runs - decision ids are stable per scenario now
+        (see shelfwise_backend.cascade), so a real deploy never needs this at runtime."""
+        with self._lock:
+            self._decisions.clear()
+
     def get(self, decision_id: str) -> dict[str, Any] | None:
         with self._lock:
             item = self._decisions.get(decision_id)

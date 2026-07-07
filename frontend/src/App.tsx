@@ -1,4 +1,13 @@
-import { Component, type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Component,
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { applyTheme, currentTheme, type Theme } from './theme'
 
 // ---------------------------------------------------------------------------
@@ -22,23 +31,16 @@ type Decision = {
   action?: RecommendedAction
   caused_by?: string[]
   summary?: string
-  role?: string
-  critic_verdict?: string
   created_at?: string
   updated_at?: string
-  review?: {
-    reviewer?: string
-    status?: string
-    reviewed_at?: string
-  } | null
-  outcome?: {
-    units_cleared?: number
-    waste_units?: number
-    rand_recovered?: unknown
-    success_score?: string
-  }
-  learning_event?: LearningEvent
-  write_back?: { status?: string; target?: string }
+  review?: { reviewer?: string; status?: string; reviewed_at?: string } | null
+  outcome?: { units_cleared?: number; waste_units?: number; rand_recovered?: unknown; success_score?: string }
+}
+type LearningEvent = {
+  id?: string
+  decision_id?: string
+  message?: string
+  outcome?: Decision['outcome']
 }
 type TraceSpan = { name?: string; status?: string; ms?: number; detail?: Record<string, unknown> }
 type InferenceConfig = {
@@ -50,46 +52,10 @@ type InferenceConfig = {
   routing?: { routine_agents?: string[]; strong_agents?: string[] }
 }
 type StoreIntelligence = {
-  batch_split?: {
-    total_units?: number
-    priority_sell_units?: number
-    normal_units?: number
-    blocked_units?: number
-    conclusion?: string
-  }
-  delivery_reconciliation?: {
-    ordered_units?: number
-    received_units?: number
-    missing_units?: number
-    short_dated_units?: number
-    supplier_fill_rate?: string
-    status?: string
-    conclusion?: string
-  }
-  supplier_cover?: {
-    days_of_supply?: string
-    gap_before_delivery_units?: number
-    transfer_units_recommended?: number
-    recommended_action?: string
-    conclusion?: string
-  }
-  learning_summary?: {
-    sell_through_delta_units?: number
-    waste_delta_units?: number
-    score?: string
-    lesson?: string
-  }
-}
-type LearningEvent = {
-  id?: string
-  decision_id?: string
-  sku?: string
-  metric?: string
-  previous_threshold?: number
-  updated_threshold?: number
-  delta_units?: number
-  outcome?: Decision['outcome']
-  message?: string
+  batch_split?: { total_units?: number; priority_sell_units?: number; normal_units?: number; blocked_units?: number; conclusion?: string }
+  delivery_reconciliation?: { missing_units?: number; supplier_fill_rate?: string; conclusion?: string }
+  supplier_cover?: { transfer_units_recommended?: number; recommended_action?: string; conclusion?: string }
+  learning_summary?: { score?: string; lesson?: string }
 }
 type GoldenDemo = {
   correlation_id?: string
@@ -101,16 +67,19 @@ type GoldenDemo = {
   learning?: { status?: string; message?: string }
   store_intelligence?: StoreIntelligence
 }
-type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type DecisionLogResponse = { decisions?: Decision[] }
+type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type ScenarioMode = 'approval' | 'critic'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
-type Metric = { label: string; value: string; tone?: Tone }
-type Priority = { label: string; value: string; tone: Tone }
+
+// Chat is Q&A only now - decisions live in the persistent status bar + slide-down panel, never
+// embedded as an interactive card inside a message (that was duplicate UI: the same pending
+// decision rendered twice, in two different places, with two different ways to act on it).
+type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
 
 // ---------------------------------------------------------------------------
-// API - same endpoints, with blueprint env-var compatibility + optional key.
+// API
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = 'http://localhost:8000'
 const DEMO_PATHS: Record<ScenarioMode, string> = {
@@ -139,7 +108,6 @@ function requestUrls(path: string): string[] {
   urls.push(joinUrl(configured || DEFAULT_API_BASE, path))
   return Array.from(new Set(urls))
 }
-
 async function fetchJson<T>(path: string, init: RequestInit, signal: AbortSignal): Promise<T> {
   let lastError = 'Unknown error'
   for (const url of requestUrls(path)) {
@@ -158,21 +126,13 @@ async function fetchJson<T>(path: string, init: RequestInit, signal: AbortSignal
   }
   throw new Error(`Could not reach ${path}. ${lastError}`)
 }
-
-const fetchDemo = (path: string, signal: AbortSignal) =>
-  fetchJson<GoldenDemo>(path, { method: 'GET' }, signal)
-
+const fetchDemo = (path: string, signal: AbortSignal) => fetchJson<GoldenDemo>(path, { method: 'GET' }, signal)
 async function fetchDecisionLog(signal: AbortSignal): Promise<Decision[]> {
   const payload = await fetchJson<DecisionLogResponse>('/decisions', { method: 'GET' }, signal)
-  return payload.decisions ?? []
+  return Array.isArray(payload.decisions) ? payload.decisions : []
 }
-
-async function postTransition(
-  id: string,
-  transition: 'approve' | 'reject',
-  signal: AbortSignal,
-): Promise<TransitionResult> {
-  const payload = await fetchJson<{ decision?: Decision; learning_event?: LearningEvent | null }>(
+async function postTransition(id: string, transition: 'approve' | 'reject', signal: AbortSignal): Promise<TransitionResult> {
+  const payload = await fetchJson<TransitionResult>(
     `/decisions/${encodeURIComponent(id)}/${transition}`,
     { method: 'POST' },
     signal,
@@ -182,21 +142,15 @@ async function postTransition(
 }
 
 // ---------------------------------------------------------------------------
-// Formatting - money as R, provenance via SourceRef, confidence as %.
+// Formatting + derived helpers
 // ---------------------------------------------------------------------------
 function formatLabel(value: unknown): string {
-  return String(value ?? 'unknown')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+  return String(value ?? 'unknown').replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
-
-/** Render a Rand figure from Money objects, "ZAR 378.00"/"R378" strings, or raw display strings. */
 function formatMoneyish(value: unknown): string | null {
   if (value && typeof value === 'object') {
-    const m = value as { minor_units?: number; currency?: string; amount?: string }
-    if (typeof m.minor_units === 'number') {
-      return `R${Math.round(m.minor_units / 100).toLocaleString('en-ZA')}`
-    }
+    const m = value as { minor_units?: number }
+    if (typeof m.minor_units === 'number') return `R${Math.round(m.minor_units / 100).toLocaleString('en-ZA')}`
   }
   if (typeof value === 'string') {
     const m = value.match(/^\s*(?:ZAR|R)\s*([\d,]+(?:\.\d+)?)\s*$/i)
@@ -204,7 +158,6 @@ function formatMoneyish(value: unknown): string | null {
   }
   return null
 }
-
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '-'
   const money = formatMoneyish(value)
@@ -219,31 +172,17 @@ function formatValue(value: unknown): string {
     return String(value)
   }
 }
-
 function confidencePct(value: string | number | undefined): number {
   const n = Number(value)
   if (!Number.isFinite(n)) return 0
   return Math.max(0, Math.min(100, Math.round((n > 1 ? n / 100 : n) * 100)))
 }
-
 function formatSource(source: SourceRef): string {
-  const locator = source.locator ? `#${source.locator}` : ''
-  return `${source.ref ?? 'unknown'}${locator}`
+  return `${source.ref ?? 'unknown'}${source.locator ? `#${source.locator}` : ''}`
 }
-
-function formatParamValue(key: string, value: unknown): string {
-  const numeric = Number(value)
-  if (Number.isFinite(numeric) && key.toLowerCase().includes('pct')) {
-    return `${Math.round((numeric > 1 ? numeric / 100 : numeric) * 100)}%`
-  }
-  return formatValue(value)
-}
-
 function riskTone(tier?: string): Tone {
   const t = (tier ?? '').toLowerCase()
-  if (t === 'high') return 'risk'
-  if (t === 'medium') return 'warn'
-  return 'ok'
+  return t === 'high' ? 'risk' : t === 'medium' ? 'warn' : 'ok'
 }
 function statusTone(status?: string): Tone {
   const s = (status ?? '').toLowerCase()
@@ -252,181 +191,183 @@ function statusTone(status?: string): Tone {
   if (s === 'pending' || s === 'degraded') return 'warn'
   return 'mute'
 }
-
 function decisionTime(decision?: Decision): string {
   const raw = decision?.updated_at ?? decision?.created_at
   if (!raw) return '-'
   const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return raw
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
-
-function decisionSortKey(decision: Decision): number {
-  const raw = decision.updated_at ?? decision.created_at ?? ''
-  const value = Date.parse(raw)
-  return Number.isNaN(value) ? 0 : value
-}
-
-function sortDecisions(decisions: Decision[]): Decision[] {
-  return [...decisions].sort((a, b) => decisionSortKey(b) - decisionSortKey(a))
-}
-
-function upsertDecisionLog(decisions: Decision[], next: Decision): Decision[] {
-  if (!next.id) return sortDecisions(decisions)
-  const byId = new Map(decisions.map((item) => [item.id, item]))
-  byId.set(next.id, next)
-  return sortDecisions(Array.from(byId.values()))
+function sortByTimeDesc(decisions: Decision[]): Decision[] {
+  const key = (d: Decision) => {
+    const v = Date.parse(d.updated_at ?? d.created_at ?? '')
+    return Number.isNaN(v) ? 0 : v
+  }
+  return [...(Array.isArray(decisions) ? decisions : [])].sort((a, b) => key(b) - key(a))
 }
 
 const GLYPH: Record<Tone, string> = { ok: '●', warn: '◆', risk: '▲', info: '■', mute: '◐', accent: '●' }
 const toneVar: Record<Tone, string> = {
-  ok: 'var(--ok)',
-  warn: 'var(--warn)',
-  risk: 'var(--risk)',
-  info: 'var(--info)',
-  mute: 'var(--mute)',
-  accent: 'var(--accent)',
+  ok: 'var(--ok)', warn: 'var(--warn)', risk: 'var(--risk)', info: 'var(--info)', mute: 'var(--mute)', accent: 'var(--accent)',
 }
 
-function listWithAnd(items: string[]): string {
-  if (items.length === 0) return 'No agent'
-  if (items.length === 1) return items[0]
-  if (items.length === 2) return `${items[0]} and ${items[1]}`
-  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+/** Which AI agent raised this decision - used to group/rank the approval stack. */
+function agencyForAction(action?: RecommendedAction): string {
+  const t = (action?.type ?? '').toLowerCase()
+  if (t.includes('markdown') || t.includes('bundle')) return 'Expiry'
+  if (t.includes('reorder')) return 'Inventory'
+  if (t.includes('supplier')) return 'Procurement'
+  if (t.includes('move') || t.includes('transfer')) return 'Cold chain'
+  if (t.includes('monitor')) return 'Executive'
+  return 'Operations'
 }
-
+function riskRank(tier?: string): number {
+  const t = (tier ?? 'low').toLowerCase()
+  return t === 'high' ? 0 : t === 'medium' ? 1 : 2
+}
+/** The day's approval queue: pending decisions, most urgent (by risk) first. */
+function pendingQueue(decisions: Decision[], current?: Decision): Decision[] {
+  const byId = new Map<string, Decision>()
+  for (const d of decisions) if (d.id) byId.set(d.id, d)
+  if (current?.id) byId.set(current.id, current)
+  return Array.from(byId.values())
+    .filter((d) => (d.status ?? 'pending').toLowerCase() === 'pending')
+    .sort((a, b) => riskRank(a.action?.risk_tier) - riskRank(b.action?.risk_tier))
+}
+function describeAction(action?: RecommendedAction): string {
+  if (!action) return 'No action'
+  const discount = action.params?.discount_pct
+  const pct =
+    typeof discount === 'string' || typeof discount === 'number'
+      ? ` ${Math.round((Number(discount) > 1 ? Number(discount) / 100 : Number(discount)) * 100)}%`
+      : ''
+  return `${formatLabel(action.type)}${pct}`
+}
 function firstActionEvidence(evidence?: EvidenceObject[], actionType?: string): EvidenceObject | undefined {
   const items = evidence ?? []
   return (
-    items.find((item) => item.recommended_action?.type === actionType && item.requires_human_review) ??
-    items.find((item) => item.recommended_action?.type === actionType) ??
-    items.find((item) => item.requires_human_review) ??
-    items.find((item) => item.recommended_action) ??
+    items.find((i) => i.recommended_action?.type === actionType && i.requires_human_review) ??
+    items.find((i) => i.recommended_action?.type === actionType) ??
+    items.find((i) => i.requires_human_review) ??
+    items.find((i) => i.recommended_action) ??
     items[0]
   )
 }
-
-function recommendation(data: GoldenDemo | null): RecommendedAction | undefined {
-  return data?.decision?.action ?? firstActionEvidence(data?.evidence)?.recommended_action
+function moneyAtRisk(evidence?: EvidenceObject[]): string | null {
+  for (const e of evidence ?? [])
+    for (const f of e.supporting_data ?? [])
+      if ((f.fact ?? '').toLowerCase().includes('at_risk')) {
+        const m = formatMoneyish(f.value)
+        if (m) return m
+      }
+  return null
+}
+function whyLine(decision: Decision, evidence?: EvidenceObject[]): string {
+  const ev = firstActionEvidence(evidence, decision.action?.type)
+  return ev?.conclusion ?? decision.summary ?? 'Recommended by the ShelfWise cascade.'
 }
 
-function describeAction(action?: RecommendedAction): string {
-  if (!action) return 'No action returned'
-  const discount = action.params?.discount_pct
-  const suffix =
-    typeof discount === 'string' || typeof discount === 'number'
-      ? ` ${formatParamValue('discount_pct', Number(discount))}`
-      : ''
-  return `${formatLabel(action.type)}${suffix}`
-}
-
-function buildActionMetrics(action?: RecommendedAction, evidence?: EvidenceObject): Metric[] {
-  const metrics: Metric[] = []
-  const seen = new Set<string>()
-  const add = (label: string, value: string, tone: Tone = 'mute') => {
-    const key = label.toLowerCase()
-    if (!value || value === '-' || seen.has(key)) return
-    metrics.push({ label, value, tone })
-    seen.add(key)
+/** Demo intent-matching. Real streaming /chat is the follow-up; this never fabricates numbers.
+ *  Chat only ever points at the status bar now - it never renders the decisions itself. */
+function replyFor(text: string, data: GoldenDemo | null, pending: Decision[]): string {
+  const q = text.toLowerCase()
+  if (/approv|decision|today|queue|pending|what.*do/.test(q)) {
+    return pending.length
+      ? `${pending.length} decision${pending.length > 1 ? 's' : ''} waiting, most urgent first — tap the bar above to review.`
+      : 'Nothing needs approval right now — the queue is clear.'
   }
-
-  Object.entries(action?.params ?? {}).forEach(([key, value]) => {
-    add(formatLabel(key), formatParamValue(key, value), key.toLowerCase().includes('pct') ? 'accent' : 'mute')
-  })
-
-  ;(evidence?.supporting_data ?? []).forEach((fact) => {
-    if (metrics.length >= 5) return
-    const label = formatLabel(fact.fact ?? fact.method ?? 'Fact')
-    const value = formatValue(fact.value)
-    const tone = formatMoneyish(fact.value) ? 'ok' : 'mute'
-    add(label, value, tone)
-  })
-
-  return metrics.slice(0, 5)
-}
-
-function storeIntelligenceMetrics(data?: GoldenDemo | null): Metric[] {
-  const intelligence = data?.store_intelligence
-  const metrics: Metric[] = []
-  const add = (label: string, value: unknown, tone: Tone = 'mute') => {
-    if (value === undefined || value === null || value === '') return
-    metrics.push({ label, value: formatValue(value), tone })
+  if (/risk|waste|expir|cold|fridge|warm|spoil/.test(q)) {
+    const ev = firstActionEvidence(data?.evidence)
+    const atRisk = moneyAtRisk(data?.evidence)
+    const base = ev?.conclusion ?? 'Nothing is flagged at risk right now.'
+    return atRisk ? `${base} About ${atRisk} of stock is exposed.` : base
   }
-
-  add('Urgent batch', intelligence?.batch_split?.priority_sell_units, 'warn')
-  add('Normal stock', intelligence?.batch_split?.normal_units, 'ok')
-  add('Missing delivery', intelligence?.delivery_reconciliation?.missing_units, 'risk')
-  add('Transfer now', intelligence?.supplier_cover?.transfer_units_recommended, 'accent')
-  add('Learning score', intelligence?.learning_summary?.score, 'info')
-  return metrics
-}
-
-function buildProofLine(evidence?: EvidenceObject[]): string {
-  const names = (evidence ?? []).map((item) => formatLabel(item.agent)).filter(Boolean)
-  if (names.length === 0) return 'No agent proof returned yet.'
-  return `${listWithAnd(names)} checks completed.`
-}
-
-function executiveAnswer(data: GoldenDemo | null): { heading: string; body: string } {
-  if (!data) {
-    return { heading: 'Waiting for the demo cascade', body: 'ShelfWise will summarize the next decision here.' }
+  if (/why|reason|explain|how/.test(q)) {
+    return 'Tap the bar above, then “Why?” on any decision, to see the agent chain and the numbers behind it.'
   }
-  const action = recommendation(data)
-  const evidence = firstActionEvidence(data.evidence, action?.type)
-  const metrics = [...buildActionMetrics(action, evidence), ...storeIntelligenceMetrics(data)]
-  const metricText = metrics.length > 0 ? metrics.slice(0, 3).map((m) => `${m.label}: ${m.value}`).join(', ') : null
-  const summary = data.decision?.summary ?? evidence?.conclusion ?? 'The cascade returned a single operational decision.'
-  const body = metricText
-    ? `${summary} The useful numbers are ${metricText}.`
-    : summary
-  return {
-    heading: describeAction(action),
-    body,
+  return 'I can show what needs approval today, what’s at risk, or the reasoning behind a decision — just ask.'
+}
+
+/** Local calendar-day label for grouping the receipt timeline ("Today", "Yesterday", or a date). */
+function dayLabel(iso: string | undefined): string {
+  if (!iso) return 'Earlier'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return 'Earlier'
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOf(new Date()) - startOf(d)) / 86_400_000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+function receiptDetail(decision: Decision): string {
+  const outcome = decision.outcome
+  if (outcome) {
+    const parts: string[] = []
+    if (outcome.units_cleared != null) parts.push(`${outcome.units_cleared} units cleared`)
+    const recovered = formatMoneyish(outcome.rand_recovered)
+    if (recovered) parts.push(`${recovered} recovered`)
+    if (outcome.success_score) parts.push(`score ${outcome.success_score}`)
+    if (parts.length) return parts.join(' · ')
   }
+  return decision.summary ?? 'No further detail recorded.'
 }
 
-function buildPriorities(data: GoldenDemo): Priority[] {
-  const action = recommendation(data)
-  const evidence = firstActionEvidence(data.evidence, action?.type)
-  const metrics = buildActionMetrics(action, evidence)
-  const intelligence = storeIntelligenceMetrics(data)
-  const topMetric = metrics.find((m) => m.tone === 'ok') ?? metrics[0]
-  const reviewRequired = Boolean(data.evidence?.some((item) => item.requires_human_review))
+let msgSeq = 0
+const newMsgId = () => `m${++msgSeq}`
 
-  return [
-    {
-      label: 'Approval',
-      value: formatLabel(data.decision?.status ?? 'pending'),
-      tone: statusTone(data.decision?.status ?? 'pending'),
-    },
-    {
-      label: 'Action risk',
-      value: formatLabel(action?.risk_tier ?? 'low'),
-      tone: riskTone(action?.risk_tier),
-    },
-    {
-      label: intelligence[2]?.label ?? topMetric?.label ?? 'Action',
-      value: intelligence[2]?.value ?? topMetric?.value ?? describeAction(action),
-      tone: intelligence[2]?.tone ?? topMetric?.tone ?? 'accent',
-    },
-    {
-      label: 'Human review',
-      value: reviewRequired ? 'required' : 'not required',
-      tone: reviewRequired ? 'warn' : 'ok',
-    },
-  ]
-}
+// ---------------------------------------------------------------------------
+// Voice input (browser SpeechRecognition; degrades silently)
+// ---------------------------------------------------------------------------
+function useVoiceInput(onText: (text: string) => void) {
+  const [supported] = useState(
+    () => typeof window !== 'undefined' && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition),
+  )
+  const [listening, setListening] = useState(false)
+  const recRef = useRef<any>(null)
 
-function traceSummary(trace?: TraceSpan[]) {
-  const spans = trace ?? []
-  const totalMs = spans.reduce((n, s) => n + (s.ms ?? 0), 0)
-  const failed = spans.filter((s) => statusTone(s.status) === 'risk').length
-  const slowest = spans.reduce<TraceSpan | undefined>((acc, span) => {
-    if (!acc || (span.ms ?? 0) > (acc.ms ?? 0)) return span
-    return acc
-  }, undefined)
+  const stop = useCallback(() => {
+    try {
+      recRef.current?.stop?.()
+    } catch {
+      /* ignore */
+    }
+    setListening(false)
+  }, [])
 
-  return { spans, totalMs, failed, slowest }
+  const start = useCallback(() => {
+    if (!supported || listening) return
+    const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const rec = new Ctor()
+    rec.lang = 'en-ZA'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.onresult = (e: any) => {
+      const t = e?.results?.[0]?.[0]?.transcript
+      if (t) onText(String(t))
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    recRef.current = rec
+    try {
+      rec.start()
+      setListening(true)
+    } catch {
+      setListening(false)
+    }
+  }, [supported, listening, onText])
+
+  useEffect(
+    () => () => {
+      try {
+        recRef.current?.abort?.()
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  )
+
+  return { supported, listening, start, stop }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +383,6 @@ function StatusGlyph({ tone, label }: { tone: Tone; label: string }) {
     </span>
   )
 }
-
 function Confidence({ value }: { value: string | number | undefined }) {
   const pct = confidencePct(value)
   return (
@@ -454,20 +394,6 @@ function Confidence({ value }: { value: string | number | undefined }) {
     </span>
   )
 }
-
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <section className="panel alert" role="alert">
-      <div className="section-kicker">API error</div>
-      <h2>Demo cascade unavailable</h2>
-      <p>{message}</p>
-      <button className="btn btn-secondary" type="button" onClick={onRetry}>
-        Retry
-      </button>
-    </section>
-  )
-}
-
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() {
@@ -479,701 +405,684 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
   render() {
     if (!this.state.failed) return this.props.children
     return (
-      <section className="panel alert" role="alert">
-        <h2>Something failed to render</h2>
+      <div className="bubble assistant">
+        <p>Something failed to render.</p>
         <button className="btn btn-secondary" type="button" onClick={() => this.setState({ failed: false })}>
           Retry
         </button>
-      </section>
+      </div>
     )
   }
 }
 
 // ---------------------------------------------------------------------------
-// Conversation surface
+// Reasoning (on-demand, INSIDE a decision) - compact chain + swap-in detail
 // ---------------------------------------------------------------------------
-function ChatHeader({ data, conn }: { data: GoldenDemo | null; conn: string }) {
+function Reasoning({ evidence }: { evidence: EvidenceObject[] }) {
+  const [active, setActive] = useState(0)
+  const selected = evidence[active]
+  if (evidence.length === 0) return <p className="why-empty">No agent chain is attached to this decision.</p>
   return (
-    <div className="chat-header">
-      <div>
-        <div className="section-kicker">Executive answer</div>
-        <h1>ShelfWise decision layer</h1>
-      </div>
-      <div className="chat-meta">
-        <span className={`conn conn-${conn}`}>
-          <span className="conn-dot" /> {conn}
+    <div className="why-body">
+      <ol className="why-chain">
+        {evidence.map((item, index) => {
+          const tone = riskTone(item.recommended_action?.risk_tier)
+          return (
+            <li key={`${item.agent ?? 'a'}-${index}`}>
+              <button
+                type="button"
+                className={`why-step ${index === active ? 'is-active' : ''}`}
+                aria-expanded={index === active}
+                onClick={() => setActive(index)}
+              >
+                <span className={`glyph-shape tone-${tone}`} aria-hidden>
+                  {GLYPH[tone]}
+                </span>
+                <span className="why-step-text">
+                  <span>{formatLabel(item.agent)}</span>
+                  <small>{item.conclusion ?? 'No conclusion.'}</small>
+                </span>
+                <Confidence value={item.confidence} />
+              </button>
+              {index === active ? (
+                <div className="why-detail" style={{ '--rail': toneVar[tone] } as CSSProperties}>
+                  {(selected?.supporting_data ?? []).length > 0 ? (
+                    <dl className="facts">
+                      {(selected?.supporting_data ?? []).map((f, i) => (
+                        <div className="fact-row" key={`${f.fact ?? 'f'}-${i}`}>
+                          <dt>{formatLabel(f.fact ?? f.method ?? 'Fact')}</dt>
+                          <dd className="fact-value tnum">{formatValue(f.value)}</dd>
+                          <dd className="fact-source">{f.source ?? f.method ?? '-'}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <p className="why-empty">No supporting facts for this step.</p>
+                  )}
+                  {(selected?.sources ?? []).length > 0 ? (
+                    <p className="source-line">
+                      {(selected?.sources ?? []).map((s, i) => (
+                        <span key={`${s.ref ?? 's'}-${i}`} title={s.kind}>
+                          {formatSource(s)}
+                        </span>
+                      ))}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// A single decision card (inside a message / the stack)
+// ---------------------------------------------------------------------------
+function DecisionCard({
+  decision,
+  evidence,
+  busyId,
+  onApprove,
+  onReject,
+}: {
+  decision: Decision
+  evidence?: EvidenceObject[]
+  busyId: string | null
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+}) {
+  const [why, setWhy] = useState(false)
+  // Confirm-before-acting gate: clicking Approve/Reject never fires the API call directly. It morphs
+  // the buttons into a plain-text "this can't be undone" warning with explicit Yes/Cancel first -
+  // irreversible actions on a real ops tool need a deliberate second step, not a single fat-finger tap.
+  const [pendingChoice, setPendingChoice] = useState<'approve' | 'reject' | null>(null)
+  const action = decision.action
+  const tone = riskTone(action?.risk_tier)
+  const status = (decision.status ?? 'pending').toLowerCase()
+  const pending = status === 'pending'
+  const busy = busyId === decision.id
+  const atRisk = moneyAtRisk(evidence)
+  const actionLabel = describeAction(action)
+
+  const confirmText =
+    pendingChoice === 'approve'
+      ? `This can't be undone. "${actionLabel}" will be applied now.`
+      : "This can't be undone. Removes this recommendation from the queue."
+
+  return (
+    <article className="decision-card" style={{ '--rail': toneVar[tone] } as CSSProperties}>
+      <header className="dc-head">
+        <div>
+          <div className="dc-agency">{agencyForAction(action)} agent</div>
+          <h3>{actionLabel}</h3>
+        </div>
+        <StatusGlyph tone={pending ? tone : statusTone(status)} label={pending ? `risk ${action?.risk_tier ?? 'low'}` : formatLabel(status)} />
+      </header>
+      <p className="dc-why">{whyLine(decision, evidence)}</p>
+      {atRisk ? <p className="dc-risk tnum">{atRisk} at risk</p> : null}
+
+      {pending ? (
+        <>
+          <div className={`dc-actions ${pendingChoice ? 'is-hidden' : ''}`}>
+            <button className="btn btn-primary" type="button" disabled={busy} onClick={() => setPendingChoice('approve')}>
+              Approve
+            </button>
+            <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => setPendingChoice('reject')}>
+              Reject
+            </button>
+            {evidence && evidence.length > 0 ? (
+              <button className="btn btn-ghost why-toggle" type="button" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
+                {why ? 'Why? ▾' : 'Why? ▸'}
+              </button>
+            ) : null}
+          </div>
+          <div className={`dc-confirm ${pendingChoice ? 'show' : ''}`}>
+            <p className="dc-confirm-msg">{confirmText}</p>
+            <div className="dc-confirm-actions">
+              <button
+                className={`confirm-yes ${pendingChoice === 'reject' ? 'reject-tone' : ''}`}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (pendingChoice === 'approve') onApprove(decision.id!)
+                  else if (pendingChoice === 'reject') onReject(decision.id!)
+                }}
+              >
+                {busy ? 'Working…' : pendingChoice === 'approve' ? 'Yes, apply it' : 'Yes, reject it'}
+              </button>
+              <button className="confirm-cancel" type="button" onClick={() => setPendingChoice(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="dc-actions">
+          <span className={`dc-resolved tone-${statusTone(status)}`}>{formatLabel(status)}</span>
+          {evidence && evidence.length > 0 ? (
+            <button className="btn btn-ghost why-toggle" type="button" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
+              {why ? 'Why? ▾' : 'Why? ▸'}
+            </button>
+          ) : null}
+        </div>
+      )}
+      {why && evidence ? <Reasoning evidence={evidence} /> : null}
+    </article>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The persistent approval queue: a status bar (always visible) + a slide-down panel with the
+// flat pending list and the day-grouped receipt timeline.
+// ---------------------------------------------------------------------------
+function StatusBar({ queue, open, onToggle }: { queue: Decision[]; open: boolean; onToggle: () => void }) {
+  const top = queue[0]
+  const tone: Tone = top ? riskTone(top.action?.risk_tier) : 'ok'
+  const more = queue.length - 1
+  return (
+    <button className={`statusbar ${open ? 'is-open' : ''}`} type="button" onClick={onToggle}>
+      <span className="statusbar-accent" style={{ background: toneVar[tone] }} aria-hidden />
+      <span className="statusbar-main">
+        <span className="statusbar-label">{top ? describeAction(top.action) : 'All caught up'}</span>
+        <span className="statusbar-sub">
+          <span className={`tag tone-${tone}`}>{top ? (top.action?.risk_tier ?? 'low') : 'clear'}</span>
+          {more > 0 ? <span>· +{more} more waiting</span> : null}
         </span>
-        <span className="tnum">{data?.correlation_id ?? 'no correlation id'}</span>
+      </span>
+      <svg className="chevron" viewBox="0 0 10 6" fill="none" aria-hidden>
+        <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    </button>
+  )
+}
+
+function ReceiptRow({ decision }: { decision: Decision }) {
+  const [open, setOpen] = useState(false)
+  const tone = statusTone(decision.status)
+  const label = `${formatLabel(decision.status)} — ${describeAction(decision.action)}`
+  return (
+    <li className={`receipt ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)}>
+      <div className="receipt-top">
+        <span className={`receipt-dot tone-${tone}`} aria-hidden />
+        <span className="receipt-txt">{label}</span>
+        <span className="receipt-time tnum">{decisionTime(decision)}</span>
+      </div>
+      {open ? <div className="receipt-detail">{receiptDetail(decision)}</div> : null}
+    </li>
+  )
+}
+
+function ApprovalPanel({
+  queue,
+  resolved,
+  currentId,
+  evidence,
+  busyId,
+  onApprove,
+  onReject,
+}: {
+  queue: Decision[]
+  resolved: Decision[]
+  currentId?: string
+  evidence?: EvidenceObject[]
+  busyId: string | null
+  onApprove: (id: string) => void
+  onReject: (id: string) => void
+}) {
+  const evidenceFor = (d: Decision) => (d.id && d.id === currentId ? evidence : undefined)
+
+  const days = new Map<string, Decision[]>()
+  for (const d of sortByTimeDesc(resolved)) {
+    const key = dayLabel(d.updated_at ?? d.created_at)
+    days.set(key, [...(days.get(key) ?? []), d])
+  }
+
+  return (
+    <div className="approval-panel-scroll">
+      <div className="section-heading">Needs your approval</div>
+      {queue.length === 0 ? (
+        <p className="stack-clear">✓ The approval queue is clear — nothing waiting.</p>
+      ) : (
+        queue.map((d) => (
+          <DecisionCard key={d.id} decision={d} evidence={evidenceFor(d)} busyId={busyId} onApprove={onApprove} onReject={onReject} />
+        ))
+      )}
+
+      {Array.from(days.entries()).map(([day, items]) => (
+        <div key={day}>
+          <div className="day-marker">{day}</div>
+          <ol className="receipt-list">
+            {items.map((d) => (
+              <ReceiptRow key={d.id ?? d.summary} decision={d} />
+            ))}
+          </ol>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Chat message bubbles — text only. Decisions live in the status bar/panel, never here.
+// ---------------------------------------------------------------------------
+function AssistantBubble({ text }: { text: string }) {
+  return (
+    <div className="row assistant-row">
+      <div className="avatar" aria-hidden>
+        ◆
+      </div>
+      <div className="bubble assistant">
+        <div className="speaker">ShelfWise</div>
+        <p>{text}</p>
+      </div>
+    </div>
+  )
+}
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="row user-row">
+      <div className="bubble user">{text}</div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ops menu drawer (everything that is NOT the conversation)
+// ---------------------------------------------------------------------------
+function MenuDrawer({
+  open,
+  onClose,
+  data,
+  scenarioMode,
+  onScenario,
+  onReload,
+}: {
+  open: boolean
+  onClose: () => void
+  data: GoldenDemo | null
+  scenarioMode: ScenarioMode
+  onScenario: (mode: ScenarioMode) => void
+  onReload: () => void
+}) {
+  const intel = data?.store_intelligence
+  const trace = data?.trace ?? []
+  const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
+  return (
+    <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-hidden={!open}>
+      <aside className="drawer" onClick={(e) => e.stopPropagation()} aria-label="Operations menu">
+        <div className="drawer-head">
+          <span className="section-kicker">Operations</span>
+          <button className="icon-btn" type="button" aria-label="Close menu" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        <section className="rail-section">
+          <div className="section-kicker">Demo scenario</div>
+          <div className="scenario-switch">
+            <button className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`} type="button" onClick={() => onScenario('approval')}>
+              Approval
+            </button>
+            <button className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`} type="button" onClick={() => onScenario('critic')}>
+              Critic rejection
+            </button>
+          </div>
+          <button className="btn btn-secondary drawer-reload" type="button" onClick={onReload}>
+            Reload cascade
+          </button>
+        </section>
+
+        {intel ? (
+          <section className="rail-section">
+            <div className="section-kicker">Store intelligence</div>
+            <p className="muted">{intel.batch_split?.conclusion ?? 'Batch-level stock proof.'}</p>
+            <dl className="kv">
+              <div>
+                <dt>Urgent batch</dt>
+                <dd className="tnum">{formatValue(intel.batch_split?.priority_sell_units)}</dd>
+              </div>
+              <div>
+                <dt>Delivery missing</dt>
+                <dd className="tnum">{formatValue(intel.delivery_reconciliation?.missing_units)}</dd>
+              </div>
+              <div>
+                <dt>Transfer now</dt>
+                <dd className="tnum">{formatValue(intel.supplier_cover?.transfer_units_recommended)}</dd>
+              </div>
+              <div>
+                <dt>Learning score</dt>
+                <dd className="tnum">{formatValue(intel.learning_summary?.score)}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+
+        <section className="rail-section">
+          <div className="section-kicker">System · {formatLabel(data?.inference?.provider ?? 'offline')}</div>
+          <dl className="kv">
+            <div>
+              <dt>Trace</dt>
+              <dd className="tnum">{totalMs}ms · {trace.length} spans</dd>
+            </div>
+            <div>
+              <dt>Routed agents</dt>
+              <dd className="tnum">
+                {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
+              </dd>
+            </div>
+          </dl>
+          {data?.learning?.message ? <p className="muted">{data.learning.message}</p> : null}
+        </section>
+      </aside>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Composer (text + voice + suggestions)
+// ---------------------------------------------------------------------------
+const SUGGESTIONS = ['What should I approve?', "What's at risk today?"]
+
+function Composer({ onSend }: { onSend: (text: string) => void }) {
+  const [text, setText] = useState('')
+  const voice = useVoiceInput((t) => setText((prev) => (prev ? `${prev} ${t}` : t)))
+  const send = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return
+    onSend(trimmed)
+    setText('')
+  }
+  return (
+    <div className="composer">
+      <div className="suggestions">
+        {SUGGESTIONS.map((s) => (
+          <button className="chip-btn" type="button" key={s} onClick={() => send(s)}>
+            {s}
+          </button>
+        ))}
+      </div>
+      <div className="composer-row">
+        {voice.supported ? (
+          <button
+            className={`icon-btn mic ${voice.listening ? 'is-live' : ''}`}
+            type="button"
+            aria-label={voice.listening ? 'Stop listening' : 'Talk to ShelfWise'}
+            aria-pressed={voice.listening}
+            onClick={() => (voice.listening ? voice.stop() : voice.start())}
+          >
+            {voice.listening ? '■' : '🎤'}
+          </button>
+        ) : null}
+        <input
+          className="composer-input"
+          value={text}
+          placeholder={voice.listening ? 'Listening…' : 'Ask ShelfWise…'}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send(text)
+          }}
+          aria-label="Message ShelfWise"
+        />
+        <button className="btn btn-primary send" type="button" onClick={() => send(text)} disabled={!text.trim()}>
+          ➤
+        </button>
       </div>
     </div>
   )
 }
 
-function ActionBlock({
-  data,
-  busy,
-  error,
-  reasoningOpen,
-  onApprove,
-  onReject,
-  onToggleReasoning,
-}: {
-  data: GoldenDemo
-  busy: 'approve' | 'reject' | null
-  error: string | null
-  reasoningOpen: boolean
-  onApprove: () => void
-  onReject: () => void
-  onToggleReasoning: () => void
-}) {
-  const action = recommendation(data)
-  const evidence = firstActionEvidence(data.evidence, action?.type)
-  const metrics = buildActionMetrics(action, evidence)
-  const status = data.decision?.status ?? 'pending'
-  const pending = status.toLowerCase() === 'pending'
-  const tone = riskTone(action?.risk_tier)
-
-  return (
-    <section className="action-record" style={{ '--rail': toneVar[tone] } as CSSProperties} aria-label="Recommended action">
-      <div className="action-main">
-        <div className="action-copy">
-          <div className="section-kicker">Recommended action</div>
-          <h2>{describeAction(action)}</h2>
-          <p>{evidence?.conclusion ?? data.decision?.summary ?? 'No recommendation detail was returned.'}</p>
-        </div>
-        <StatusGlyph tone={pending ? 'warn' : statusTone(status)} label={formatLabel(status)} />
-      </div>
-
-      {metrics.length > 0 ? (
-        <dl className="metric-strip">
-          {metrics.map((metric) => (
-            <div key={metric.label}>
-              <dt>{metric.label}</dt>
-              <dd className={`tnum tone-${metric.tone ?? 'mute'}`}>{metric.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-
-      <div className="action-controls">
-        <button className="btn btn-primary" type="button" disabled={!pending || busy !== null} onClick={onApprove}>
-          {busy === 'approve' ? 'Approving' : 'Approve'}
-        </button>
-        <button className="btn btn-secondary" type="button" disabled={!pending || busy !== null} onClick={onReject}>
-          {busy === 'reject' ? 'Rejecting' : 'Reject'}
-        </button>
-        <button className="btn btn-ghost" type="button" aria-expanded={reasoningOpen} onClick={onToggleReasoning}>
-          {reasoningOpen ? 'Hide reasoning' : 'Show reasoning'}
-        </button>
-      </div>
-
-      {error ? (
-        <p className="action-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </section>
-  )
-}
-
-function ReasoningChain({ evidence }: { evidence?: EvidenceObject[] }) {
-  const items = evidence ?? []
-  const [active, setActive] = useState(0)
-  const selected = items[active]
-
-  if (items.length === 0) return <p className="empty-line">No reasoning chain returned.</p>
-
-  return (
-    <section className="reasoning" aria-label="Reasoning chain">
-      <div className="reasoning-head">
-        <div>
-          <div className="section-kicker">Reasoning chain</div>
-          <h2>Compact agent steps</h2>
-        </div>
-        <span className="section-count tnum">{items.length} steps</span>
-      </div>
-
-      <div className="reason-grid">
-        <div className="step-list" role="tablist" aria-label="Agent steps">
-          {items.map((item, index) => {
-            const isActive = index === active
-            return (
-              <button
-                className={`step-row ${isActive ? 'is-active' : ''}`}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                aria-controls="reason-detail"
-                id={`reason-step-${index}`}
-                key={`${item.agent ?? 'agent'}-${index}`}
-                onClick={() => setActive(index)}
-              >
-                <span className="step-index tnum">{String(index + 1).padStart(2, '0')}</span>
-                <span className="step-text">
-                  <span>{formatLabel(item.agent)}</span>
-                  <small>{item.conclusion ?? 'No conclusion supplied.'}</small>
-                </span>
-                <Confidence value={item.confidence} />
-              </button>
-            )
-          })}
-        </div>
-
-        <article
-          className="reason-detail"
-          id="reason-detail"
-          role="tabpanel"
-          aria-labelledby={`reason-step-${active}`}
-          style={{ '--rail': toneVar[riskTone(selected?.recommended_action?.risk_tier)] } as CSSProperties}
-        >
-          <header>
-            <span className="section-kicker">{formatLabel(selected?.agent)}</span>
-            <h3>{selected?.conclusion ?? 'No conclusion supplied.'}</h3>
-          </header>
-          <FactTable facts={selected?.supporting_data ?? []} />
-          <SourceLine sources={selected?.sources ?? []} />
-        </article>
-      </div>
-    </section>
-  )
-}
-
-function FactTable({ facts }: { facts: SupportingFact[] }) {
-  if (facts.length === 0) return <p className="empty-line">No supporting facts returned for this step.</p>
-  return (
-    <dl className="facts">
-      {facts.map((fact, index) => (
-        <div className="fact-row" key={`${fact.fact ?? 'fact'}-${index}`}>
-          <dt>{formatLabel(fact.fact ?? fact.method ?? 'Fact')}</dt>
-          <dd className="fact-value tnum">{formatValue(fact.value)}</dd>
-          <dd className="fact-source">{fact.source ?? fact.method ?? '-'}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-function SourceLine({ sources }: { sources: SourceRef[] }) {
-  if (sources.length === 0) return null
-  return (
-    <p className="source-line">
-      {sources.map((source, index) => (
-        <span key={`${source.ref ?? 'source'}-${index}`} title={source.kind}>
-          {formatSource(source)}
-        </span>
-      ))}
-    </p>
-  )
-}
-
-function Conversation({
-  data,
-  conn,
-  busy,
-  transitionError,
-  onApprove,
-  onReject,
-}: {
-  data: GoldenDemo
-  conn: string
-  busy: 'approve' | 'reject' | null
-  transitionError: string | null
-  onApprove: () => void
-  onReject: () => void
-}) {
-  const [reasoningOpen, setReasoningOpen] = useState(false)
-  const answer = executiveAnswer(data)
-
-  return (
-    <section className="chat-main panel" aria-label="Executive conversation">
-      <ChatHeader data={data} conn={conn} />
-
-      <div className="turn user-turn">
-        <div className="speaker">Ops lead</div>
-        <p>What should I approve right now?</p>
-      </div>
-
-      <div className="turn answer-turn">
-        <div className="speaker">ShelfWise</div>
-        <div className="answer-copy">
-          <h2>{answer.heading}</h2>
-          <p>{answer.body}</p>
-          <p className="proof-line">
-            <StatusGlyph tone="ok" label={buildProofLine(data.evidence)} />
-          </p>
-        </div>
-      </div>
-
-      <ActionBlock
-        data={data}
-        busy={busy}
-        error={transitionError}
-        reasoningOpen={reasoningOpen}
-        onApprove={onApprove}
-        onReject={onReject}
-        onToggleReasoning={() => setReasoningOpen((value) => !value)}
-      />
-
-      {reasoningOpen ? <ReasoningChain evidence={data.evidence} /> : null}
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Side rail
-// ---------------------------------------------------------------------------
-function SideRail({
-  data,
-  decisions,
-  decisionLogError,
-}: {
-  data: GoldenDemo
-  decisions?: Decision[]
-  decisionLogError: string | null
-}) {
-  return (
-    <aside className="side-rail panel" aria-label="Approval and system summary">
-      <ApprovalSummary data={data} />
-      <DecisionLogPanel decisions={decisions} currentId={data.decision?.id} error={decisionLogError} />
-      <PriorityList priorities={buildPriorities(data)} />
-      <StoreIntelligencePanel intelligence={data.store_intelligence} />
-      <TraceSummaryPanel trace={data.trace} inference={data.inference} />
-      <LearningNote learning={data.learning} />
-    </aside>
-  )
-}
-
-function DecisionLogPanel({
-  decisions,
-  currentId,
-  error,
-}: {
-  decisions?: Decision[]
-  currentId?: string
-  error: string | null
-}) {
-  const recent = sortDecisions(decisions ?? []).slice(0, 5)
-
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">Decision log</div>
-          <h2>Audit trail</h2>
-        </div>
-        <span className="section-count tnum">{recent.length}</span>
-      </div>
-
-      {error ? <p className="rail-warning">{error}</p> : null}
-
-      {recent.length > 0 ? (
-        <ol className="decision-log">
-          {recent.map((decision) => {
-            const status = decision.status ?? 'unknown'
-            const tone = statusTone(status)
-            const isCurrent = Boolean(currentId && decision.id === currentId)
-            return (
-              <li
-                className={`decision-row ${isCurrent ? 'is-current' : ''}`}
-                key={decision.id ?? decision.summary}
-              >
-                <span className={`glyph-shape tone-${tone}`} aria-hidden>
-                  {GLYPH[tone]}
-                </span>
-                <span className="decision-copy">
-                  <strong>{describeAction(decision.action)}</strong>
-                  <small>{decision.summary ?? decision.id ?? 'No decision summary.'}</small>
-                </span>
-                <span className="decision-meta">
-                  <span>{formatLabel(status)}</span>
-                  <span className="tnum">{decisionTime(decision)}</span>
-                </span>
-              </li>
-            )
-          })}
-        </ol>
-      ) : (
-        <p>No decisions logged yet.</p>
-      )}
-    </section>
-  )
-}
-
-function ApprovalSummary({ data }: { data: GoldenDemo }) {
-  const status = data.decision?.status ?? 'pending'
-  const outcome = data.decision?.outcome
-  const writeBack = data.decision?.write_back
-  const label = status.toLowerCase() === 'pending' ? 'Pending approval' : 'Decision status'
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">{label}</div>
-          <h2>{data.decision?.id ?? 'No decision id'}</h2>
-        </div>
-        <StatusGlyph tone={statusTone(status)} label={formatLabel(status)} />
-      </div>
-      <p>{data.decision?.summary ?? 'No approval summary returned.'}</p>
-      {outcome ? (
-        <dl className="trace-kv">
-          <div>
-            <dt>Units cleared</dt>
-            <dd className="tnum">{formatValue(outcome.units_cleared)}</dd>
-          </div>
-          <div>
-            <dt>Recovered</dt>
-            <dd className="tnum">{formatValue(outcome.rand_recovered)}</dd>
-          </div>
-          <div>
-            <dt>Score</dt>
-            <dd className="tnum">{formatValue(outcome.success_score)}</dd>
-          </div>
-        </dl>
-      ) : null}
-      {writeBack?.status ? <p>Write-back: {formatLabel(writeBack.status)}</p> : null}
-    </section>
-  )
-}
-
-function PriorityList({ priorities }: { priorities: Priority[] }) {
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">Current priorities</div>
-          <h2>Operator queue</h2>
-        </div>
-        <span className="section-count tnum">{priorities.length}</span>
-      </div>
-      <dl className="priority-list">
-        {priorities.map((priority) => (
-          <div key={priority.label} className="priority-row">
-            <dt>
-              <span className={`glyph-shape tone-${priority.tone}`} aria-hidden>
-                {GLYPH[priority.tone]}
-              </span>
-              {priority.label}
-            </dt>
-            <dd>{priority.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  )
-}
-
-function StoreIntelligencePanel({ intelligence }: { intelligence?: StoreIntelligence }) {
-  if (!intelligence) return null
-
-  const rows: Priority[] = [
-    {
-      label: 'Old batch to sell',
-      value: formatValue(intelligence.batch_split?.priority_sell_units),
-      tone: 'warn',
-    },
-    {
-      label: 'Normal units',
-      value: formatValue(intelligence.batch_split?.normal_units),
-      tone: 'ok',
-    },
-    {
-      label: 'Delivery missing',
-      value: formatValue(intelligence.delivery_reconciliation?.missing_units),
-      tone: 'risk',
-    },
-    {
-      label: 'Supplier action',
-      value: formatLabel(intelligence.supplier_cover?.recommended_action ?? 'hold'),
-      tone: intelligence.supplier_cover?.recommended_action === 'transfer' ? 'accent' : 'ok',
-    },
-  ]
-
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">Store intelligence</div>
-          <h2>Numeric proof</h2>
-        </div>
-        <span className="section-count">FEFO</span>
-      </div>
-      <p>{intelligence.batch_split?.conclusion ?? 'Batch-level stock proof is available.'}</p>
-      <dl className="priority-list">
-        {rows.map((row) => (
-          <div key={row.label} className="priority-row">
-            <dt>
-              <span className={`glyph-shape tone-${row.tone}`} aria-hidden>
-                {GLYPH[row.tone]}
-              </span>
-              {row.label}
-            </dt>
-            <dd>{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-      {intelligence.learning_summary?.lesson ? <p>{intelligence.learning_summary.lesson}</p> : null}
-    </section>
-  )
-}
-
-function TraceSummaryPanel({
-  trace,
-  inference,
-}: {
-  trace?: TraceSpan[]
-  inference?: InferenceConfig
-}) {
-  const summary = traceSummary(trace)
-  const provider = inference?.provider ?? 'offline'
-  const routingCount =
-    (inference?.routing?.routine_agents?.length ?? 0) + (inference?.routing?.strong_agents?.length ?? 0)
-
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">System thinking</div>
-          <h2>Trace summary</h2>
-        </div>
-        <span className="section-count tnum">{summary.totalMs}ms</span>
-      </div>
-
-      <dl className="trace-kv">
-        <div>
-          <dt>Provider</dt>
-          <dd>{formatLabel(provider)}</dd>
-        </div>
-        <div>
-          <dt>Routed agents</dt>
-          <dd className="tnum">{routingCount}</dd>
-        </div>
-        <div>
-          <dt>Failed spans</dt>
-          <dd className="tnum">{summary.failed}</dd>
-        </div>
-        <div>
-          <dt>Slowest</dt>
-          <dd>{summary.slowest ? `${summary.slowest.name ?? 'span'} ${summary.slowest.ms ?? 0}ms` : '-'}</dd>
-        </div>
-      </dl>
-
-      <ol className="trace-list">
-        {summary.spans.slice(0, 5).map((span, index) => {
-          const tone = statusTone(span.status)
-          return (
-            <li key={`${span.name ?? 'span'}-${index}`}>
-              <span className={`glyph-shape tone-${tone}`} aria-hidden>
-                {GLYPH[tone]}
-              </span>
-              <span>{span.name ?? 'span'}</span>
-              <span className="tnum">{span.ms ?? 0}ms</span>
-            </li>
-          )
-        })}
-      </ol>
-    </section>
-  )
-}
-
-function LearningNote({ learning }: { learning?: GoldenDemo['learning'] }) {
-  if (!learning?.status && !learning?.message) return null
-  return (
-    <section className="rail-section">
-      <div className="rail-heading">
-        <div>
-          <div className="section-kicker">Learning</div>
-          <h2>{formatLabel(learning.status ?? 'ready')}</h2>
-        </div>
-      </div>
-      <p>{learning.message}</p>
-    </section>
-  )
-}
-
-function LoadingShell({ endpoint }: { endpoint: string }) {
-  return (
-    <section className="panel loading-panel" aria-live="polite">
-      <div className="chat-header">
-        <div>
-          <div className="section-kicker">Loading</div>
-          <h1>Fetching demo cascade</h1>
-        </div>
-        <span className="chat-meta">{endpoint}</span>
-      </div>
-      {[0, 1, 2, 3, 4].map((index) => (
-        <div className="skeleton-row" key={index} style={{ width: `${82 - index * 9}%` }} />
-      ))}
-    </section>
-  )
-}
-
 function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(currentTheme)
-  const toggle = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark'
-    applyTheme(next)
-    setTheme(next)
-  }
   return (
-    <button className="btn btn-secondary theme-toggle" type="button" aria-label="toggle theme" onClick={toggle}>
-      {theme === 'dark' ? 'Light' : 'Dark'}
+    <button
+      className="icon-btn"
+      type="button"
+      aria-label="Toggle theme"
+      onClick={() => {
+        const next: Theme = theme === 'dark' ? 'light' : 'dark'
+        applyTheme(next)
+        setTheme(next)
+      }}
+    >
+      {theme === 'dark' ? '☀' : '☾'}
     </button>
   )
 }
 
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 function App() {
   const [data, setData] = useState<GoldenDemo | null>(null)
+  const [decisions, setDecisions] = useState<Decision[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [scenarioMode, setScenarioMode] = useState<ScenarioMode>('approval')
-  const [decisions, setDecisions] = useState<Decision[]>([])
-  const [decisionLogError, setDecisionLogError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null)
-  const [transitionError, setTransitionError] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [approvalOpen, setApprovalOpen] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
   const transitionCtrl = useRef<AbortController | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const activePath = DEMO_PATHS[scenarioMode]
+
+  const queue = useMemo(() => pendingQueue(decisions, data?.decision), [decisions, data])
+  const resolved = useMemo(() => {
+    const byId = new Map<string, Decision>()
+    for (const d of decisions) if (d.id) byId.set(d.id, d)
+    if (data?.decision?.id) byId.set(data.decision.id, data.decision)
+    return Array.from(byId.values()).filter((d) => (d.status ?? 'pending').toLowerCase() !== 'pending')
+  }, [decisions, data])
 
   useEffect(() => {
     const controller = new AbortController()
     setLoadState('loading')
     setError(null)
-    setDecisionLogError(null)
-
-    async function loadDemo() {
+    async function load() {
       const payload = await fetchDemo(activePath, controller.signal)
-      let log = payload.decision ? [payload.decision] : []
+      let log: Decision[] = payload.decision ? [payload.decision] : []
       try {
         log = await fetchDecisionLog(controller.signal)
-      } catch (logError) {
-        if (controller.signal.aborted) return
-        setDecisionLogError(
-          `Decision log unavailable: ${logError instanceof Error ? logError.message : String(logError)}`,
-        )
+      } catch {
+        /* decision log optional */
       }
       if (controller.signal.aborted) return
-      setDecisions(sortDecisions(log))
       setData(payload)
-      setBusy(null)
-      setTransitionError(null)
+      setDecisions(log)
+      const pending = pendingQueue(log, payload.decision)
+      const greeting =
+        pending.length === 0
+          ? 'Good evening. Nothing needs your approval right now — I’ll flag anything the moment it does.'
+          : pending.length === 1
+            ? 'Good evening. One decision needs you tonight — tap the bar above when you’re ready.'
+            : `Good evening. ${pending.length} decisions need you today, most urgent first — tap the bar above.`
+      setMessages([{ id: newMsgId(), role: 'assistant', text: greeting }])
       setLoadState('ready')
     }
-
-    loadDemo()
-      .catch((e) => {
-        if (controller.signal.aborted) return
-        setError(e instanceof Error ? e.message : String(e))
-        setLoadState('error')
-      })
+    load().catch((e) => {
+      if (controller.signal.aborted) return
+      setError(e instanceof Error ? e.message : String(e))
+      setLoadState('error')
+    })
     return () => controller.abort()
   }, [reloadKey, activePath])
 
   useEffect(() => () => transitionCtrl.current?.abort(), [])
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages])
 
-  const endpoint = useMemo(() => joinUrl(configuredBase() || DEFAULT_API_BASE, activePath), [activePath])
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
 
   const selectScenario = (next: ScenarioMode) => {
-    if (next !== scenarioMode) setData(null)
+    if (next === scenarioMode) return
     transitionCtrl.current?.abort()
+    setData(null)
+    setMessages([])
+    setBusyId(null)
     setScenarioMode(next)
-    setBusy(null)
-    setTransitionError(null)
+    setMenuOpen(false)
+    setApprovalOpen(false)
   }
 
-  const transition = (kind: 'approve' | 'reject') => {
-    const id = data?.decision?.id
-    if (!id || busy) {
-      if (!id) setTransitionError('No decision id is available.')
-      return
-    }
+  const send = (text: string) => {
+    setMessages((prev) => {
+      const reply = replyFor(text, data, pendingQueue(decisions, data?.decision))
+      return [...prev, { id: newMsgId(), role: 'user', text }, { id: newMsgId(), role: 'assistant', text: reply }]
+    })
+  }
+
+  const resolve = (id: string, kind: 'approve' | 'reject') => {
+    if (busyId) return
     transitionCtrl.current?.abort()
     const controller = new AbortController()
     transitionCtrl.current = controller
-    setBusy(kind)
-    setTransitionError(null)
+    setBusyId(id)
     postTransition(id, kind, controller.signal)
       .then((result) => {
-        setData((cur) =>
-          cur
-            ? {
-                ...cur,
-                decision: result.decision,
-                learning: result.learning_event
-                  ? {
-                      status: 'threshold_adjusted',
-                      message: result.learning_event.message,
-                    }
-                  : cur.learning,
-              }
-            : cur,
-        )
-        setDecisions((cur) => upsertDecisionLog(cur, result.decision))
-        setBusy(null)
+        const { decision, learning_event } = result
+        setDecisions((cur) => {
+          const byId = new Map(cur.map((d) => [d.id, d]))
+          byId.set(decision.id, decision)
+          return Array.from(byId.values())
+        })
+        setData((cur) => {
+          if (!cur || cur.decision?.id !== decision.id) return cur
+          return {
+            ...cur,
+            decision,
+            learning: learning_event?.message
+              ? { status: 'threshold_adjusted', message: learning_event.message }
+              : cur.learning,
+          }
+        })
+        setBusyId(null)
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newMsgId(),
+            role: 'assistant',
+            text: `${kind === 'approve' ? 'Approved' : 'Rejected'} — ${describeAction(decision.action)}. Logged to the audit trail.`,
+          },
+        ])
       })
       .catch((e) => {
         if (controller.signal.aborted) return
-        setBusy(null)
-        setTransitionError(
-          `${kind} failed: ${e instanceof Error ? e.message : String(e)}. Nothing was changed; try again.`,
-        )
+        setBusyId(null)
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newMsgId(),
+            role: 'assistant',
+            text: `That ${kind} didn’t go through (${e instanceof Error ? e.message : String(e)}). Nothing changed — try again.`,
+          },
+        ])
       })
   }
 
   return (
     <div className="app-shell">
-      <header className="header">
+      <header className="topbar">
+        <button
+          className="icon-btn"
+          type="button"
+          aria-label="Open menu"
+          onClick={() => {
+            setApprovalOpen(false)
+            setMenuOpen(true)
+          }}
+        >
+          ☰
+        </button>
         <span className="brand">
           <span className="brand-mark" />
           <span className="brand-name">ShelfWise</span>
         </span>
-        {data?.scenario ? <span className="scenario">{data.scenario.replace(/_/g, ' ')}</span> : null}
-        <div className="header-right">
-          <div className="scenario-switch" aria-label="Demo scenario">
-            <button
-              className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
-              type="button"
-              aria-pressed={scenarioMode === 'approval'}
-              onClick={() => selectScenario('approval')}
-            >
-              Approval case
-            </button>
-            <button
-              className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
-              type="button"
-              aria-pressed={scenarioMode === 'critic'}
-              onClick={() => selectScenario('critic')}
-            >
-              Critic rejection
-            </button>
-          </div>
-          <button className="btn btn-secondary" type="button" onClick={() => setReloadKey((value) => value + 1)}>
-            Reload
-          </button>
+        <div className="topbar-right">
+          <span className={`conn conn-${conn}`}>
+            <span className="conn-dot" /> {conn}
+          </span>
           <ThemeToggle />
         </div>
       </header>
 
-      <main className="content">
-        {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
-        {loadState === 'loading' && !data ? <LoadingShell endpoint={endpoint} /> : null}
+      {data ? (
+        <StatusBar
+          queue={queue}
+          open={approvalOpen}
+          onToggle={() => {
+            setMenuOpen(false)
+            setApprovalOpen((v) => !v)
+          }}
+        />
+      ) : null}
 
-        {data ? (
-          <ErrorBoundary>
-            <div className="intel-layout">
-              <Conversation
-                data={data}
-                conn={conn}
-                busy={busy}
-                transitionError={transitionError}
-                onApprove={() => transition('approve')}
-                onReject={() => transition('reject')}
-              />
-              <SideRail data={data} decisions={decisions} decisionLogError={decisionLogError} />
+      <main className="chat" ref={scrollRef}>
+        <div className="chat-inner">
+          {error ? (
+            <div className="row assistant-row">
+              <div className="avatar" aria-hidden>
+                ◆
+              </div>
+              <div className="bubble assistant">
+                <p>I couldn’t reach the cascade: {error}</p>
+                <button className="btn btn-secondary" type="button" onClick={() => setReloadKey((v) => v + 1)}>
+                  Retry
+                </button>
+              </div>
             </div>
+          ) : null}
+
+          {loadState === 'loading' && messages.length === 0 ? (
+            <div className="row assistant-row">
+              <div className="avatar" aria-hidden>
+                ◆
+              </div>
+              <div className="bubble assistant typing">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          ) : null}
+
+          <ErrorBoundary>
+            {messages.map((m) => (m.role === 'user' ? <UserBubble key={m.id} text={m.text} /> : <AssistantBubble key={m.id} text={m.text} />))}
           </ErrorBoundary>
-        ) : null}
+        </div>
       </main>
+
+      <Composer onSend={send} />
+
+      <div className={`approval-scrim ${approvalOpen ? 'is-open' : ''}`} onClick={() => setApprovalOpen(false)} aria-hidden={!approvalOpen}>
+        <div className={`approval-panel ${approvalOpen ? 'open' : ''}`} onClick={(e) => e.stopPropagation()} aria-label="Approval queue">
+          <ApprovalPanel
+            queue={queue}
+            resolved={resolved}
+            currentId={data?.decision?.id}
+            evidence={data?.evidence}
+            busyId={busyId}
+            onApprove={(id) => resolve(id, 'approve')}
+            onReject={(id) => resolve(id, 'reject')}
+          />
+        </div>
+      </div>
+
+      <MenuDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        data={data}
+        scenarioMode={scenarioMode}
+        onScenario={selectScenario}
+        onReload={() => {
+          setReloadKey((v) => v + 1)
+          setMenuOpen(false)
+        }}
+      />
     </div>
   )
 }

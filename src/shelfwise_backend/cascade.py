@@ -24,6 +24,15 @@ from shelfwise_decision_science import (
 )
 from shelfwise_inference import load_inference_config
 
+# Scenario slugs double as the decision's stable identity (see run_golden_cascade /
+# run_critic_rejection_cascade below): the demo has exactly ONE decision per scenario, and every
+# /demo/* call must resolve to that SAME record, never mint a fresh duplicate. `new_id("dec")`
+# used to be called per-request, which spammed the DecisionStore with a new "pending" row on
+# every page load/reload. correlation_id stays random per call - that legitimately identifies
+# "this cascade run", not "this decision".
+_GOLDEN_SCENARIO_ID = "stage4_loadshedding_x_payday_yoghurt"
+_CRITIC_REJECTION_SCENARIO_ID = "critic_rejects_unsupported_supplier_switch"
+
 
 def _supporting_fact(fact: str, value: object, source: str, method: str) -> dict[str, Any]:
     return {"fact": fact, "value": str(value), "source": source, "method": method}
@@ -264,7 +273,7 @@ def run_golden_cascade() -> dict[str, Any]:
     )
 
     decision = Decision(
-        id=new_id("dec"),
+        id=f"dec_{_GOLDEN_SCENARIO_ID}",
         status=DecisionStatus.PENDING,
         action=markdown,
         caused_by=(correlation_id,),
@@ -283,7 +292,7 @@ def run_golden_cascade() -> dict[str, Any]:
 
     return {
         "correlation_id": correlation_id,
-        "scenario": "stage4_loadshedding_x_payday_yoghurt",
+        "scenario": _GOLDEN_SCENARIO_ID,
         "evidence": [item.to_dict() for item in evidence],
         "decision": decision_payload,
         "trace": [span.to_dict() for span in spans],
@@ -402,7 +411,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
     )
 
     decision = Decision(
-        id=new_id("dec"),
+        id=f"dec_{_CRITIC_REJECTION_SCENARIO_ID}",
         status=DecisionStatus.REJECTED,
         action=monitor,
         caused_by=(correlation_id,),
@@ -415,7 +424,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
 
     return {
         "correlation_id": correlation_id,
-        "scenario": "critic_rejects_unsupported_supplier_switch",
+        "scenario": _CRITIC_REJECTION_SCENARIO_ID,
         "evidence": [item.to_dict() for item in evidence],
         "decision": decision_payload,
         "trace": [span.to_dict() for span in spans],

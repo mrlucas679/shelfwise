@@ -52,6 +52,12 @@ class LearningStore:
         with self._lock:
             return [event.to_dict() for event in self._events_by_decision.values()]
 
+    def clear(self) -> None:
+        """Reset test state for the shared, process-wide store."""
+        with self._lock:
+            self._thresholds.clear()
+            self._events_by_decision.clear()
+
     def record_approved_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
         if decision.get("status") != "approved":
             raise ValueError("learning requires an approved decision")
