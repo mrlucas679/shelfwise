@@ -1154,13 +1154,125 @@ input {
   top: 0;
   left: 0;
   bottom: 0;
-  width: min(360px, 92vw);
-  overflow-y: auto;
+  width: min(280px, 82vw); /* a slim side rail, never half the screen */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* the pages inside manage their own scroll */
   background: var(--bg);
   border-right: 1px solid var(--border-strong);
   box-shadow: 24px 0 60px rgba(0, 0, 0, 0.34);
   transform: translateX(-100%);
   transition: transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Two sliding panes, settings-style: the root list and one topic page. */
+.drawer-pages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  width: 200%;
+  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.drawer-pages.show-detail {
+  transform: translateX(-50%);
+}
+
+.drawer-page {
+  width: 50%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.nav-row:hover {
+  background: var(--surface);
+}
+
+.nav-row:active {
+  background: var(--surface-2);
+}
+
+.nav-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.nav-label small {
+  display: block;
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-value {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.nav-chevron {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-top: 1.5px solid var(--mute);
+  border-right: 1.5px solid var(--mute);
+  transform: rotate(45deg);
+}
+
+.nav-chevron.back {
+  border-color: currentColor;
+  transform: rotate(-135deg);
+}
+
+.drawer-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.drawer-back:hover {
+  color: var(--accent);
+}
+
+.drawer-back:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .drawer-scrim.is-open .drawer {
@@ -1265,77 +1377,10 @@ p.snapshot-title {
   font-weight: 400;
 }
 
-/* Signal rows: one summary line each; detail expands on tap (progressive disclosure). */
-.signal-row {
-  border-bottom: 1px solid var(--border);
-}
-
-.signal-row:last-child {
-  border-bottom: 0;
-}
-
-.signal-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 42px;
-  padding: 8px 2px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 120ms ease;
-}
-
-.signal-toggle:hover {
-  background: var(--surface);
-}
-
-.signal-toggle:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-.signal-label {
-  flex: 1;
-  min-width: 0;
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.signal-label small {
-  display: block;
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 400;
-}
-
-.signal-value {
-  flex-shrink: 0;
-  color: var(--text);
-  font-size: 12.5px;
-}
-
-.signal-toggle .why-caret {
-  color: var(--mute);
-  flex-shrink: 0;
-}
-
-.signal-detail {
-  padding: 0 2px 12px;
-}
-
-.signal-detail .kv {
-  margin-top: 0;
-}
-
 .lot-list {
   display: grid;
   gap: 5px;
-  margin: 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
 }

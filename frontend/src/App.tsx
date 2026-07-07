@@ -807,21 +807,31 @@ function UserBubble({ text }: { text: string }) {
 // ---------------------------------------------------------------------------
 // Ops menu drawer (everything that is NOT the conversation)
 // ---------------------------------------------------------------------------
-/** One summary line per signal; the story behind the number expands only on tap. */
-function SignalRow({ label, sku, value, children }: { label: string; sku?: string; value: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+/** Settings-style navigation: the root is a compact list that always fits without scrolling;
+ *  each topic opens its own page that slides in over it, with a back control - never
+ *  everything at once. */
+type DrawerPage = 'snapshot' | 'batch' | 'delivery' | 'transfer' | 'outcomes' | 'dev'
+
+const DRAWER_PAGES: Record<DrawerPage, string> = {
+  snapshot: 'Store snapshot',
+  batch: 'Urgent batch',
+  delivery: 'Delivery',
+  transfer: 'Transfer',
+  outcomes: 'Outcomes',
+  // Compile-time guarded so the label is stripped from production bundles with the page itself.
+  dev: import.meta.env.DEV ? 'Developer' : '',
+}
+
+function NavRow({ label, sku, value, onOpen }: { label: string; sku?: string; value: string; onOpen: () => void }) {
   return (
-    <div className="signal-row">
-      <button className="signal-toggle" type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="signal-label">
-          {label}
-          {sku ? <small>{humanizeOperationalText(sku)}</small> : null}
-        </span>
-        <span className="signal-value tnum">{value}</span>
-        <span className={`why-caret ${open ? 'is-open' : ''}`} aria-hidden />
-      </button>
-      {open ? <div className="signal-detail">{children}</div> : null}
-    </div>
+    <button className="nav-row" type="button" onClick={onOpen}>
+      <span className="nav-label">
+        {label}
+        {sku ? <small>{humanizeOperationalText(sku)}</small> : null}
+      </span>
+      <span className="nav-value tnum">{value}</span>
+      <span className="nav-chevron" aria-hidden />
+    </button>
   )
 }
 
@@ -847,198 +857,248 @@ function MenuDrawer({
   const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
   const lesson = intel?.learning_summary?.lesson
   const batches = intel?.batch_split?.fefo_batches ?? []
+  const [page, setPage] = useState<DrawerPage | null>(null)
+  const backRef = useRef<HTMLButtonElement | null>(null)
+  // Reopening always starts at the root list; entering a page moves focus to the back control.
+  useEffect(() => {
+    if (!open) setPage(null)
+  }, [open])
+  useEffect(() => {
+    if (page) backRef.current?.focus()
+  }, [page])
   return (
     <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="operations-drawer-title" onClick={(e) => e.stopPropagation()}>
+      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Operations menu" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
-          <span className="drawer-title" id="operations-drawer-title">Operations</span>
+          {page ? (
+            <button className="drawer-back" type="button" ref={backRef} onClick={() => setPage(null)}>
+              <span className="nav-chevron back" aria-hidden />
+              Operations
+            </button>
+          ) : (
+            <span className="drawer-title">Operations</span>
+          )}
           <button className="icon-btn" type="button" aria-label="Close menu" onClick={onClose}>
             <UiIcon name="close" />
           </button>
         </div>
 
-        <section className="rail-section">
-          <div className="section-kicker">Store snapshot</div>
-          {seed ? (
-            <>
-              <p className="snapshot-title">
-                {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
-                {seed.category ? <span className="snapshot-cat"> · {seed.category}</span> : null}
-              </p>
-              <dl className="kv">
-                <div>
-                  <dt>On hand</dt>
-                  <dd className="tnum">{formatValue(seed.units_on_hand)} units</dd>
-                </div>
-                <div>
-                  <dt>Reorder at</dt>
-                  <dd className="tnum">{formatValue(seed.reorder_point)}</dd>
-                </div>
-                <div>
-                  <dt>Expires in</dt>
-                  <dd className={`tnum ${seed.days_to_expiry != null && seed.days_to_expiry <= 3 ? 'tone-warn' : ''}`}>
-                    {seed.days_to_expiry != null ? `${seed.days_to_expiry} days` : '-'}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Supplier</dt>
-                  <dd className="tnum">
-                    {seed.supplier ?? '-'}
-                    {seed.supplier_lead_time_days ? `, ${Math.round(Number(seed.supplier_lead_time_days))}d lead` : ''}
-                  </dd>
-                </div>
-              </dl>
-            </>
-          ) : (
-            <p className="muted">No snapshot available.</p>
-          )}
-        </section>
-
-        {intel ? (
-          <section className="rail-section">
-            <div className="section-kicker">Store signals</div>
-            {intel.batch_split ? (
-              <SignalRow
+        <div className={`drawer-pages ${page ? 'show-detail' : ''}`}>
+          <nav className="drawer-page" aria-hidden={page != null}>
+            <NavRow
+              label="Snapshot"
+              sku={seed?.product_name ?? seed?.sku}
+              value={seed?.units_on_hand != null ? `${seed.units_on_hand} on hand` : '-'}
+              onOpen={() => setPage('snapshot')}
+            />
+            {intel?.batch_split ? (
+              <NavRow
                 label="Urgent batch"
                 sku={intel.batch_split.sku}
                 value={`${formatValue(intel.batch_split.priority_sell_units)} units`}
-              >
-                {batches.length > 0 ? (
-                  <ul className="lot-list">
-                    {batches.map((b, i) => (
-                      <li className="lot-row" key={b.lot ?? i}>
-                        <span className="lot-id tnum">{b.lot ?? '-'}</span>
-                        <span className="tnum">{formatValue(b.units)} units</span>
-                        <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
-                        <span
-                          className={`lot-status tone-${
-                            b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
-                          }`}
-                        >
-                          {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted">{humanizeOperationalText(intel.batch_split.conclusion ?? 'No batch detail available.')}</p>
-                )}
-              </SignalRow>
+                onOpen={() => setPage('batch')}
+              />
             ) : null}
-            {intel.delivery_reconciliation ? (
-              <SignalRow
-                label="Delivery missing"
+            {intel?.delivery_reconciliation ? (
+              <NavRow
+                label="Delivery"
                 sku={intel.delivery_reconciliation.sku}
-                value={`${formatValue(intel.delivery_reconciliation.missing_units)} units`}
-              >
-                <dl className="kv">
-                  <div>
-                    <dt>Ordered</dt>
-                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.ordered_units)}</dd>
-                  </div>
-                  <div>
-                    <dt>Received</dt>
-                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.received_units)}</dd>
-                  </div>
-                  <div>
-                    <dt>Accepted</dt>
-                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.accepted_units)}</dd>
-                  </div>
-                  <div>
-                    <dt>Short dated</dt>
-                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.short_dated_units)}</dd>
-                  </div>
-                  <div>
-                    <dt>Fill rate</dt>
-                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.supplier_fill_rate)}</dd>
-                  </div>
-                </dl>
-                {intel.delivery_reconciliation.conclusion ? (
-                  <p className="muted">{humanizeOperationalText(intel.delivery_reconciliation.conclusion)}</p>
-                ) : null}
-              </SignalRow>
+                value={`${formatValue(intel.delivery_reconciliation.missing_units)} missing`}
+                onOpen={() => setPage('delivery')}
+              />
             ) : null}
-            {intel.supplier_cover ? (
-              <SignalRow
-                label="Transfer now"
+            {intel?.supplier_cover ? (
+              <NavRow
+                label="Transfer"
                 sku={intel.supplier_cover.sku}
                 value={`${formatValue(intel.supplier_cover.transfer_units_recommended)} units`}
-              >
-                <dl className="kv">
-                  <div>
-                    <dt>Days of supply</dt>
-                    <dd className="tnum">{formatValue(intel.supplier_cover.days_of_supply)}</dd>
-                  </div>
-                  <div>
-                    <dt>Gap before delivery</dt>
-                    <dd className="tnum">{formatValue(intel.supplier_cover.gap_before_delivery_units)}</dd>
-                  </div>
-                </dl>
-                {intel.supplier_cover.conclusion ? (
-                  <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
+                onOpen={() => setPage('transfer')}
+              />
+            ) : null}
+            {recoveredToday || lesson ? (
+              <NavRow label="Outcomes" value={recoveredToday ?? '1 lesson'} onOpen={() => setPage('outcomes')} />
+            ) : null}
+            {import.meta.env.DEV ? (
+              /* Development-only diagnostics: scenario switching and pipeline internals never ship to users. */
+              <NavRow label="Developer" value={formatLabel(data?.inference?.provider ?? 'offline')} onOpen={() => setPage('dev')} />
+            ) : null}
+          </nav>
+
+          <div className="drawer-page" aria-hidden={page == null}>
+            {page ? (
+              <section className={`rail-section ${page === 'dev' ? 'dev-section' : ''}`}>
+                <div className="section-kicker">{DRAWER_PAGES[page]}</div>
+
+                {page === 'snapshot' ? (
+                  seed ? (
+                    <>
+                      <p className="snapshot-title">
+                        {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
+                        {seed.category ? <span className="snapshot-cat"> · {seed.category}</span> : null}
+                      </p>
+                      <dl className="kv">
+                        <div>
+                          <dt>On hand</dt>
+                          <dd className="tnum">{formatValue(seed.units_on_hand)} units</dd>
+                        </div>
+                        <div>
+                          <dt>Reorder at</dt>
+                          <dd className="tnum">{formatValue(seed.reorder_point)}</dd>
+                        </div>
+                        <div>
+                          <dt>Expires in</dt>
+                          <dd className={`tnum ${seed.days_to_expiry != null && seed.days_to_expiry <= 3 ? 'tone-warn' : ''}`}>
+                            {seed.days_to_expiry != null ? `${seed.days_to_expiry} days` : '-'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Supplier</dt>
+                          <dd className="tnum">
+                            {seed.supplier ?? '-'}
+                            {seed.supplier_lead_time_days ? `, ${Math.round(Number(seed.supplier_lead_time_days))}d lead` : ''}
+                          </dd>
+                        </div>
+                      </dl>
+                    </>
+                  ) : (
+                    <p className="muted">No snapshot available.</p>
+                  )
                 ) : null}
-              </SignalRow>
-            ) : null}
-          </section>
-        ) : null}
 
-        {recoveredToday || lesson ? (
-          <section className="rail-section">
-            <div className="section-kicker">Outcomes</div>
-            {recoveredToday ? (
-              <p className="outcome-line">
-                <span className="tnum tone-ok">{recoveredToday}</span> recovered today
-              </p>
-            ) : null}
-            {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
-          </section>
-        ) : null}
+                {page === 'batch' ? (
+                  <>
+                    {batches.length > 0 ? (
+                      <ul className="lot-list">
+                        {batches.map((b, i) => (
+                          <li className="lot-row" key={b.lot ?? i}>
+                            <span className="lot-id tnum">{b.lot ?? '-'}</span>
+                            <span className="tnum">{formatValue(b.units)} units</span>
+                            <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
+                            <span
+                              className={`lot-status tone-${
+                                b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
+                              }`}
+                            >
+                              {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {intel?.batch_split?.conclusion || batches.length === 0 ? (
+                      <p className="muted">
+                        {humanizeOperationalText(intel?.batch_split?.conclusion ?? 'No batch detail available.')}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
 
-        {import.meta.env.DEV ? (
-          /* Development-only diagnostics: scenario switching and pipeline internals never ship to users. */
-          <section className="rail-section dev-section">
-            <div className="section-kicker">Developer</div>
-            <div className="scenario-switch">
-              <button
-                className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
-                type="button"
-                aria-pressed={scenarioMode === 'approval'}
-                onClick={() => onScenario('approval')}
-              >
-                Approval
-              </button>
-              <button
-                className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
-                type="button"
-                aria-pressed={scenarioMode === 'critic'}
-                onClick={() => onScenario('critic')}
-              >
-                Critic rejection
-              </button>
-            </div>
-            <dl className="kv">
-              <div>
-                <dt>Provider</dt>
-                <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
-              </div>
-              <div>
-                <dt>Trace</dt>
-                <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
-              </div>
-              <div>
-                <dt>Routed agents</dt>
-                <dd className="tnum">
-                  {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
-                </dd>
-              </div>
-              <div>
-                <dt>Learning score</dt>
-                <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
-              </div>
-            </dl>
-            {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
-          </section>
-        ) : null}
+                {page === 'delivery' ? (
+                  <>
+                    <dl className="kv">
+                      <div>
+                        <dt>Ordered</dt>
+                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.ordered_units)}</dd>
+                      </div>
+                      <div>
+                        <dt>Received</dt>
+                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.received_units)}</dd>
+                      </div>
+                      <div>
+                        <dt>Accepted</dt>
+                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.accepted_units)}</dd>
+                      </div>
+                      <div>
+                        <dt>Short dated</dt>
+                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.short_dated_units)}</dd>
+                      </div>
+                      <div>
+                        <dt>Fill rate</dt>
+                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.supplier_fill_rate)}</dd>
+                      </div>
+                    </dl>
+                    {intel?.delivery_reconciliation?.conclusion ? (
+                      <p className="muted">{humanizeOperationalText(intel.delivery_reconciliation.conclusion)}</p>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {page === 'transfer' ? (
+                  <>
+                    <dl className="kv">
+                      <div>
+                        <dt>Days of supply</dt>
+                        <dd className="tnum">{formatValue(intel?.supplier_cover?.days_of_supply)}</dd>
+                      </div>
+                      <div>
+                        <dt>Gap before delivery</dt>
+                        <dd className="tnum">{formatValue(intel?.supplier_cover?.gap_before_delivery_units)}</dd>
+                      </div>
+                    </dl>
+                    {intel?.supplier_cover?.conclusion ? (
+                      <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {page === 'outcomes' ? (
+                  <>
+                    {recoveredToday ? (
+                      <p className="outcome-line">
+                        <span className="tnum tone-ok">{recoveredToday}</span> recovered today
+                      </p>
+                    ) : null}
+                    {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
+                  </>
+                ) : null}
+
+                {import.meta.env.DEV && page === 'dev' ? (
+                  <>
+                    <div className="scenario-switch">
+                      <button
+                        className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
+                        type="button"
+                        aria-pressed={scenarioMode === 'approval'}
+                        onClick={() => onScenario('approval')}
+                      >
+                        Approval
+                      </button>
+                      <button
+                        className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
+                        type="button"
+                        aria-pressed={scenarioMode === 'critic'}
+                        onClick={() => onScenario('critic')}
+                      >
+                        Critic rejection
+                      </button>
+                    </div>
+                    <dl className="kv">
+                      <div>
+                        <dt>Provider</dt>
+                        <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
+                      </div>
+                      <div>
+                        <dt>Trace</dt>
+                        <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
+                      </div>
+                      <div>
+                        <dt>Routed agents</dt>
+                        <dd className="tnum">
+                          {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Learning score</dt>
+                        <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
+                      </div>
+                    </dl>
+                    {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
+                  </>
+                ) : null}
+              </section>
+            ) : null}
+          </div>
+        </div>
       </aside>
     </div>
   )
