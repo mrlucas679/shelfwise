@@ -751,16 +751,12 @@ function MenuDrawer({
   data,
   scenarioMode,
   onScenario,
-  onReload,
-  onOpenApprovals,
 }: {
   open: boolean
   onClose: () => void
   data: GoldenDemo | null
   scenarioMode: ScenarioMode
   onScenario: (mode: ScenarioMode) => void
-  onReload: () => void
-  onOpenApprovals: () => void
 }) {
   const intel = data?.store_intelligence
   const trace = data?.trace ?? []
@@ -799,16 +795,6 @@ function MenuDrawer({
             </dl>
           </section>
         ) : null}
-
-        <section className="rail-section">
-          <div className="section-kicker">Today</div>
-          <button className="btn btn-secondary drawer-action" type="button" onClick={onOpenApprovals}>
-            Approvals and history
-          </button>
-          <button className="btn btn-secondary drawer-action" type="button" onClick={onReload}>
-            Refresh data
-          </button>
-        </section>
 
         {import.meta.env.DEV ? (
           /* Development-only diagnostics: scenario switching and pipeline internals never ship to users. */
@@ -1198,14 +1184,6 @@ function App() {
           data={data}
           scenarioMode={scenarioMode}
           onScenario={selectScenario}
-          onReload={() => {
-            setReloadKey((v) => v + 1)
-            setMenuOpen(false)
-          }}
-          onOpenApprovals={() => {
-            setMenuOpen(false)
-            setApprovalOpen(true)
-          }}
         />
       ) : null}
     </div>
