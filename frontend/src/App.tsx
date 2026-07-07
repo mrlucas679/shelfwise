@@ -51,11 +51,62 @@ type InferenceConfig = {
   api_key_present?: boolean
   routing?: { routine_agents?: string[]; strong_agents?: string[] }
 }
+type FefoBatch = {
+  lot?: string
+  units?: number
+  expiry_date?: string
+  days_to_expiry?: number
+  location?: string
+  stock_status?: string
+}
 type StoreIntelligence = {
-  batch_split?: { total_units?: number; priority_sell_units?: number; normal_units?: number; blocked_units?: number; conclusion?: string }
-  delivery_reconciliation?: { missing_units?: number; supplier_fill_rate?: string; conclusion?: string }
-  supplier_cover?: { transfer_units_recommended?: number; recommended_action?: string; conclusion?: string }
-  learning_summary?: { score?: string; lesson?: string }
+  batch_split?: {
+    sku?: string
+    total_units?: number
+    priority_sell_units?: number
+    normal_units?: number
+    blocked_units?: number
+    conclusion?: string
+    fefo_batches?: FefoBatch[]
+  }
+  delivery_reconciliation?: {
+    sku?: string
+    ordered_units?: number
+    asn_units?: number
+    received_units?: number
+    accepted_units?: number
+    rejected_units?: number
+    missing_units?: number
+    over_units?: number
+    short_dated_units?: number
+    supplier_fill_rate?: string
+    status?: string
+    conclusion?: string
+  }
+  supplier_cover?: {
+    sku?: string
+    days_of_supply?: string
+    units_needed_until_delivery?: number
+    gap_before_delivery_units?: number
+    transfer_available_units?: number
+    transfer_units_recommended?: number
+    recommended_action?: string
+    conclusion?: string
+  }
+  learning_summary?: { sku?: string; score?: string; lesson?: string }
+}
+/** /data/seed/summary - the one-product stock card the store is currently working. */
+type SeedSummary = {
+  sku?: string
+  product_name?: string
+  category?: string
+  supplier?: string
+  location?: string
+  units_on_hand?: number
+  reorder_point?: number
+  days_to_expiry?: number
+  supplier_lead_time_days?: string
+  supplier_recent_delay?: boolean
 }
 type GoldenDemo = {
   correlation_id?: string
@@ -174,6 +225,17 @@ function formatMoneyish(value: unknown): string | null {
   if (typeof value === 'string') {
     const m = value.match(/^\s*(?:ZAR|R)\s*([\d,]+(?:\.\d+)?)\s*$/i)
     if (m) return `R${Math.round(Number(m[1].replace(/,/g, ''))).toLocaleString('en-ZA')}`
+  }
+  return null
+}
+function moneyMinorUnits(value: unknown): number | null {
+  if (value && typeof value === 'object') {
+    const m = value as { minor_units?: number }
+    if (typeof m.minor_units === 'number') return m.minor_units
+  }
+  if (typeof value === 'string') {
+    const m = value.match(/^\s*(?:ZAR|R)\s*([\d,]+(?:\.\d+)?)\s*$/i)
+    if (m) return Math.round(Number(m[1].replace(/,/g, '')) * 100)
   }
   return null
 }
@@ -745,22 +807,46 @@ function UserBubble({ text }: { text: string }) {
 // ---------------------------------------------------------------------------
 // Ops menu drawer (everything that is NOT the conversation)
 // ---------------------------------------------------------------------------
+/** One summary line per signal; the story behind the number expands only on tap. */
+function SignalRow({ label, sku, value, children }: { label: string; sku?: string; value: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="signal-row">
+      <button className="signal-toggle" type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="signal-label">
+          {label}
+          {sku ? <small>{humanizeOperationalText(sku)}</small> : null}
+        </span>
+        <span className="signal-value tnum">{value}</span>
+        <span className={`why-caret ${open ? 'is-open' : ''}`} aria-hidden />
+      </button>
+      {open ? <div className="signal-detail">{children}</div> : null}
+    </div>
+  )
+}
+
 function MenuDrawer({
   open,
   onClose,
   data,
+  seed,
+  recoveredToday,
   scenarioMode,
   onScenario,
 }: {
   open: boolean
   onClose: () => void
   data: GoldenDemo | null
+  seed: SeedSummary | null
+  recoveredToday: string | null
   scenarioMode: ScenarioMode
   onScenario: (mode: ScenarioMode) => void
 }) {
   const intel = data?.store_intelligence
   const trace = data?.trace ?? []
   const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
+  const lesson = intel?.learning_summary?.lesson
+  const batches = intel?.batch_split?.fefo_batches ?? []
   return (
     <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose}>
       <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="operations-drawer-title" onClick={(e) => e.stopPropagation()}>
@@ -771,28 +857,140 @@ function MenuDrawer({
           </button>
         </div>
 
+        <section className="rail-section">
+          <div className="section-kicker">Store snapshot</div>
+          {seed ? (
+            <>
+              <p className="snapshot-title">
+                {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
+                {seed.category ? <span className="snapshot-cat"> · {seed.category}</span> : null}
+              </p>
+              <dl className="kv">
+                <div>
+                  <dt>On hand</dt>
+                  <dd className="tnum">{formatValue(seed.units_on_hand)} units</dd>
+                </div>
+                <div>
+                  <dt>Reorder at</dt>
+                  <dd className="tnum">{formatValue(seed.reorder_point)}</dd>
+                </div>
+                <div>
+                  <dt>Expires in</dt>
+                  <dd className={`tnum ${seed.days_to_expiry != null && seed.days_to_expiry <= 3 ? 'tone-warn' : ''}`}>
+                    {seed.days_to_expiry != null ? `${seed.days_to_expiry} days` : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Supplier</dt>
+                  <dd className="tnum">
+                    {seed.supplier ?? '-'}
+                    {seed.supplier_lead_time_days ? `, ${Math.round(Number(seed.supplier_lead_time_days))}d lead` : ''}
+                  </dd>
+                </div>
+              </dl>
+            </>
+          ) : (
+            <p className="muted">No snapshot available.</p>
+          )}
+        </section>
+
         {intel ? (
           <section className="rail-section">
             <div className="section-kicker">Store signals</div>
-            <p className="muted">{humanizeOperationalText(intel.batch_split?.conclusion ?? 'Batch-level stock proof.')}</p>
-            <dl className="kv">
-              <div>
-                <dt>Urgent batch</dt>
-                <dd className="tnum">{formatValue(intel.batch_split?.priority_sell_units)}</dd>
-              </div>
-              <div>
-                <dt>Delivery missing</dt>
-                <dd className="tnum">{formatValue(intel.delivery_reconciliation?.missing_units)}</dd>
-              </div>
-              <div>
-                <dt>Transfer now</dt>
-                <dd className="tnum">{formatValue(intel.supplier_cover?.transfer_units_recommended)}</dd>
-              </div>
-              <div>
-                <dt>Fill rate</dt>
-                <dd className="tnum">{formatValue(intel.delivery_reconciliation?.supplier_fill_rate)}</dd>
-              </div>
-            </dl>
+            {intel.batch_split ? (
+              <SignalRow
+                label="Urgent batch"
+                sku={intel.batch_split.sku}
+                value={`${formatValue(intel.batch_split.priority_sell_units)} units`}
+              >
+                {batches.length > 0 ? (
+                  <ul className="lot-list">
+                    {batches.map((b, i) => (
+                      <li className="lot-row" key={b.lot ?? i}>
+                        <span className="lot-id tnum">{b.lot ?? '-'}</span>
+                        <span className="tnum">{formatValue(b.units)} units</span>
+                        <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
+                        <span
+                          className={`lot-status tone-${
+                            b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
+                          }`}
+                        >
+                          {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">{humanizeOperationalText(intel.batch_split.conclusion ?? 'No batch detail available.')}</p>
+                )}
+              </SignalRow>
+            ) : null}
+            {intel.delivery_reconciliation ? (
+              <SignalRow
+                label="Delivery missing"
+                sku={intel.delivery_reconciliation.sku}
+                value={`${formatValue(intel.delivery_reconciliation.missing_units)} units`}
+              >
+                <dl className="kv">
+                  <div>
+                    <dt>Ordered</dt>
+                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.ordered_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Received</dt>
+                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.received_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Accepted</dt>
+                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.accepted_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Short dated</dt>
+                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.short_dated_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Fill rate</dt>
+                    <dd className="tnum">{formatValue(intel.delivery_reconciliation.supplier_fill_rate)}</dd>
+                  </div>
+                </dl>
+                {intel.delivery_reconciliation.conclusion ? (
+                  <p className="muted">{humanizeOperationalText(intel.delivery_reconciliation.conclusion)}</p>
+                ) : null}
+              </SignalRow>
+            ) : null}
+            {intel.supplier_cover ? (
+              <SignalRow
+                label="Transfer now"
+                sku={intel.supplier_cover.sku}
+                value={`${formatValue(intel.supplier_cover.transfer_units_recommended)} units`}
+              >
+                <dl className="kv">
+                  <div>
+                    <dt>Days of supply</dt>
+                    <dd className="tnum">{formatValue(intel.supplier_cover.days_of_supply)}</dd>
+                  </div>
+                  <div>
+                    <dt>Gap before delivery</dt>
+                    <dd className="tnum">{formatValue(intel.supplier_cover.gap_before_delivery_units)}</dd>
+                  </div>
+                </dl>
+                {intel.supplier_cover.conclusion ? (
+                  <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
+                ) : null}
+              </SignalRow>
+            ) : null}
+          </section>
+        ) : null}
+
+        {recoveredToday || lesson ? (
+          <section className="rail-section">
+            <div className="section-kicker">Outcomes</div>
+            {recoveredToday ? (
+              <p className="outcome-line">
+                <span className="tnum tone-ok">{recoveredToday}</span> recovered today
+              </p>
+            ) : null}
+            {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
           </section>
         ) : null}
 
@@ -934,6 +1132,7 @@ function ThemeToggle() {
 function App() {
   const [data, setData] = useState<GoldenDemo | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
+  const [seed, setSeed] = useState<SeedSummary | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -954,6 +1153,17 @@ function App() {
     return Array.from(byId.values()).filter((d) => (d.status ?? 'pending').toLowerCase() !== 'pending')
   }, [decisions, data])
 
+  // Value recovered by decisions resolved today - one honest number, summed from real outcomes.
+  const recoveredToday = useMemo(() => {
+    let cents = 0
+    for (const d of resolved) {
+      if (dayLabel(d.updated_at ?? d.created_at) !== 'Today') continue
+      const minor = moneyMinorUnits(d.outcome?.rand_recovered)
+      if (minor && minor > 0) cents += minor
+    }
+    return cents > 0 ? `R${Math.round(cents / 100).toLocaleString('en-ZA')}` : null
+  }, [resolved])
+
   useEffect(() => {
     const controller = new AbortController()
     setLoadState('loading')
@@ -966,9 +1176,17 @@ function App() {
       } catch {
         /* decision log optional */
       }
+      let seedData: SeedSummary | null = null
+      try {
+        const summary = await fetchJson<{ seed_data?: SeedSummary }>('/data/seed/summary', { method: 'GET' }, controller.signal)
+        seedData = summary.seed_data ?? null
+      } catch {
+        /* snapshot optional */
+      }
       if (controller.signal.aborted) return
       setData(payload)
       setDecisions(log)
+      setSeed(seedData)
       const pending = pendingQueue(log, payload.decision)
       const greeting =
         pending.length === 0
@@ -1182,6 +1400,8 @@ function App() {
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
           data={data}
+          seed={seed}
+          recoveredToday={recoveredToday}
           scenarioMode={scenarioMode}
           onScenario={selectScenario}
         />

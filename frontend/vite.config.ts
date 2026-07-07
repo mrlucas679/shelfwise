@@ -13,6 +13,8 @@ export default defineConfig({
     proxy: {
       '/demo': backend,
       '/decisions': backend,
+      '/data': backend,
+      '/learning': backend,
       '/health': backend,
       '/readiness': backend,
       '/inference': backend,

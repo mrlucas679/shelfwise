@@ -1249,6 +1249,126 @@ input {
   overflow-wrap: anywhere;
 }
 
+.kv dd.tone-warn {
+  color: var(--warn);
+}
+
+p.snapshot-title {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.snapshot-title .snapshot-cat {
+  color: var(--mute);
+  font-weight: 400;
+}
+
+/* Signal rows: one summary line each; detail expands on tap (progressive disclosure). */
+.signal-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.signal-row:last-child {
+  border-bottom: 0;
+}
+
+.signal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.signal-toggle:hover {
+  background: var(--surface);
+}
+
+.signal-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.signal-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.signal-label small {
+  display: block;
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.signal-value {
+  flex-shrink: 0;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.signal-toggle .why-caret {
+  color: var(--mute);
+  flex-shrink: 0;
+}
+
+.signal-detail {
+  padding: 0 2px 12px;
+}
+
+.signal-detail .kv {
+  margin-top: 0;
+}
+
+.lot-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11.5px;
+}
+
+.lot-id {
+  overflow: hidden;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lot-status {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: right;
+}
+
+p.outcome-line {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
