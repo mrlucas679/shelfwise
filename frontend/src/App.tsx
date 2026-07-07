@@ -510,7 +510,9 @@ function DecisionCard({
   const confirmText =
     pendingChoice === 'approve'
       ? `This can't be undone. "${actionLabel}" will be applied now.`
-      : "This can't be undone. Removes this recommendation from the queue."
+      : pendingChoice === 'reject'
+        ? "This can't be undone. Removes this recommendation from the queue."
+        : null
 
   return (
     <article className="decision-card" style={{ '--rail': toneVar[tone] } as CSSProperties}>
@@ -539,25 +541,27 @@ function DecisionCard({
               </button>
             ) : null}
           </div>
-          <div className={`dc-confirm ${pendingChoice ? 'show' : ''}`}>
-            <p className="dc-confirm-msg">{confirmText}</p>
-            <div className="dc-confirm-actions">
-              <button
-                className={`confirm-yes ${pendingChoice === 'reject' ? 'reject-tone' : ''}`}
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  if (pendingChoice === 'approve') onApprove(decision.id!)
-                  else if (pendingChoice === 'reject') onReject(decision.id!)
-                }}
-              >
-                {busy ? 'Working…' : pendingChoice === 'approve' ? 'Yes, apply it' : 'Yes, reject it'}
-              </button>
-              <button className="confirm-cancel" type="button" onClick={() => setPendingChoice(null)}>
-                Cancel
-              </button>
+          {pendingChoice && confirmText ? (
+            <div className="dc-confirm show">
+              <p className="dc-confirm-msg">{confirmText}</p>
+              <div className="dc-confirm-actions">
+                <button
+                  className={`confirm-yes ${pendingChoice === 'reject' ? 'reject-tone' : ''}`}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (pendingChoice === 'approve') onApprove(decision.id!)
+                    else if (pendingChoice === 'reject') onReject(decision.id!)
+                  }}
+                >
+                  {busy ? 'Working…' : pendingChoice === 'approve' ? 'Yes, apply it' : 'Yes, reject it'}
+                </button>
+                <button className="confirm-cancel" type="button" onClick={() => setPendingChoice(null)}>
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </>
       ) : (
         <div className="dc-actions">
