@@ -77,6 +77,7 @@ type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
 // embedded as an interactive card inside a message (that was duplicate UI: the same pending
 // decision rendered twice, in two different places, with two different ways to act on it).
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
+type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
 // ---------------------------------------------------------------------------
 // API
@@ -147,6 +148,24 @@ async function postTransition(id: string, transition: 'approve' | 'reject', sign
 function formatLabel(value: unknown): string {
   return String(value ?? 'unknown').replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
+const SKU_LABELS: Record<string, string> = {
+  milk_2l: '2L milk',
+  yoghurt_1l: '1L yoghurt',
+}
+const SOURCE_LABELS: Record<string, string> = {
+  seed_stock: 'Stock ledger',
+  seed_sales: 'Sales history',
+  load_shedding: 'Load-shedding schedule',
+  simulate_markdown: 'Markdown simulation',
+  critic_gate: 'Critic gate',
+  executive_policy: 'Executive policy',
+  seed_suppliers: 'Supplier file',
+}
+function humanizeOperationalText(value: unknown): string {
+  return String(value ?? '').replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, (match) => {
+    return SKU_LABELS[match] ?? match.replace(/_/g, ' ')
+  })
+}
 function formatMoneyish(value: unknown): string | null {
   if (value && typeof value === 'object') {
     const m = value as { minor_units?: number }
@@ -178,7 +197,13 @@ function confidencePct(value: string | number | undefined): number {
   return Math.max(0, Math.min(100, Math.round((n > 1 ? n / 100 : n) * 100)))
 }
 function formatSource(source: SourceRef): string {
-  return `${source.ref ?? 'unknown'}${source.locator ? `#${source.locator}` : ''}`
+  const ref = source.ref ?? 'unknown'
+  return SOURCE_LABELS[ref] ?? formatLabel(ref)
+}
+function formatFactSource(value: unknown): string {
+  if (!value) return '-'
+  const ref = String(value).split('#')[0]
+  return SOURCE_LABELS[ref] ?? formatLabel(ref)
 }
 function riskTone(tier?: string): Tone {
   const t = (tier ?? '').toLowerCase()
@@ -205,12 +230,11 @@ function sortByTimeDesc(decisions: Decision[]): Decision[] {
   return [...(Array.isArray(decisions) ? decisions : [])].sort((a, b) => key(b) - key(a))
 }
 
-const GLYPH: Record<Tone, string> = { ok: '●', warn: '◆', risk: '▲', info: '■', mute: '◐', accent: '●' }
 const toneVar: Record<Tone, string> = {
   ok: 'var(--ok)', warn: 'var(--warn)', risk: 'var(--risk)', info: 'var(--info)', mute: 'var(--mute)', accent: 'var(--accent)',
 }
 
-/** Which AI agent raised this decision - used to group/rank the approval stack. */
+/** Which agent raised this decision - used to group/rank the approval stack. */
 function agencyForAction(action?: RecommendedAction): string {
   const t = (action?.type ?? '').toLowerCase()
   if (t.includes('markdown') || t.includes('bundle')) return 'Expiry'
@@ -238,9 +262,12 @@ function describeAction(action?: RecommendedAction): string {
   const discount = action.params?.discount_pct
   const pct =
     typeof discount === 'string' || typeof discount === 'number'
-      ? ` ${Math.round((Number(discount) > 1 ? Number(discount) / 100 : Number(discount)) * 100)}%`
+      ? `${Math.round((Number(discount) > 1 ? Number(discount) / 100 : Number(discount)) * 100)}%`
       : ''
-  return `${formatLabel(action.type)}${pct}`
+  if (action.type === 'apply_markdown') return pct ? `Apply ${pct} markdown` : 'Apply markdown'
+  if (action.type === 'monitor') return 'Monitor only'
+  if (action.type === 'supplier_switch') return 'Switch supplier'
+  return formatLabel(action.type)
 }
 function firstActionEvidence(evidence?: EvidenceObject[], actionType?: string): EvidenceObject | undefined {
   const items = evidence ?? []
@@ -263,7 +290,7 @@ function moneyAtRisk(evidence?: EvidenceObject[]): string | null {
 }
 function whyLine(decision: Decision, evidence?: EvidenceObject[]): string {
   const ev = firstActionEvidence(evidence, decision.action?.type)
-  return ev?.conclusion ?? decision.summary ?? 'Recommended by the ShelfWise cascade.'
+  return humanizeOperationalText(ev?.conclusion ?? decision.summary ?? 'Recommended by the ShelfWise cascade.')
 }
 
 /** Demo intent-matching. Real streaming /chat is the follow-up; this never fabricates numbers.
@@ -272,19 +299,19 @@ function replyFor(text: string, data: GoldenDemo | null, pending: Decision[]): s
   const q = text.toLowerCase()
   if (/approv|decision|today|queue|pending|what.*do/.test(q)) {
     return pending.length
-      ? `${pending.length} decision${pending.length > 1 ? 's' : ''} waiting, most urgent first — tap the bar above to review.`
-      : 'Nothing needs approval right now — the queue is clear.'
+      ? `${pending.length} approval${pending.length > 1 ? 's' : ''} waiting. Open the status bar to review the evidence.`
+      : 'Queue clear. No approvals are waiting.'
   }
   if (/risk|waste|expir|cold|fridge|warm|spoil/.test(q)) {
     const ev = firstActionEvidence(data?.evidence)
     const atRisk = moneyAtRisk(data?.evidence)
-    const base = ev?.conclusion ?? 'Nothing is flagged at risk right now.'
+    const base = humanizeOperationalText(ev?.conclusion ?? 'Nothing is flagged at risk right now.')
     return atRisk ? `${base} About ${atRisk} of stock is exposed.` : base
   }
   if (/why|reason|explain|how/.test(q)) {
-    return 'Tap the bar above, then “Why?” on any decision, to see the agent chain and the numbers behind it.'
+    return 'Open the status bar, then choose Why? on a decision to see the agent chain and numbers.'
   }
-  return 'I can show what needs approval today, what’s at risk, or the reasoning behind a decision — just ask.'
+  return 'Ask about approvals, stock risk, deliveries, or evidence.'
 }
 
 /** Local calendar-day label for grouping the receipt timeline ("Today", "Yesterday", or a date). */
@@ -307,9 +334,9 @@ function receiptDetail(decision: Decision): string {
     const recovered = formatMoneyish(outcome.rand_recovered)
     if (recovered) parts.push(`${recovered} recovered`)
     if (outcome.success_score) parts.push(`score ${outcome.success_score}`)
-    if (parts.length) return parts.join(' · ')
+    if (parts.length) return parts.join(', ')
   }
-  return decision.summary ?? 'No further detail recorded.'
+  return humanizeOperationalText(decision.summary ?? 'No further detail recorded.')
 }
 
 let msgSeq = 0
@@ -376,12 +403,13 @@ function useVoiceInput(onText: (text: string) => void) {
 function StatusGlyph({ tone, label }: { tone: Tone; label: string }) {
   return (
     <span className={`glyph tone-${tone}`}>
-      <span className="glyph-shape" aria-hidden>
-        {GLYPH[tone]}
-      </span>
+      <span className={`glyph-shape tone-${tone}`} aria-hidden />
       <span>{label}</span>
     </span>
   )
+}
+function UiIcon({ name }: { name: UiIconName }) {
+  return <span className={`ui-icon ui-icon-${name}`} aria-hidden />
 }
 function Confidence({ value }: { value: string | number | undefined }) {
   const pct = confidencePct(value)
@@ -427,6 +455,9 @@ function Reasoning({ evidence }: { evidence: EvidenceObject[] }) {
       <ol className="why-chain">
         {evidence.map((item, index) => {
           const tone = riskTone(item.recommended_action?.risk_tier)
+          const detailFacts = selected?.supporting_data ?? []
+          const factSourceLabels = new Set(detailFacts.map((fact) => formatFactSource(fact.source ?? fact.method)).filter((label) => label !== '-'))
+          const sourceLabels = Array.from(new Set((selected?.sources ?? []).map(formatSource).filter((label) => !factSourceLabels.has(label))))
           return (
             <li key={`${item.agent ?? 'a'}-${index}`}>
               <button
@@ -435,35 +466,33 @@ function Reasoning({ evidence }: { evidence: EvidenceObject[] }) {
                 aria-expanded={index === active}
                 onClick={() => setActive(index)}
               >
-                <span className={`glyph-shape tone-${tone}`} aria-hidden>
-                  {GLYPH[tone]}
-                </span>
+                <span className={`glyph-shape tone-${tone}`} aria-hidden />
                 <span className="why-step-text">
                   <span>{formatLabel(item.agent)}</span>
-                  <small>{item.conclusion ?? 'No conclusion.'}</small>
+                  <small>{humanizeOperationalText(item.conclusion ?? 'No conclusion.')}</small>
                 </span>
                 <Confidence value={item.confidence} />
               </button>
               {index === active ? (
                 <div className="why-detail" style={{ '--rail': toneVar[tone] } as CSSProperties}>
-                  {(selected?.supporting_data ?? []).length > 0 ? (
+                  {detailFacts.length > 0 ? (
                     <dl className="facts">
-                      {(selected?.supporting_data ?? []).map((f, i) => (
+                      {detailFacts.map((f, i) => (
                         <div className="fact-row" key={`${f.fact ?? 'f'}-${i}`}>
                           <dt>{formatLabel(f.fact ?? f.method ?? 'Fact')}</dt>
                           <dd className="fact-value tnum">{formatValue(f.value)}</dd>
-                          <dd className="fact-source">{f.source ?? f.method ?? '-'}</dd>
+                          <dd className="fact-source">{formatFactSource(f.source ?? f.method)}</dd>
                         </div>
                       ))}
                     </dl>
                   ) : (
                     <p className="why-empty">No supporting facts for this step.</p>
                   )}
-                  {(selected?.sources ?? []).length > 0 ? (
+                  {sourceLabels.length > 0 ? (
                     <p className="source-line">
-                      {(selected?.sources ?? []).map((s, i) => (
-                        <span key={`${s.ref ?? 's'}-${i}`} title={s.kind}>
-                          {formatSource(s)}
+                      {sourceLabels.map((label, i) => (
+                        <span key={`${label}-${i}`}>
+                          {label}
                         </span>
                       ))}
                     </p>
@@ -495,8 +524,8 @@ function DecisionCard({
   onReject: (id: string) => void
 }) {
   const [why, setWhy] = useState(false)
-  // Confirm-before-acting gate: clicking Approve/Reject never fires the API call directly. It morphs
-  // the buttons into a plain-text "this can't be undone" warning with explicit Yes/Cancel first -
+  // Confirm-before-acting gate: clicking Approve/Reject never fires the API call directly. It swaps
+  // the buttons for a plain-text warning with explicit Yes/Cancel first -
   // irreversible actions on a real ops tool need a deliberate second step, not a single fat-finger tap.
   const [pendingChoice, setPendingChoice] = useState<'approve' | 'reject' | null>(null)
   const action = decision.action
@@ -509,9 +538,9 @@ function DecisionCard({
 
   const confirmText =
     pendingChoice === 'approve'
-      ? `This can't be undone. "${actionLabel}" will be applied now.`
+      ? `This action cannot be undone. "${actionLabel}" will be applied now.`
       : pendingChoice === 'reject'
-        ? "This can't be undone. Removes this recommendation from the queue."
+        ? 'This action cannot be undone. This recommendation will leave the queue.'
         : null
 
   return (
@@ -528,19 +557,6 @@ function DecisionCard({
 
       {pending ? (
         <>
-          <div className={`dc-actions ${pendingChoice ? 'is-hidden' : ''}`}>
-            <button className="btn btn-primary" type="button" disabled={busy} onClick={() => setPendingChoice('approve')}>
-              Approve
-            </button>
-            <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => setPendingChoice('reject')}>
-              Reject
-            </button>
-            {evidence && evidence.length > 0 ? (
-              <button className="btn btn-ghost why-toggle" type="button" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
-                {why ? 'Why? ▾' : 'Why? ▸'}
-              </button>
-            ) : null}
-          </div>
           {pendingChoice && confirmText ? (
             <div className="dc-confirm show">
               <p className="dc-confirm-msg">{confirmText}</p>
@@ -554,21 +570,37 @@ function DecisionCard({
                     else if (pendingChoice === 'reject') onReject(decision.id!)
                   }}
                 >
-                  {busy ? 'Working…' : pendingChoice === 'approve' ? 'Yes, apply it' : 'Yes, reject it'}
+                  {busy ? 'Working...' : pendingChoice === 'approve' ? 'Yes, apply it' : 'Yes, reject it'}
                 </button>
                 <button className="confirm-cancel" type="button" onClick={() => setPendingChoice(null)}>
                   Cancel
                 </button>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="dc-actions">
+              <button className="btn btn-primary" type="button" disabled={busy} onClick={() => setPendingChoice('approve')}>
+                Approve
+              </button>
+              <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => setPendingChoice('reject')}>
+                Reject
+              </button>
+              {evidence && evidence.length > 0 ? (
+                <button className="btn btn-ghost why-toggle" type="button" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
+                  <span>Why?</span>
+                  <span className={`why-caret ${why ? 'is-open' : ''}`} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+          )}
         </>
       ) : (
         <div className="dc-actions">
           <span className={`dc-resolved tone-${statusTone(status)}`}>{formatLabel(status)}</span>
           {evidence && evidence.length > 0 ? (
             <button className="btn btn-ghost why-toggle" type="button" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
-              {why ? 'Why? ▾' : 'Why? ▸'}
+              <span>Why?</span>
+              <span className={`why-caret ${why ? 'is-open' : ''}`} aria-hidden />
             </button>
           ) : null}
         </div>
@@ -586,14 +618,26 @@ function StatusBar({ queue, open, onToggle }: { queue: Decision[]; open: boolean
   const top = queue[0]
   const tone: Tone = top ? riskTone(top.action?.risk_tier) : 'ok'
   const more = queue.length - 1
+  const statusLabel = top ? describeAction(top.action) : 'Queue clear'
+  const statusMeta = top ? (top.action?.risk_tier ?? 'low') : 'clear'
+  const a11yLabel = top
+    ? `Approval queue: ${statusLabel}, ${statusMeta} risk${more > 0 ? `, ${more} more waiting` : ''}.`
+    : 'Approval queue: clear.'
   return (
-    <button className={`statusbar ${open ? 'is-open' : ''}`} type="button" onClick={onToggle}>
+    <button
+      className={`statusbar ${open ? 'is-open' : ''}`}
+      type="button"
+      aria-controls="approval-panel"
+      aria-expanded={open}
+      aria-label={a11yLabel}
+      onClick={onToggle}
+    >
       <span className="statusbar-accent" style={{ background: toneVar[tone] }} aria-hidden />
       <span className="statusbar-main">
-        <span className="statusbar-label">{top ? describeAction(top.action) : 'All caught up'}</span>
+        <span className="statusbar-label">{statusLabel}</span>
         <span className="statusbar-sub">
-          <span className={`tag tone-${tone}`}>{top ? (top.action?.risk_tier ?? 'low') : 'clear'}</span>
-          {more > 0 ? <span>· +{more} more waiting</span> : null}
+          <span className={`tag tone-${tone}`}>{statusMeta}</span>
+          {more > 0 ? <span>{more} more waiting</span> : null}
         </span>
       </span>
       <svg className="chevron" viewBox="0 0 10 6" fill="none" aria-hidden>
@@ -606,14 +650,14 @@ function StatusBar({ queue, open, onToggle }: { queue: Decision[]; open: boolean
 function ReceiptRow({ decision }: { decision: Decision }) {
   const [open, setOpen] = useState(false)
   const tone = statusTone(decision.status)
-  const label = `${formatLabel(decision.status)} — ${describeAction(decision.action)}`
+  const label = `${formatLabel(decision.status)} - ${describeAction(decision.action)}`
   return (
-    <li className={`receipt ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)}>
-      <div className="receipt-top">
+    <li className={`receipt ${open ? 'is-open' : ''}`}>
+      <button className="receipt-toggle" type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className={`receipt-dot tone-${tone}`} aria-hidden />
         <span className="receipt-txt">{label}</span>
         <span className="receipt-time tnum">{decisionTime(decision)}</span>
-      </div>
+      </button>
       {open ? <div className="receipt-detail">{receiptDetail(decision)}</div> : null}
     </li>
   )
@@ -648,7 +692,7 @@ function ApprovalPanel({
     <div className="approval-panel-scroll">
       <div className="section-heading">Needs your approval</div>
       {queue.length === 0 ? (
-        <p className="stack-clear">✓ The approval queue is clear — nothing waiting.</p>
+        <p className="stack-clear">Queue clear. Nothing waiting.</p>
       ) : (
         queue.map((d) => (
           <DecisionCard key={d.id} decision={d} evidence={evidenceFor(d)} busyId={busyId} onApprove={onApprove} onReject={onReject} />
@@ -670,13 +714,13 @@ function ApprovalPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Chat message bubbles — text only. Decisions live in the status bar/panel, never here.
+// Chat message bubbles: text only. Decisions live in the status bar/panel, never here.
 // ---------------------------------------------------------------------------
 function AssistantBubble({ text }: { text: string }) {
   return (
     <div className="row assistant-row">
       <div className="avatar" aria-hidden>
-        ◆
+        <span className="avatar-mark" />
       </div>
       <div className="bubble assistant">
         <div className="speaker">ShelfWise</div>
@@ -715,34 +759,44 @@ function MenuDrawer({
   const trace = data?.trace ?? []
   const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
   return (
-    <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-hidden={!open}>
-      <aside className="drawer" onClick={(e) => e.stopPropagation()} aria-label="Operations menu">
+    <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose}>
+      <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="operations-drawer-title" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
-          <span className="section-kicker">Operations</span>
+          <span className="drawer-title" id="operations-drawer-title">Operations</span>
           <button className="icon-btn" type="button" aria-label="Close menu" onClick={onClose}>
-            ✕
+            <UiIcon name="close" />
           </button>
         </div>
 
         <section className="rail-section">
-          <div className="section-kicker">Demo scenario</div>
+          <div className="section-kicker">Scenario</div>
           <div className="scenario-switch">
-            <button className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`} type="button" onClick={() => onScenario('approval')}>
+            <button
+              className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
+              type="button"
+              aria-pressed={scenarioMode === 'approval'}
+              onClick={() => onScenario('approval')}
+            >
               Approval
             </button>
-            <button className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`} type="button" onClick={() => onScenario('critic')}>
+            <button
+              className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
+              type="button"
+              aria-pressed={scenarioMode === 'critic'}
+              onClick={() => onScenario('critic')}
+            >
               Critic rejection
             </button>
           </div>
           <button className="btn btn-secondary drawer-reload" type="button" onClick={onReload}>
-            Reload cascade
+            Refresh scenario
           </button>
         </section>
 
         {intel ? (
           <section className="rail-section">
-            <div className="section-kicker">Store intelligence</div>
-            <p className="muted">{intel.batch_split?.conclusion ?? 'Batch-level stock proof.'}</p>
+            <div className="section-kicker">Store signals</div>
+            <p className="muted">{humanizeOperationalText(intel.batch_split?.conclusion ?? 'Batch-level stock proof.')}</p>
             <dl className="kv">
               <div>
                 <dt>Urgent batch</dt>
@@ -765,11 +819,11 @@ function MenuDrawer({
         ) : null}
 
         <section className="rail-section">
-          <div className="section-kicker">System · {formatLabel(data?.inference?.provider ?? 'offline')}</div>
+          <div className="section-kicker">System: {formatLabel(data?.inference?.provider ?? 'offline')}</div>
           <dl className="kv">
             <div>
               <dt>Trace</dt>
-              <dd className="tnum">{totalMs}ms · {trace.length} spans</dd>
+              <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
             </div>
             <div>
               <dt>Routed agents</dt>
@@ -778,7 +832,7 @@ function MenuDrawer({
               </dd>
             </div>
           </dl>
-          {data?.learning?.message ? <p className="muted">{data.learning.message}</p> : null}
+          {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
         </section>
       </aside>
     </div>
@@ -788,7 +842,7 @@ function MenuDrawer({
 // ---------------------------------------------------------------------------
 // Composer (text + voice + suggestions)
 // ---------------------------------------------------------------------------
-const SUGGESTIONS = ['What should I approve?', "What's at risk today?"]
+const SUGGESTIONS = ['Approval queue', 'Risk today']
 
 function Composer({ onSend }: { onSend: (text: string) => void }) {
   const [text, setText] = useState('')
@@ -817,21 +871,21 @@ function Composer({ onSend }: { onSend: (text: string) => void }) {
             aria-pressed={voice.listening}
             onClick={() => (voice.listening ? voice.stop() : voice.start())}
           >
-            {voice.listening ? '■' : '🎤'}
+            <UiIcon name={voice.listening ? 'stop' : 'mic'} />
           </button>
         ) : null}
         <input
           className="composer-input"
           value={text}
-          placeholder={voice.listening ? 'Listening…' : 'Ask ShelfWise…'}
+          placeholder={voice.listening ? 'Listening...' : 'Ask ShelfWise...'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') send(text)
           }}
           aria-label="Message ShelfWise"
         />
-        <button className="btn btn-primary send" type="button" onClick={() => send(text)} disabled={!text.trim()}>
-          ➤
+        <button className="btn btn-primary send" type="button" aria-label="Send message" onClick={() => send(text)} disabled={!text.trim()}>
+          <UiIcon name="send" />
         </button>
       </div>
     </div>
@@ -844,14 +898,14 @@ function ThemeToggle() {
     <button
       className="icon-btn"
       type="button"
-      aria-label="Toggle theme"
+      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
       onClick={() => {
         const next: Theme = theme === 'dark' ? 'light' : 'dark'
         applyTheme(next)
         setTheme(next)
       }}
     >
-      {theme === 'dark' ? '☀' : '☾'}
+      <UiIcon name={theme === 'dark' ? 'sun' : 'moon'} />
     </button>
   )
 }
@@ -900,10 +954,10 @@ function App() {
       const pending = pendingQueue(log, payload.decision)
       const greeting =
         pending.length === 0
-          ? 'Good evening. Nothing needs your approval right now — I’ll flag anything the moment it does.'
+          ? "Queue clear. I'll surface exceptions as soon as they appear."
           : pending.length === 1
-            ? 'Good evening. One decision needs you tonight — tap the bar above when you’re ready.'
-            : `Good evening. ${pending.length} decisions need you today, most urgent first — tap the bar above.`
+            ? 'One approval is ready. Open the status bar to review the evidence.'
+            : `${pending.length} approvals are ready. Open the status bar to review highest risk first.`
       setMessages([{ id: newMsgId(), role: 'assistant', text: greeting }])
       setLoadState('ready')
     }
@@ -919,6 +973,15 @@ function App() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
+  useEffect(() => {
+    const closeOverlay = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setApprovalOpen(false)
+      setMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOverlay)
+    return () => window.removeEventListener('keydown', closeOverlay)
+  }, [])
 
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
 
@@ -949,6 +1012,13 @@ function App() {
     postTransition(id, kind, controller.signal)
       .then((result) => {
         const { decision, learning_event } = result
+        const nextById = new Map(decisions.map((item) => [item.id, item]))
+        nextById.set(decision.id, decision)
+        const currentDecision = data?.decision?.id === decision.id ? decision : data?.decision
+        const remaining = pendingQueue(Array.from(nextById.values()), currentDecision)
+        const queueNote = remaining.length === 0
+          ? ' Queue clear.'
+          : ` ${remaining.length} approval${remaining.length > 1 ? 's' : ''} still waiting.`
         setDecisions((cur) => {
           const byId = new Map(cur.map((d) => [d.id, d]))
           byId.set(decision.id, decision)
@@ -970,7 +1040,7 @@ function App() {
           {
             id: newMsgId(),
             role: 'assistant',
-            text: `${kind === 'approve' ? 'Approved' : 'Rejected'} — ${describeAction(decision.action)}. Logged to the audit trail.`,
+            text: `${kind === 'approve' ? 'Approved' : 'Rejected'}: ${describeAction(decision.action)}. Logged to the audit trail.${queueNote}`,
           },
         ])
       })
@@ -982,7 +1052,7 @@ function App() {
           {
             id: newMsgId(),
             role: 'assistant',
-            text: `That ${kind} didn’t go through (${e instanceof Error ? e.message : String(e)}). Nothing changed — try again.`,
+            text: `That ${kind} did not go through. Nothing changed. Try again.`,
           },
         ])
       })
@@ -1000,7 +1070,7 @@ function App() {
             setMenuOpen(true)
           }}
         >
-          ☰
+          <UiIcon name="menu" />
         </button>
         <span className="brand">
           <span className="brand-mark" />
@@ -1030,10 +1100,11 @@ function App() {
           {error ? (
             <div className="row assistant-row">
               <div className="avatar" aria-hidden>
-                ◆
+                <span className="avatar-mark" />
               </div>
               <div className="bubble assistant">
-                <p>I couldn’t reach the cascade: {error}</p>
+                <p>I could not reach the cascade. Check the backend and retry.</p>
+                <p className="muted">{error}</p>
                 <button className="btn btn-secondary" type="button" onClick={() => setReloadKey((v) => v + 1)}>
                   Retry
                 </button>
@@ -1044,7 +1115,7 @@ function App() {
           {loadState === 'loading' && messages.length === 0 ? (
             <div className="row assistant-row">
               <div className="avatar" aria-hidden>
-                ◆
+                <span className="avatar-mark" />
               </div>
               <div className="bubble assistant typing">
                 <span />
@@ -1062,31 +1133,35 @@ function App() {
 
       <Composer onSend={send} />
 
-      <div className={`approval-scrim ${approvalOpen ? 'is-open' : ''}`} onClick={() => setApprovalOpen(false)} aria-hidden={!approvalOpen}>
-        <div className={`approval-panel ${approvalOpen ? 'open' : ''}`} onClick={(e) => e.stopPropagation()} aria-label="Approval queue">
-          <ApprovalPanel
-            queue={queue}
-            resolved={resolved}
-            currentId={data?.decision?.id}
-            evidence={data?.evidence}
-            busyId={busyId}
-            onApprove={(id) => resolve(id, 'approve')}
-            onReject={(id) => resolve(id, 'reject')}
-          />
+      {approvalOpen ? (
+        <div className="approval-scrim is-open" onClick={() => setApprovalOpen(false)}>
+          <div id="approval-panel" className="approval-panel open" role="region" onClick={(e) => e.stopPropagation()} aria-label="Approval queue">
+            <ApprovalPanel
+              queue={queue}
+              resolved={resolved}
+              currentId={data?.decision?.id}
+              evidence={data?.evidence}
+              busyId={busyId}
+              onApprove={(id) => resolve(id, 'approve')}
+              onReject={(id) => resolve(id, 'reject')}
+            />
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <MenuDrawer
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        data={data}
-        scenarioMode={scenarioMode}
-        onScenario={selectScenario}
-        onReload={() => {
-          setReloadKey((v) => v + 1)
-          setMenuOpen(false)
-        }}
-      />
+      {menuOpen ? (
+        <MenuDrawer
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          data={data}
+          scenarioMode={scenarioMode}
+          onScenario={selectScenario}
+          onReload={() => {
+            setReloadKey((v) => v + 1)
+            setMenuOpen(false)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

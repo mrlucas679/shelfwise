@@ -61,6 +61,11 @@ button {
   font: inherit;
 }
 
+button,
+input {
+  letter-spacing: 0;
+}
+
 .tnum {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -83,7 +88,7 @@ button {
 
 .topbar {
   position: relative;
-  z-index: 50; /* stays above the approval/menu scrims (z-index 40) - global chrome is never covered */
+  z-index: 50; /* above the approval panel; the modal drawer gets its own higher layer */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -128,7 +133,7 @@ button {
   border-radius: var(--r-md);
   color: var(--dim);
   background: transparent;
-  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -140,6 +145,123 @@ button {
 .icon-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+.ui-icon {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.ui-icon-menu::before,
+.ui-icon-menu::after,
+.ui-icon-close::before,
+.ui-icon-close::after,
+.ui-icon-send::before,
+.ui-icon-mic::before,
+.ui-icon-mic::after,
+.ui-icon-stop::before,
+.ui-icon-sun::before,
+.ui-icon-moon::before,
+.ui-icon-moon::after {
+  content: "";
+  position: absolute;
+  display: block;
+}
+
+.ui-icon-menu::before {
+  top: 3px;
+  left: 2px;
+  width: 12px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: currentColor;
+  box-shadow: 0 5px 0 currentColor, 0 10px 0 currentColor;
+}
+
+.ui-icon-close::before,
+.ui-icon-close::after {
+  top: 7px;
+  left: 2px;
+  width: 12px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ui-icon-close::before {
+  transform: rotate(45deg);
+}
+
+.ui-icon-close::after {
+  transform: rotate(-45deg);
+}
+
+.ui-icon-send::before {
+  top: 3px;
+  left: 4px;
+  width: 8px;
+  height: 10px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%, 28% 52%);
+}
+
+.ui-icon-mic::before {
+  top: 1px;
+  left: 5px;
+  width: 6px;
+  height: 10px;
+  border: 1.6px solid currentColor;
+  border-radius: 999px;
+}
+
+.ui-icon-mic::after {
+  left: 3px;
+  bottom: 1px;
+  width: 10px;
+  height: 7px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  border-left: 1.6px solid currentColor;
+  border-radius: 0 0 8px 8px;
+}
+
+.ui-icon-stop::before {
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ui-icon-sun::before {
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border: 1.7px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 -5px 0 -3px currentColor, 0 5px 0 -3px currentColor, 5px 0 0 -3px currentColor, -5px 0 0 -3px currentColor;
+}
+
+.ui-icon-moon::before {
+  top: 2px;
+  left: 4px;
+  width: 10px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ui-icon-moon::after {
+  top: 1px;
+  left: 8px;
+  width: 9px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--bg);
 }
 
 .conn {
@@ -206,7 +328,14 @@ button {
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   color: var(--accent);
-  font-size: 12px;
+}
+
+.avatar-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(45deg);
 }
 
 .bubble {
@@ -289,8 +418,16 @@ button {
 }
 
 .glyph-shape {
-  font-size: 10px;
-  line-height: 1;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.glyph-shape.tone-risk {
+  border-radius: 2px;
+  transform: rotate(45deg);
 }
 
 .tone-ok { color: var(--ok); }
@@ -364,13 +501,6 @@ button {
   transition: max-height 220ms ease, opacity 160ms ease, margin 220ms ease;
 }
 
-.dc-actions.is-hidden {
-  max-height: 0;
-  opacity: 0;
-  margin-top: 0;
-  pointer-events: none;
-}
-
 .dc-resolved {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -383,7 +513,20 @@ button {
   color: var(--mute);
 }
 
-/* confirm-before-acting gate: no modal, the actions row crossfades into a plain-text warning */
+.why-caret {
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.why-caret.is-open {
+  transform: rotate(135deg);
+}
+
+/* confirm-before-acting gate: no modal, just a plain-text warning and explicit Yes/Cancel */
 .dc-confirm {
   max-height: 0;
   opacity: 0;
@@ -754,9 +897,8 @@ button {
 }
 
 .receipt {
-  padding: 8px 0 8px 14px;
   position: relative;
-  cursor: pointer;
+  padding: 0;
 }
 
 .receipt-dot {
@@ -769,11 +911,29 @@ button {
   background: currentColor;
 }
 
-.receipt-top {
+.receipt-toggle {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 8px 0 8px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   font-size: 12.5px;
+}
+
+.receipt-toggle:hover .receipt-txt,
+.receipt-toggle:focus-visible .receipt-txt {
+  color: var(--accent);
+}
+
+.receipt-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .receipt-txt {
@@ -810,8 +970,10 @@ button {
   padding: 0 13px;
   border: 1px solid transparent;
   border-radius: var(--r-md);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
   color: var(--text);
   background: transparent;
   cursor: pointer;
@@ -879,13 +1041,20 @@ button {
   border-radius: 999px;
   background: transparent;
   color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
   cursor: pointer;
 }
 
 .chip-btn:hover {
   background: var(--surface-2);
+}
+
+.chip-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .composer-row {
@@ -915,6 +1084,11 @@ button {
   outline: none;
 }
 
+.composer-row:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent), transparent 35%);
+}
+
 .composer-input::placeholder {
   color: var(--mute);
 }
@@ -922,6 +1096,7 @@ button {
 .send {
   min-width: 38px;
   padding: 0;
+  color: var(--bg);
 }
 
 .mic.is-live {
@@ -940,14 +1115,14 @@ button {
 .drawer-scrim {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 70;
   background: rgba(0, 0, 0, 0);
   pointer-events: none;
   transition: background-color 160ms ease;
 }
 
 .drawer-scrim.is-open {
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.48);
   pointer-events: auto;
 }
 
@@ -956,10 +1131,11 @@ button {
   top: 0;
   left: 0;
   bottom: 0;
-  width: min(340px, 88vw);
+  width: min(360px, 92vw);
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--bg);
   border-right: 1px solid var(--border-strong);
+  box-shadow: 24px 0 60px rgba(0, 0, 0, 0.34);
   transform: translateX(-100%);
   transition: transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -972,8 +1148,15 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  min-height: 52px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .section-kicker {
@@ -985,7 +1168,7 @@ button {
 }
 
 .rail-section {
-  padding: 13px 14px;
+  padding: 15px 14px;
   border-bottom: 1px solid var(--border);
 }
 
