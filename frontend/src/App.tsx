@@ -297,16 +297,18 @@ function whyLine(decision: Decision, evidence?: EvidenceObject[]): string {
  *  Chat only ever points at the status bar now - it never renders the decisions itself. */
 function replyFor(text: string, data: GoldenDemo | null, pending: Decision[]): string {
   const q = text.toLowerCase()
-  if (/approv|decision|today|queue|pending|what.*do/.test(q)) {
-    return pending.length
-      ? `${pending.length} approval${pending.length > 1 ? 's' : ''} waiting. Open the status bar to review the evidence.`
-      : 'Queue clear. No approvals are waiting.'
-  }
+  // Risk intent is checked before the approvals intent: "what's at risk today?" is a risk
+  // question even though it also mentions the day.
   if (/risk|waste|expir|cold|fridge|warm|spoil/.test(q)) {
     const ev = firstActionEvidence(data?.evidence)
     const atRisk = moneyAtRisk(data?.evidence)
     const base = humanizeOperationalText(ev?.conclusion ?? 'Nothing is flagged at risk right now.')
     return atRisk ? `${base} About ${atRisk} of stock is exposed.` : base
+  }
+  if (/approv|decision|queue|pending|what.*do/.test(q)) {
+    return pending.length
+      ? `${pending.length} approval${pending.length > 1 ? 's' : ''} waiting. Open the status bar to review the evidence.`
+      : 'Queue clear. No approvals are waiting.'
   }
   if (/why|reason|explain|how/.test(q)) {
     return 'Open the status bar, then choose Why? on a decision to see the agent chain and numbers.'
@@ -547,13 +549,17 @@ function DecisionCard({
     <article className="decision-card" style={{ '--rail': toneVar[tone] } as CSSProperties}>
       <header className="dc-head">
         <div>
-          <div className="dc-agency">{agencyForAction(action)} agent</div>
+          <div className="dc-agency">{agencyForAction(action)}</div>
           <h3>{actionLabel}</h3>
         </div>
-        <StatusGlyph tone={pending ? tone : statusTone(status)} label={pending ? `risk ${action?.risk_tier ?? 'low'}` : formatLabel(status)} />
+        <StatusGlyph tone={pending ? tone : statusTone(status)} label={pending ? `${action?.risk_tier ?? 'low'} risk` : formatLabel(status)} />
       </header>
       <p className="dc-why">{whyLine(decision, evidence)}</p>
-      {atRisk ? <p className="dc-risk tnum">{atRisk} at risk</p> : null}
+      {atRisk ? (
+        <p className="dc-risk">
+          <span className="tnum">{atRisk}</span> at risk
+        </p>
+      ) : null}
 
       {pending ? (
         <>
@@ -723,7 +729,6 @@ function AssistantBubble({ text }: { text: string }) {
         <span className="avatar-mark" />
       </div>
       <div className="bubble assistant">
-        <div className="speaker">ShelfWise</div>
         <p>{text}</p>
       </div>
     </div>
@@ -747,6 +752,7 @@ function MenuDrawer({
   scenarioMode,
   onScenario,
   onReload,
+  onOpenApprovals,
 }: {
   open: boolean
   onClose: () => void
@@ -754,6 +760,7 @@ function MenuDrawer({
   scenarioMode: ScenarioMode
   onScenario: (mode: ScenarioMode) => void
   onReload: () => void
+  onOpenApprovals: () => void
 }) {
   const intel = data?.store_intelligence
   const trace = data?.trace ?? []
@@ -767,31 +774,6 @@ function MenuDrawer({
             <UiIcon name="close" />
           </button>
         </div>
-
-        <section className="rail-section">
-          <div className="section-kicker">Scenario</div>
-          <div className="scenario-switch">
-            <button
-              className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
-              type="button"
-              aria-pressed={scenarioMode === 'approval'}
-              onClick={() => onScenario('approval')}
-            >
-              Approval
-            </button>
-            <button
-              className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
-              type="button"
-              aria-pressed={scenarioMode === 'critic'}
-              onClick={() => onScenario('critic')}
-            >
-              Critic rejection
-            </button>
-          </div>
-          <button className="btn btn-secondary drawer-reload" type="button" onClick={onReload}>
-            Refresh scenario
-          </button>
-        </section>
 
         {intel ? (
           <section className="rail-section">
@@ -811,29 +793,68 @@ function MenuDrawer({
                 <dd className="tnum">{formatValue(intel.supplier_cover?.transfer_units_recommended)}</dd>
               </div>
               <div>
-                <dt>Learning score</dt>
-                <dd className="tnum">{formatValue(intel.learning_summary?.score)}</dd>
+                <dt>Fill rate</dt>
+                <dd className="tnum">{formatValue(intel.delivery_reconciliation?.supplier_fill_rate)}</dd>
               </div>
             </dl>
           </section>
         ) : null}
 
         <section className="rail-section">
-          <div className="section-kicker">System: {formatLabel(data?.inference?.provider ?? 'offline')}</div>
-          <dl className="kv">
-            <div>
-              <dt>Trace</dt>
-              <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
-            </div>
-            <div>
-              <dt>Routed agents</dt>
-              <dd className="tnum">
-                {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
-              </dd>
-            </div>
-          </dl>
-          {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
+          <div className="section-kicker">Today</div>
+          <button className="btn btn-secondary drawer-action" type="button" onClick={onOpenApprovals}>
+            Approvals and history
+          </button>
+          <button className="btn btn-secondary drawer-action" type="button" onClick={onReload}>
+            Refresh data
+          </button>
         </section>
+
+        {import.meta.env.DEV ? (
+          /* Development-only diagnostics: scenario switching and pipeline internals never ship to users. */
+          <section className="rail-section dev-section">
+            <div className="section-kicker">Developer</div>
+            <div className="scenario-switch">
+              <button
+                className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
+                type="button"
+                aria-pressed={scenarioMode === 'approval'}
+                onClick={() => onScenario('approval')}
+              >
+                Approval
+              </button>
+              <button
+                className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
+                type="button"
+                aria-pressed={scenarioMode === 'critic'}
+                onClick={() => onScenario('critic')}
+              >
+                Critic rejection
+              </button>
+            </div>
+            <dl className="kv">
+              <div>
+                <dt>Provider</dt>
+                <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
+              </div>
+              <div>
+                <dt>Trace</dt>
+                <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
+              </div>
+              <div>
+                <dt>Routed agents</dt>
+                <dd className="tnum">
+                  {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
+                </dd>
+              </div>
+              <div>
+                <dt>Learning score</dt>
+                <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
+              </div>
+            </dl>
+            {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
+          </section>
+        ) : null}
       </aside>
     </div>
   )
@@ -842,9 +863,15 @@ function MenuDrawer({
 // ---------------------------------------------------------------------------
 // Composer (text + voice + suggestions)
 // ---------------------------------------------------------------------------
-const SUGGESTIONS = ['Approval queue', 'Risk today']
+// Quick actions are shortcuts, not decoration: each one either reveals the relevant surface
+// directly or asks the concrete operational question it names.
+type QuickAction = { label: string; run: (ctx: { send: (text: string) => void; openApprovals: () => void }) => void }
+const QUICK_ACTIONS: QuickAction[] = [
+  { label: 'Approval queue', run: ({ openApprovals }) => openApprovals() },
+  { label: "What's at risk today?", run: ({ send }) => send("What's at risk today?") },
+]
 
-function Composer({ onSend }: { onSend: (text: string) => void }) {
+function Composer({ onSend, onOpenApprovals }: { onSend: (text: string) => void; onOpenApprovals: () => void }) {
   const [text, setText] = useState('')
   const voice = useVoiceInput((t) => setText((prev) => (prev ? `${prev} ${t}` : t)))
   const send = (value: string) => {
@@ -856,9 +883,14 @@ function Composer({ onSend }: { onSend: (text: string) => void }) {
   return (
     <div className="composer">
       <div className="suggestions">
-        {SUGGESTIONS.map((s) => (
-          <button className="chip-btn" type="button" key={s} onClick={() => send(s)}>
-            {s}
+        {QUICK_ACTIONS.map((action) => (
+          <button
+            className="chip-btn"
+            type="button"
+            key={action.label}
+            onClick={() => action.run({ send, openApprovals: onOpenApprovals })}
+          >
+            {action.label}
           </button>
         ))}
       </div>
@@ -1078,7 +1110,7 @@ function App() {
         </span>
         <div className="topbar-right">
           <span className={`conn conn-${conn}`}>
-            <span className="conn-dot" /> {conn}
+            <span className="conn-dot" /> {conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Connecting'}
           </span>
           <ThemeToggle />
         </div>
@@ -1095,8 +1127,11 @@ function App() {
         />
       ) : null}
 
+      {/* Everything below the status bar is one positioned zone so the approval panel can slide
+          down from directly under it - the global chrome above is never covered or clipped. */}
+      <div className="chat-zone">
       <main className="chat" ref={scrollRef}>
-        <div className="chat-inner">
+        <div className={`chat-inner ${!error && messages.length <= 1 ? 'is-sparse' : ''}`}>
           {error ? (
             <div className="row assistant-row">
               <div className="avatar" aria-hidden>
@@ -1131,7 +1166,13 @@ function App() {
         </div>
       </main>
 
-      <Composer onSend={send} />
+      <Composer
+        onSend={send}
+        onOpenApprovals={() => {
+          setMenuOpen(false)
+          setApprovalOpen(true)
+        }}
+      />
 
       {approvalOpen ? (
         <div className="approval-scrim is-open" onClick={() => setApprovalOpen(false)}>
@@ -1148,6 +1189,7 @@ function App() {
           </div>
         </div>
       ) : null}
+      </div>
 
       {menuOpen ? (
         <MenuDrawer
@@ -1159,6 +1201,10 @@ function App() {
           onReload={() => {
             setReloadKey((v) => v + 1)
             setMenuOpen(false)
+          }}
+          onOpenApprovals={() => {
+            setMenuOpen(false)
+            setApprovalOpen(true)
           }}
         />
       ) : null}

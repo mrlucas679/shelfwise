@@ -269,8 +269,8 @@ input {
   align-items: center;
   gap: 6px;
   color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .conn-dot {
@@ -294,6 +294,16 @@ input {
 /* ---------------------------------------------------------------------- */
 /* Chat surface                                                           */
 /* ---------------------------------------------------------------------- */
+/* The zone below the status bar: chat + composer, and the positioning context for the
+   approval panel overlay - so overlays can never cover or clip the global chrome above. */
+.chat-zone {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat {
   flex: 1;
   min-height: 0;
@@ -307,6 +317,12 @@ input {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* With nothing on screen but the greeting, center it instead of leaving a dead slab below. */
+.chat-inner.is-sparse {
+  min-height: 100%;
+  justify-content: center;
 }
 
 .row {
@@ -361,15 +377,6 @@ input {
   border-bottom-left-radius: 4px;
 }
 
-.bubble .speaker {
-  margin-bottom: 3px;
-  color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .bubble p {
   margin: 0;
 }
@@ -412,8 +419,8 @@ input {
   align-items: center;
   gap: 6px;
   color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -462,10 +469,10 @@ input {
 
 .dc-agency {
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .dc-head h3 {
@@ -484,7 +491,7 @@ input {
 
 .dc-risk {
   margin: 6px 0 0;
-  color: var(--ok);
+  color: var(--warn);
   font-size: 13px;
   font-weight: 600;
 }
@@ -502,8 +509,8 @@ input {
 }
 
 .dc-resolved {
-  font-family: var(--font-mono);
   font-size: 11.5px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -563,7 +570,6 @@ input {
   padding: 0;
   background: none;
   color: var(--accent);
-  font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -583,8 +589,8 @@ input {
   padding: 0;
   background: none;
   color: var(--mute);
-  font-family: var(--font-mono);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -627,6 +633,11 @@ input {
 
 .why-step:hover {
   background: var(--surface);
+}
+
+.why-step:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .why-step.is-active {
@@ -705,11 +716,10 @@ input {
 .source-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 8px;
+  gap: 5px 10px;
   margin: 8px 0 0;
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 .conf {
@@ -794,14 +804,14 @@ input {
   gap: 6px;
   margin-top: 1px;
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .statusbar-sub .tag {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
 }
 
 .statusbar .chevron {
@@ -821,7 +831,7 @@ input {
 /* the rest of the screen - the same "no modal box" ethos as the drawer.  */
 /* ---------------------------------------------------------------------- */
 .approval-scrim {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 40;
   background: rgba(0, 0, 0, 0);
@@ -848,11 +858,11 @@ input {
 }
 
 .approval-panel.open {
-  max-height: 80vh;
+  max-height: 100%;
 }
 
 .approval-panel-scroll {
-  max-height: 80vh;
+  max-height: calc(100vh - 140px); /* viewport minus the topbar + status bar chrome above the zone */
   overflow-y: auto;
   padding: 14px 16px 22px;
 }
@@ -860,9 +870,9 @@ input {
 .section-heading {
   margin: 4px 0 8px;
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -880,9 +890,9 @@ input {
   padding-top: 12px;
   border-top: 1px solid var(--border);
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -917,13 +927,19 @@ input {
   gap: 8px;
   width: 100%;
   min-height: 32px;
-  padding: 8px 0 8px 14px;
+  padding: 8px 4px 8px 14px;
   border: 0;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
   font-size: 12.5px;
+  transition: background-color 120ms ease;
+}
+
+.receipt-toggle:hover {
+  background: var(--surface);
 }
 
 .receipt-toggle:hover .receipt-txt,
@@ -951,11 +967,10 @@ input {
 }
 
 .receipt-detail {
-  padding: 6px 0 0;
+  padding: 6px 0 2px;
   color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -977,7 +992,11 @@ input {
   color: var(--text);
   background: transparent;
   cursor: pointer;
-  transition: background-color 120ms cubic-bezier(0.2, 0.6, 0.2, 1), opacity 120ms;
+  transition: background-color 120ms cubic-bezier(0.2, 0.6, 0.2, 1), opacity 120ms, transform 80ms ease;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .btn:focus-visible {
@@ -1050,6 +1069,10 @@ input {
 
 .chip-btn:hover {
   background: var(--surface-2);
+}
+
+.chip-btn:active {
+  transform: translateY(1px);
 }
 
 .chip-btn:focus-visible {
@@ -1160,10 +1183,10 @@ input {
 }
 
 .section-kicker {
-  font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--mute);
 }
 
@@ -1194,9 +1217,18 @@ input {
   min-height: 28px;
 }
 
-.drawer-reload {
+.drawer-action {
   width: 100%;
   margin-top: 8px;
+}
+
+/* Development-only diagnostics: visibly separated from the product surfaces above it. */
+.dev-section {
+  border-top: 1px dashed var(--border-strong);
+}
+
+.dev-section .section-kicker {
+  color: var(--warn);
 }
 
 .kv {
@@ -1208,8 +1240,8 @@ input {
 
 .kv dt {
   color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
