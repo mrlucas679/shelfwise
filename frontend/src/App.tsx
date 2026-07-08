@@ -86,6 +86,9 @@ type StoreIntelligence = {
   }
   supplier_cover?: {
     sku?: string
+    units_on_hand?: number
+    forecast_daily_units?: string
+    supplier_lead_time_days?: string
     days_of_supply?: string
     units_needed_until_delivery?: number
     gap_before_delivery_units?: number
@@ -122,7 +125,6 @@ type GoldenDemo = {
 type DecisionLogResponse = { decisions?: Decision[] }
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
-type ScenarioMode = 'approval' | 'critic'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
 
 // Chat is Q&A only now - decisions live in the persistent status bar + slide-down panel, never
@@ -135,10 +137,7 @@ type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 // API
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = 'http://localhost:8000'
-const DEMO_PATHS: Record<ScenarioMode, string> = {
-  approval: '/demo/golden',
-  critic: '/demo/critic-rejection',
-}
+const DEMO_PATH = '/demo/golden'
 
 function configuredBase(): string {
   const env = import.meta.env as Record<string, string | undefined>
@@ -812,19 +811,21 @@ function UserBubble({ text }: { text: string }) {
 // on desktop, an overlay on mobile. Detail opens as a settings-style slide-in page
 // (a page stack with a back control), so the root list stays small and never scrolls.
 // ---------------------------------------------------------------------------
-type SidebarPage = 'store' | 'snapshot' | 'batch' | 'delivery' | 'transfer' | 'outcomes' | 'settings' | 'dev'
+type SidebarPage = 'store' | 'stock' | 'product' | 'order' | 'batch' | 'delivery' | 'outcomes' | 'settings'
 type Recent = { id: string; title: string; active?: boolean }
 
+// Plain-language names a store person reads without a manual. Each surface is a COLLECTION
+// (stock is never one product - a real store carries thousands), shaped to scale from today's
+// seeded items to the full assortment when the store-wide API lands.
 const PAGE_TITLE: Record<SidebarPage, string> = {
-  store: 'Store context',
-  snapshot: 'Store snapshot',
-  batch: 'Urgent batch',
-  delivery: 'Delivery',
-  transfer: 'Transfer',
-  outcomes: 'Outcomes',
+  store: 'My store',
+  stock: 'Stock',
+  product: 'Product', // the header shows the selected product's name instead
+  order: 'To order',
+  batch: 'Sell first',
+  delivery: 'Short delivery',
+  outcomes: "Today's results",
   settings: 'Settings',
-  // Compile-time guarded so the label is stripped from production bundles with the page itself.
-  dev: import.meta.env.DEV ? 'Developer' : '',
 }
 
 function PlusIcon() {
@@ -843,17 +844,35 @@ function SearchIcon() {
   )
 }
 
-function NavRow({ label, sku, value, onOpen }: { label: string; sku?: string; value?: string; onOpen: () => void }) {
+function NavRow({
+  label,
+  sku,
+  value,
+  tone,
+  onOpen,
+}: {
+  label: string
+  sku?: string
+  value?: string
+  tone?: Tone
+  onOpen: () => void
+}) {
   return (
     <button className="nav-row" type="button" onClick={onOpen}>
       <span className="nav-label">
         {label}
         {sku ? <small>{humanizeOperationalText(sku)}</small> : null}
       </span>
-      {value ? <span className="nav-value tnum">{value}</span> : null}
+      {value ? <span className={`nav-value tnum${tone ? ` tone-${tone}` : ''}`}>{value}</span> : null}
       <span className="nav-chevron" aria-hidden />
     </button>
   )
+}
+
+/** "1.2 days" from the backend's decimal-string days-of-supply; null when the data is absent. */
+function daysNumber(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n * 10) / 10 : null
 }
 
 /** Theme control lives in Settings now (moved off the top bar), like every reference product. */
@@ -886,8 +905,6 @@ function Sidebar({
   data,
   seed,
   recoveredToday,
-  scenarioMode,
-  onScenario,
 }: {
   open: boolean
   onClose: () => void
@@ -899,13 +916,9 @@ function Sidebar({
   data: GoldenDemo | null
   seed: SeedSummary | null
   recoveredToday: string | null
-  scenarioMode: ScenarioMode
-  onScenario: (mode: ScenarioMode) => void
 }) {
   const intel = data?.store_intelligence
-  const trace = data?.trace ?? []
-  const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
-  const lesson = intel?.learning_summary?.lesson
+  const cover = intel?.supplier_cover
   const batches = intel?.batch_split?.fefo_batches ?? []
 
   // Identity zone - real fields, no fabrication: role routed by the backend, store from the seed.
@@ -914,7 +927,37 @@ function Sidebar({
   const store = seed?.location ? formatLabel(seed.location) : 'Store'
   const monogram = role.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 
-  // Page stack: back always pops one level (root -> store -> delivery -> back -> back).
+  // Stock is a COLLECTION: every product the data layer reports on today, in one list that
+  // scales to the full assortment. A product is "low" when it needs ordering now.
+  type ProductId = 'seed' | 'cover'
+  const [productId, setProductId] = useState<ProductId | null>(null)
+  const coverDays = daysNumber(cover?.days_of_supply)
+  const products: Array<{ id: ProductId; name: string; sub?: string; value: string; low: boolean }> = []
+  if (seed) {
+    products.push({
+      id: 'seed',
+      name: seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product'),
+      sub: [seed.category, seed.supplier].filter(Boolean).join(' · ') || undefined,
+      value: seed.units_on_hand != null ? `${seed.units_on_hand} on hand` : '-',
+      low: seed.units_on_hand != null && seed.reorder_point != null && seed.units_on_hand <= seed.reorder_point,
+    })
+  }
+  if (cover?.sku) {
+    products.push({
+      id: 'cover',
+      name: humanizeOperationalText(cover.sku),
+      value: coverDays != null ? `${coverDays} days left` : cover.units_on_hand != null ? `${cover.units_on_hand} on hand` : '-',
+      low: true,
+    })
+  }
+  // The shopping list: products that will run out before a normal order can arrive.
+  const orderLines = cover?.transfer_units_recommended ? [cover] : []
+  const productName =
+    productId === 'cover'
+      ? humanizeOperationalText(cover?.sku ?? 'Product')
+      : seed?.product_name ?? humanizeOperationalText(seed?.sku ?? 'Product')
+
+  // Page stack: back always pops one level (root -> store -> stock -> product -> back...).
   const [stack, setStack] = useState<SidebarPage[]>([])
   const page = stack[stack.length - 1] ?? null
   const push = (p: SidebarPage) => setStack((s) => [...s, p])
@@ -926,6 +969,7 @@ function Sidebar({
   useEffect(() => {
     if (!open) {
       setStack([])
+      setProductId(null)
       setSearching(false)
       setQuery('')
     }
@@ -944,7 +988,7 @@ function Sidebar({
             {page ? (
               <button className="drawer-back" type="button" ref={backRef} onClick={back}>
                 <span className="nav-chevron back" aria-hidden />
-                {PAGE_TITLE[page]}
+                {page === 'product' ? productName : PAGE_TITLE[page]}
               </button>
             ) : (
               <span className="brand">
@@ -999,23 +1043,30 @@ function Sidebar({
 
                 <div className="sidebar-section">
                   <NavRow label="Approvals & history" value={queue.length ? `${queue.length} waiting` : 'clear'} onOpen={onOpenApprovals} />
-                  <NavRow label="Store context" value={store} onOpen={() => push('store')} />
+                  <NavRow label="My store" value={store} onOpen={() => push('store')} />
                 </div>
               </>
             ) : null}
 
-            {/* STORE CONTEXT - a sub-list; each signal opens its own detail page */}
+            {/* MY STORE - store-wide categories; every row is a collection, not one product's card */}
             {page === 'store' ? (
               <div className="sidebar-section">
                 <NavRow
-                  label="Snapshot"
-                  sku={seed?.product_name ?? seed?.sku}
-                  value={seed?.units_on_hand != null ? `${seed.units_on_hand} on hand` : undefined}
-                  onOpen={() => push('snapshot')}
+                  label="Stock"
+                  value={`${products.length} product${products.length === 1 ? '' : 's'}`}
+                  onOpen={() => push('stock')}
                 />
+                {orderLines.length ? (
+                  <NavRow
+                    label="To order"
+                    value={`${orderLines.length} item${orderLines.length === 1 ? '' : 's'}`}
+                    tone="warn"
+                    onOpen={() => push('order')}
+                  />
+                ) : null}
                 {intel?.batch_split ? (
                   <NavRow
-                    label="Urgent batch"
+                    label="Sell first"
                     sku={intel.batch_split.sku}
                     value={`${formatValue(intel.batch_split.priority_sell_units)} units`}
                     onOpen={() => push('batch')}
@@ -1023,29 +1074,62 @@ function Sidebar({
                 ) : null}
                 {intel?.delivery_reconciliation ? (
                   <NavRow
-                    label="Delivery"
+                    label="Short delivery"
                     sku={intel.delivery_reconciliation.sku}
-                    value={`${formatValue(intel.delivery_reconciliation.missing_units)} missing`}
+                    value={`${formatValue(intel.delivery_reconciliation.missing_units)} short`}
                     onOpen={() => push('delivery')}
                   />
                 ) : null}
-                {intel?.supplier_cover ? (
-                  <NavRow
-                    label="Transfer"
-                    sku={intel.supplier_cover.sku}
-                    value={`${formatValue(intel.supplier_cover.transfer_units_recommended)} units`}
-                    onOpen={() => push('transfer')}
-                  />
-                ) : null}
-                {recoveredToday || lesson ? (
-                  <NavRow label="Outcomes" value={recoveredToday ?? '1 lesson'} onOpen={() => push('outcomes')} />
-                ) : null}
+                {recoveredToday ? <NavRow label="Today's results" value={recoveredToday} onOpen={() => push('outcomes')} /> : null}
               </div>
             ) : null}
 
-            {page === 'snapshot' ? (
+            {/* STOCK - the product list; tapping a product opens its card */}
+            {page === 'stock' ? (
+              <div className="sidebar-section">
+                {products.length ? (
+                  products.map((p) => (
+                    <NavRow
+                      key={p.id}
+                      label={p.name}
+                      sku={p.sub}
+                      value={p.value}
+                      tone={p.low ? 'warn' : undefined}
+                      onOpen={() => {
+                        setProductId(p.id)
+                        push('product')
+                      }}
+                    />
+                  ))
+                ) : (
+                  <p className="side-empty">No stock data yet.</p>
+                )}
+              </div>
+            ) : null}
+
+            {/* TO ORDER - the shopping list; each line opens the product it belongs to */}
+            {page === 'order' ? (
+              <div className="sidebar-section">
+                <p className="side-empty">Will run out before a normal order arrives.</p>
+                {orderLines.map((o) => (
+                  <NavRow
+                    key={o.sku}
+                    label={humanizeOperationalText(o.sku ?? 'Product')}
+                    value={`${formatValue(o.transfer_units_recommended)} units`}
+                    tone="warn"
+                    onOpen={() => {
+                      setProductId('cover')
+                      push('product')
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {/* PRODUCT - one product's card; the single home for its numbers */}
+            {page === 'product' ? (
               <section className="rail-section">
-                {seed ? (
+                {productId === 'seed' && seed ? (
                   <>
                     <p className="snapshot-title">
                       {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
@@ -1075,9 +1159,31 @@ function Sidebar({
                       </div>
                     </dl>
                   </>
-                ) : (
-                  <p className="muted">No snapshot available.</p>
-                )}
+                ) : null}
+                {productId === 'cover' && cover ? (
+                  <>
+                    <p className="snapshot-title">{humanizeOperationalText(cover.sku ?? 'Product')}</p>
+                    <dl className="kv">
+                      <div>
+                        <dt>On hand</dt>
+                        <dd className="tnum">{formatValue(cover.units_on_hand)} units</dd>
+                      </div>
+                      <div>
+                        <dt>Sells per day</dt>
+                        <dd className="tnum">{daysNumber(cover.forecast_daily_units) ?? '-'}</dd>
+                      </div>
+                      <div>
+                        <dt>Days left</dt>
+                        <dd className="tnum tone-warn">{coverDays != null ? `${coverDays} days` : '-'}</dd>
+                      </div>
+                      <div>
+                        <dt>Needed now</dt>
+                        <dd className="tnum">{formatValue(cover.transfer_units_recommended)} units</dd>
+                      </div>
+                    </dl>
+                    {cover.conclusion ? <p className="muted">{humanizeOperationalText(cover.conclusion)}</p> : null}
+                  </>
+                ) : null}
               </section>
             ) : null}
 
@@ -1137,36 +1243,19 @@ function Sidebar({
               </section>
             ) : null}
 
-            {page === 'transfer' ? (
-              <section className="rail-section">
-                <dl className="kv">
-                  <div>
-                    <dt>Days of supply</dt>
-                    <dd className="tnum">{formatValue(intel?.supplier_cover?.days_of_supply)}</dd>
-                  </div>
-                  <div>
-                    <dt>Gap before delivery</dt>
-                    <dd className="tnum">{formatValue(intel?.supplier_cover?.gap_before_delivery_units)}</dd>
-                  </div>
-                </dl>
-                {intel?.supplier_cover?.conclusion ? (
-                  <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
-                ) : null}
-              </section>
-            ) : null}
-
             {page === 'outcomes' ? (
               <section className="rail-section">
                 {recoveredToday ? (
                   <p className="outcome-line">
                     <span className="tnum tone-ok">{recoveredToday}</span> recovered today
                   </p>
-                ) : null}
-                {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
+                ) : (
+                  <p className="muted">No results recorded yet today.</p>
+                )}
               </section>
             ) : null}
 
-            {/* SETTINGS - behind the profile chip; appearance, identity, and (dev-only) diagnostics */}
+            {/* SETTINGS - behind the profile chip: appearance + identity, nothing internal */}
             {page === 'settings' ? (
               <section className="rail-section">
                 <ThemeRow />
@@ -1180,54 +1269,7 @@ function Sidebar({
                     <dd className="tnum">{role}</dd>
                   </div>
                 </dl>
-                {import.meta.env.DEV ? (
-                  <NavRow label="Developer" value={formatLabel(data?.inference?.provider ?? 'offline')} onOpen={() => push('dev')} />
-                ) : null}
                 <p className="muted">Company account sign-in is coming soon.</p>
-              </section>
-            ) : null}
-
-            {import.meta.env.DEV && page === 'dev' ? (
-              <section className="rail-section dev-section">
-                <div className="scenario-switch">
-                  <button
-                    className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
-                    type="button"
-                    aria-pressed={scenarioMode === 'approval'}
-                    onClick={() => onScenario('approval')}
-                  >
-                    Approval
-                  </button>
-                  <button
-                    className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
-                    type="button"
-                    aria-pressed={scenarioMode === 'critic'}
-                    onClick={() => onScenario('critic')}
-                  >
-                    Critic rejection
-                  </button>
-                </div>
-                <dl className="kv">
-                  <div>
-                    <dt>Provider</dt>
-                    <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
-                  </div>
-                  <div>
-                    <dt>Trace</dt>
-                    <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
-                  </div>
-                  <div>
-                    <dt>Routed agents</dt>
-                    <dd className="tnum">
-                      {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Learning score</dt>
-                    <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
-                  </div>
-                </dl>
-                {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
               </section>
             ) : null}
           </div>
@@ -1339,14 +1381,12 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [scenarioMode, setScenarioMode] = useState<ScenarioMode>('approval')
   // Sidebar is persistent on desktop (open by default), an overlay on mobile (closed by default).
   const [sidebarOpen, setSidebarOpen] = useState(() => !isOverlayViewport())
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const transitionCtrl = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const activePath = DEMO_PATHS[scenarioMode]
 
   const queue = useMemo(() => pendingQueue(decisions, data?.decision), [decisions, data])
   const resolved = useMemo(() => {
@@ -1379,7 +1419,7 @@ function App() {
     setLoadState('loading')
     setError(null)
     async function load() {
-      const payload = await fetchDemo(activePath, controller.signal)
+      const payload = await fetchDemo(DEMO_PATH, controller.signal)
       let log: Decision[] = payload.decision ? [payload.decision] : []
       try {
         log = await fetchDecisionLog(controller.signal)
@@ -1406,7 +1446,7 @@ function App() {
       setLoadState('error')
     })
     return () => controller.abort()
-  }, [reloadKey, activePath])
+  }, [reloadKey])
 
   useEffect(() => () => transitionCtrl.current?.abort(), [])
   useEffect(() => {
@@ -1423,16 +1463,6 @@ function App() {
   }, [])
 
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
-
-  const selectScenario = (next: ScenarioMode) => {
-    if (next === scenarioMode) return
-    transitionCtrl.current?.abort()
-    setData(null)
-    setMessages([])
-    setBusyId(null)
-    setScenarioMode(next)
-    setApprovalOpen(false)
-  }
 
   // Opening a surface (approvals) or starting a new chat must reveal the chat on mobile, where the
   // sidebar is a full overlay; on desktop the persistent sidebar stays put.
@@ -1523,8 +1553,6 @@ function App() {
         data={data}
         seed={seed}
         recoveredToday={recoveredToday}
-        scenarioMode={scenarioMode}
-        onScenario={selectScenario}
       />
 
       <div className="app-main">
