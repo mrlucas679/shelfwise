@@ -31,6 +31,7 @@ type Decision = {
   action?: RecommendedAction
   caused_by?: string[]
   summary?: string
+  role?: string
   created_at?: string
   updated_at?: string
   review?: { reviewer?: string; status?: string; reviewed_at?: string } | null
@@ -805,39 +806,83 @@ function UserBubble({ text }: { text: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Ops menu drawer (everything that is NOT the conversation)
+// Sidebar - the chat-first access surface. Modeled on ChatGPT/Claude/Codex:
+// three zones (create+find · continuity+surfaces · identity). Nothing here is a
+// data display; every row is an ENTRY POINT that never blocks the chat. Persistent
+// on desktop, an overlay on mobile. Detail opens as a settings-style slide-in page
+// (a page stack with a back control), so the root list stays small and never scrolls.
 // ---------------------------------------------------------------------------
-/** Settings-style navigation: the root is a compact list that always fits without scrolling;
- *  each topic opens its own page that slides in over it, with a back control - never
- *  everything at once. */
-type DrawerPage = 'snapshot' | 'batch' | 'delivery' | 'transfer' | 'outcomes' | 'dev'
+type SidebarPage = 'store' | 'snapshot' | 'batch' | 'delivery' | 'transfer' | 'outcomes' | 'settings' | 'dev'
+type Recent = { id: string; title: string; active?: boolean }
 
-const DRAWER_PAGES: Record<DrawerPage, string> = {
+const PAGE_TITLE: Record<SidebarPage, string> = {
+  store: 'Store context',
   snapshot: 'Store snapshot',
   batch: 'Urgent batch',
   delivery: 'Delivery',
   transfer: 'Transfer',
   outcomes: 'Outcomes',
+  settings: 'Settings',
   // Compile-time guarded so the label is stripped from production bundles with the page itself.
   dev: import.meta.env.DEV ? 'Developer' : '',
 }
 
-function NavRow({ label, sku, value, onOpen }: { label: string; sku?: string; value: string; onOpen: () => void }) {
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+    </svg>
+  )
+}
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <circle cx="7" cy="7" r="4.3" />
+      <path d="M10.4 10.4L14 14" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function NavRow({ label, sku, value, onOpen }: { label: string; sku?: string; value?: string; onOpen: () => void }) {
   return (
     <button className="nav-row" type="button" onClick={onOpen}>
       <span className="nav-label">
         {label}
         {sku ? <small>{humanizeOperationalText(sku)}</small> : null}
       </span>
-      <span className="nav-value tnum">{value}</span>
+      {value ? <span className="nav-value tnum">{value}</span> : null}
       <span className="nav-chevron" aria-hidden />
     </button>
   )
 }
 
-function MenuDrawer({
+/** Theme control lives in Settings now (moved off the top bar), like every reference product. */
+function ThemeRow() {
+  const [theme, setTheme] = useState<Theme>(currentTheme)
+  return (
+    <button
+      className="set-row"
+      type="button"
+      onClick={() => {
+        const next: Theme = theme === 'dark' ? 'light' : 'dark'
+        applyTheme(next)
+        setTheme(next)
+      }}
+    >
+      <span className="set-label">Appearance</span>
+      <span className="set-value">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+    </button>
+  )
+}
+
+function Sidebar({
   open,
   onClose,
+  onSelectRecent,
+  onNewChat,
+  onOpenApprovals,
+  recents,
+  queue,
   data,
   seed,
   recoveredToday,
@@ -846,6 +891,11 @@ function MenuDrawer({
 }: {
   open: boolean
   onClose: () => void
+  onSelectRecent: () => void
+  onNewChat: () => void
+  onOpenApprovals: () => void
+  recents: Recent[]
+  queue: Decision[]
   data: GoldenDemo | null
   seed: SeedSummary | null
   recoveredToday: string | null
@@ -857,250 +907,348 @@ function MenuDrawer({
   const totalMs = trace.reduce((n, s) => n + (s.ms ?? 0), 0)
   const lesson = intel?.learning_summary?.lesson
   const batches = intel?.batch_split?.fefo_batches ?? []
-  const [page, setPage] = useState<DrawerPage | null>(null)
+
+  // Identity zone - real fields, no fabrication: role routed by the backend, store from the seed.
+  // A person's name fills in when company-account login lands (see roadmap).
+  const role = data?.decision?.role ? formatLabel(data.decision.role) : 'Store manager'
+  const store = seed?.location ? formatLabel(seed.location) : 'Store'
+  const monogram = role.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+
+  // Page stack: back always pops one level (root -> store -> delivery -> back -> back).
+  const [stack, setStack] = useState<SidebarPage[]>([])
+  const page = stack[stack.length - 1] ?? null
+  const push = (p: SidebarPage) => setStack((s) => [...s, p])
+  const back = () => setStack((s) => s.slice(0, -1))
   const backRef = useRef<HTMLButtonElement | null>(null)
-  // Reopening always starts at the root list; entering a page moves focus to the back control.
+  const [searching, setSearching] = useState(false)
+  const [query, setQuery] = useState('')
+
   useEffect(() => {
-    if (!open) setPage(null)
+    if (!open) {
+      setStack([])
+      setSearching(false)
+      setQuery('')
+    }
   }, [open])
   useEffect(() => {
     if (page) backRef.current?.focus()
   }, [page])
+
+  const shownRecents = recents.filter((r) => !query || r.title.toLowerCase().includes(query.toLowerCase()))
+
   return (
-    <div className={`drawer-scrim ${open ? 'is-open' : ''}`} onClick={onClose}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Operations menu" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-head">
-          {page ? (
-            <button className="drawer-back" type="button" ref={backRef} onClick={() => setPage(null)}>
-              <span className="nav-chevron back" aria-hidden />
-              Operations
-            </button>
-          ) : (
-            <span className="drawer-title">Operations</span>
-          )}
-          <button className="icon-btn" type="button" aria-label="Close menu" onClick={onClose}>
-            <UiIcon name="close" />
-          </button>
-        </div>
-
-        <div className={`drawer-pages ${page ? 'show-detail' : ''}`}>
-          <nav className="drawer-page" aria-hidden={page != null}>
-            <NavRow
-              label="Snapshot"
-              sku={seed?.product_name ?? seed?.sku}
-              value={seed?.units_on_hand != null ? `${seed.units_on_hand} on hand` : '-'}
-              onOpen={() => setPage('snapshot')}
-            />
-            {intel?.batch_split ? (
-              <NavRow
-                label="Urgent batch"
-                sku={intel.batch_split.sku}
-                value={`${formatValue(intel.batch_split.priority_sell_units)} units`}
-                onOpen={() => setPage('batch')}
-              />
-            ) : null}
-            {intel?.delivery_reconciliation ? (
-              <NavRow
-                label="Delivery"
-                sku={intel.delivery_reconciliation.sku}
-                value={`${formatValue(intel.delivery_reconciliation.missing_units)} missing`}
-                onOpen={() => setPage('delivery')}
-              />
-            ) : null}
-            {intel?.supplier_cover ? (
-              <NavRow
-                label="Transfer"
-                sku={intel.supplier_cover.sku}
-                value={`${formatValue(intel.supplier_cover.transfer_units_recommended)} units`}
-                onOpen={() => setPage('transfer')}
-              />
-            ) : null}
-            {recoveredToday || lesson ? (
-              <NavRow label="Outcomes" value={recoveredToday ?? '1 lesson'} onOpen={() => setPage('outcomes')} />
-            ) : null}
-            {import.meta.env.DEV ? (
-              /* Development-only diagnostics: scenario switching and pipeline internals never ship to users. */
-              <NavRow label="Developer" value={formatLabel(data?.inference?.provider ?? 'offline')} onOpen={() => setPage('dev')} />
-            ) : null}
-          </nav>
-
-          <div className="drawer-page" aria-hidden={page == null}>
+    <>
+      <aside className={`sidebar ${open ? 'is-open' : 'is-collapsed'}`} aria-label="Navigation" aria-hidden={!open}>
+        <div className="sidebar-inner">
+          <div className="sidebar-head">
             {page ? (
-              <section className={`rail-section ${page === 'dev' ? 'dev-section' : ''}`}>
-                <div className="section-kicker">{DRAWER_PAGES[page]}</div>
+              <button className="drawer-back" type="button" ref={backRef} onClick={back}>
+                <span className="nav-chevron back" aria-hidden />
+                {PAGE_TITLE[page]}
+              </button>
+            ) : (
+              <span className="brand">
+                <span className="brand-mark" aria-hidden />
+                <span className="brand-name">ShelfWise</span>
+              </span>
+            )}
+            <button className="icon-btn" type="button" aria-label="Close sidebar" onClick={onClose}>
+              <UiIcon name="close" />
+            </button>
+          </div>
 
-                {page === 'snapshot' ? (
-                  seed ? (
-                    <>
-                      <p className="snapshot-title">
-                        {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
-                        {seed.category ? <span className="snapshot-cat"> · {seed.category}</span> : null}
-                      </p>
-                      <dl className="kv">
-                        <div>
-                          <dt>On hand</dt>
-                          <dd className="tnum">{formatValue(seed.units_on_hand)} units</dd>
-                        </div>
-                        <div>
-                          <dt>Reorder at</dt>
-                          <dd className="tnum">{formatValue(seed.reorder_point)}</dd>
-                        </div>
-                        <div>
-                          <dt>Expires in</dt>
-                          <dd className={`tnum ${seed.days_to_expiry != null && seed.days_to_expiry <= 3 ? 'tone-warn' : ''}`}>
-                            {seed.days_to_expiry != null ? `${seed.days_to_expiry} days` : '-'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Supplier</dt>
-                          <dd className="tnum">
-                            {seed.supplier ?? '-'}
-                            {seed.supplier_lead_time_days ? `, ${Math.round(Number(seed.supplier_lead_time_days))}d lead` : ''}
-                          </dd>
-                        </div>
-                      </dl>
-                    </>
-                  ) : (
-                    <p className="muted">No snapshot available.</p>
-                  )
+          <div className="sidebar-body">
+            {/* ROOT - create + find, then continuity + surfaces */}
+            {page == null ? (
+              <>
+                <div className="sidebar-actions">
+                  <button className="side-action" type="button" onClick={onNewChat}>
+                    <PlusIcon />
+                    New chat
+                  </button>
+                  <button className="side-action" type="button" aria-expanded={searching} onClick={() => setSearching((v) => !v)}>
+                    <SearchIcon />
+                    Search
+                  </button>
+                </div>
+
+                <div className="sidebar-section">
+                  <div className="sidebar-kicker">Recents</div>
+                  {searching ? (
+                    <input
+                      className="side-search"
+                      autoFocus
+                      placeholder="Search conversations..."
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      aria-label="Search conversations"
+                    />
+                  ) : null}
+                  <div className="recents-list">
+                    {shownRecents.length ? (
+                      shownRecents.map((r) => (
+                        <button key={r.id} className={`recent-row ${r.active ? 'is-active' : ''}`} type="button" onClick={onSelectRecent}>
+                          {r.title}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="side-empty">No conversations match.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="sidebar-section">
+                  <NavRow label="Approvals & history" value={queue.length ? `${queue.length} waiting` : 'clear'} onOpen={onOpenApprovals} />
+                  <NavRow label="Store context" value={store} onOpen={() => push('store')} />
+                </div>
+              </>
+            ) : null}
+
+            {/* STORE CONTEXT - a sub-list; each signal opens its own detail page */}
+            {page === 'store' ? (
+              <div className="sidebar-section">
+                <NavRow
+                  label="Snapshot"
+                  sku={seed?.product_name ?? seed?.sku}
+                  value={seed?.units_on_hand != null ? `${seed.units_on_hand} on hand` : undefined}
+                  onOpen={() => push('snapshot')}
+                />
+                {intel?.batch_split ? (
+                  <NavRow
+                    label="Urgent batch"
+                    sku={intel.batch_split.sku}
+                    value={`${formatValue(intel.batch_split.priority_sell_units)} units`}
+                    onOpen={() => push('batch')}
+                  />
                 ) : null}
-
-                {page === 'batch' ? (
-                  <>
-                    {batches.length > 0 ? (
-                      <ul className="lot-list">
-                        {batches.map((b, i) => (
-                          <li className="lot-row" key={b.lot ?? i}>
-                            <span className="lot-id tnum">{b.lot ?? '-'}</span>
-                            <span className="tnum">{formatValue(b.units)} units</span>
-                            <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
-                            <span
-                              className={`lot-status tone-${
-                                b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
-                              }`}
-                            >
-                              {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {intel?.batch_split?.conclusion || batches.length === 0 ? (
-                      <p className="muted">
-                        {humanizeOperationalText(intel?.batch_split?.conclusion ?? 'No batch detail available.')}
-                      </p>
-                    ) : null}
-                  </>
+                {intel?.delivery_reconciliation ? (
+                  <NavRow
+                    label="Delivery"
+                    sku={intel.delivery_reconciliation.sku}
+                    value={`${formatValue(intel.delivery_reconciliation.missing_units)} missing`}
+                    onOpen={() => push('delivery')}
+                  />
                 ) : null}
+                {intel?.supplier_cover ? (
+                  <NavRow
+                    label="Transfer"
+                    sku={intel.supplier_cover.sku}
+                    value={`${formatValue(intel.supplier_cover.transfer_units_recommended)} units`}
+                    onOpen={() => push('transfer')}
+                  />
+                ) : null}
+                {recoveredToday || lesson ? (
+                  <NavRow label="Outcomes" value={recoveredToday ?? '1 lesson'} onOpen={() => push('outcomes')} />
+                ) : null}
+              </div>
+            ) : null}
 
-                {page === 'delivery' ? (
+            {page === 'snapshot' ? (
+              <section className="rail-section">
+                {seed ? (
                   <>
+                    <p className="snapshot-title">
+                      {seed.product_name ?? humanizeOperationalText(seed.sku ?? 'Product')}
+                      {seed.category ? <span className="snapshot-cat"> · {seed.category}</span> : null}
+                    </p>
                     <dl className="kv">
                       <div>
-                        <dt>Ordered</dt>
-                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.ordered_units)}</dd>
+                        <dt>On hand</dt>
+                        <dd className="tnum">{formatValue(seed.units_on_hand)} units</dd>
                       </div>
                       <div>
-                        <dt>Received</dt>
-                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.received_units)}</dd>
+                        <dt>Reorder at</dt>
+                        <dd className="tnum">{formatValue(seed.reorder_point)}</dd>
                       </div>
                       <div>
-                        <dt>Accepted</dt>
-                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.accepted_units)}</dd>
-                      </div>
-                      <div>
-                        <dt>Short dated</dt>
-                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.short_dated_units)}</dd>
-                      </div>
-                      <div>
-                        <dt>Fill rate</dt>
-                        <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.supplier_fill_rate)}</dd>
-                      </div>
-                    </dl>
-                    {intel?.delivery_reconciliation?.conclusion ? (
-                      <p className="muted">{humanizeOperationalText(intel.delivery_reconciliation.conclusion)}</p>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {page === 'transfer' ? (
-                  <>
-                    <dl className="kv">
-                      <div>
-                        <dt>Days of supply</dt>
-                        <dd className="tnum">{formatValue(intel?.supplier_cover?.days_of_supply)}</dd>
-                      </div>
-                      <div>
-                        <dt>Gap before delivery</dt>
-                        <dd className="tnum">{formatValue(intel?.supplier_cover?.gap_before_delivery_units)}</dd>
-                      </div>
-                    </dl>
-                    {intel?.supplier_cover?.conclusion ? (
-                      <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {page === 'outcomes' ? (
-                  <>
-                    {recoveredToday ? (
-                      <p className="outcome-line">
-                        <span className="tnum tone-ok">{recoveredToday}</span> recovered today
-                      </p>
-                    ) : null}
-                    {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
-                  </>
-                ) : null}
-
-                {import.meta.env.DEV && page === 'dev' ? (
-                  <>
-                    <div className="scenario-switch">
-                      <button
-                        className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
-                        type="button"
-                        aria-pressed={scenarioMode === 'approval'}
-                        onClick={() => onScenario('approval')}
-                      >
-                        Approval
-                      </button>
-                      <button
-                        className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
-                        type="button"
-                        aria-pressed={scenarioMode === 'critic'}
-                        onClick={() => onScenario('critic')}
-                      >
-                        Critic rejection
-                      </button>
-                    </div>
-                    <dl className="kv">
-                      <div>
-                        <dt>Provider</dt>
-                        <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
-                      </div>
-                      <div>
-                        <dt>Trace</dt>
-                        <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
-                      </div>
-                      <div>
-                        <dt>Routed agents</dt>
-                        <dd className="tnum">
-                          {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
+                        <dt>Expires in</dt>
+                        <dd className={`tnum ${seed.days_to_expiry != null && seed.days_to_expiry <= 3 ? 'tone-warn' : ''}`}>
+                          {seed.days_to_expiry != null ? `${seed.days_to_expiry} days` : '-'}
                         </dd>
                       </div>
                       <div>
-                        <dt>Learning score</dt>
-                        <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
+                        <dt>Supplier</dt>
+                        <dd className="tnum">
+                          {seed.supplier ?? '-'}
+                          {seed.supplier_lead_time_days ? `, ${Math.round(Number(seed.supplier_lead_time_days))}d lead` : ''}
+                        </dd>
                       </div>
                     </dl>
-                    {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
                   </>
+                ) : (
+                  <p className="muted">No snapshot available.</p>
+                )}
+              </section>
+            ) : null}
+
+            {page === 'batch' ? (
+              <section className="rail-section">
+                {batches.length > 0 ? (
+                  <ul className="lot-list">
+                    {batches.map((b, i) => (
+                      <li className="lot-row" key={b.lot ?? i}>
+                        <span className="lot-id tnum">{b.lot ?? '-'}</span>
+                        <span className="tnum">{formatValue(b.units)} units</span>
+                        <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
+                        <span
+                          className={`lot-status tone-${
+                            b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
+                          }`}
+                        >
+                          {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {intel?.batch_split?.conclusion || batches.length === 0 ? (
+                  <p className="muted">{humanizeOperationalText(intel?.batch_split?.conclusion ?? 'No batch detail available.')}</p>
                 ) : null}
               </section>
             ) : null}
+
+            {page === 'delivery' ? (
+              <section className="rail-section">
+                <dl className="kv">
+                  <div>
+                    <dt>Ordered</dt>
+                    <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.ordered_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Received</dt>
+                    <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.received_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Accepted</dt>
+                    <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.accepted_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Short dated</dt>
+                    <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.short_dated_units)}</dd>
+                  </div>
+                  <div>
+                    <dt>Fill rate</dt>
+                    <dd className="tnum">{formatValue(intel?.delivery_reconciliation?.supplier_fill_rate)}</dd>
+                  </div>
+                </dl>
+                {intel?.delivery_reconciliation?.conclusion ? (
+                  <p className="muted">{humanizeOperationalText(intel.delivery_reconciliation.conclusion)}</p>
+                ) : null}
+              </section>
+            ) : null}
+
+            {page === 'transfer' ? (
+              <section className="rail-section">
+                <dl className="kv">
+                  <div>
+                    <dt>Days of supply</dt>
+                    <dd className="tnum">{formatValue(intel?.supplier_cover?.days_of_supply)}</dd>
+                  </div>
+                  <div>
+                    <dt>Gap before delivery</dt>
+                    <dd className="tnum">{formatValue(intel?.supplier_cover?.gap_before_delivery_units)}</dd>
+                  </div>
+                </dl>
+                {intel?.supplier_cover?.conclusion ? (
+                  <p className="muted">{humanizeOperationalText(intel.supplier_cover.conclusion)}</p>
+                ) : null}
+              </section>
+            ) : null}
+
+            {page === 'outcomes' ? (
+              <section className="rail-section">
+                {recoveredToday ? (
+                  <p className="outcome-line">
+                    <span className="tnum tone-ok">{recoveredToday}</span> recovered today
+                  </p>
+                ) : null}
+                {lesson ? <p className="muted">{humanizeOperationalText(lesson)}</p> : null}
+              </section>
+            ) : null}
+
+            {/* SETTINGS - behind the profile chip; appearance, identity, and (dev-only) diagnostics */}
+            {page === 'settings' ? (
+              <section className="rail-section">
+                <ThemeRow />
+                <dl className="kv">
+                  <div>
+                    <dt>Store</dt>
+                    <dd className="tnum">{store}</dd>
+                  </div>
+                  <div>
+                    <dt>Role</dt>
+                    <dd className="tnum">{role}</dd>
+                  </div>
+                </dl>
+                {import.meta.env.DEV ? (
+                  <NavRow label="Developer" value={formatLabel(data?.inference?.provider ?? 'offline')} onOpen={() => push('dev')} />
+                ) : null}
+                <p className="muted">Company account sign-in is coming soon.</p>
+              </section>
+            ) : null}
+
+            {import.meta.env.DEV && page === 'dev' ? (
+              <section className="rail-section dev-section">
+                <div className="scenario-switch">
+                  <button
+                    className={`btn btn-secondary ${scenarioMode === 'approval' ? 'is-active' : ''}`}
+                    type="button"
+                    aria-pressed={scenarioMode === 'approval'}
+                    onClick={() => onScenario('approval')}
+                  >
+                    Approval
+                  </button>
+                  <button
+                    className={`btn btn-secondary ${scenarioMode === 'critic' ? 'is-active' : ''}`}
+                    type="button"
+                    aria-pressed={scenarioMode === 'critic'}
+                    onClick={() => onScenario('critic')}
+                  >
+                    Critic rejection
+                  </button>
+                </div>
+                <dl className="kv">
+                  <div>
+                    <dt>Provider</dt>
+                    <dd className="tnum">{formatLabel(data?.inference?.provider ?? 'offline')}</dd>
+                  </div>
+                  <div>
+                    <dt>Trace</dt>
+                    <dd className="tnum">{totalMs}ms, {trace.length} spans</dd>
+                  </div>
+                  <div>
+                    <dt>Routed agents</dt>
+                    <dd className="tnum">
+                      {(data?.inference?.routing?.routine_agents?.length ?? 0) + (data?.inference?.routing?.strong_agents?.length ?? 0)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Learning score</dt>
+                    <dd className="tnum">{formatValue(intel?.learning_summary?.score)}</dd>
+                  </div>
+                </dl>
+                {data?.learning?.message ? <p className="muted">{humanizeOperationalText(data.learning.message)}</p> : null}
+              </section>
+            ) : null}
           </div>
+
+          {/* IDENTITY - pinned bottom, opens Settings (the ChatGPT/Codex profile-chip pattern) */}
+          {page == null ? (
+            <div className="sidebar-foot">
+              <button className="profile-chip" type="button" onClick={() => push('settings')}>
+                <span className="chip-avatar" aria-hidden>{monogram}</span>
+                <span className="chip-id">
+                  <span className="chip-name">{role}</span>
+                  <span className="chip-sub">{store}</span>
+                </span>
+                <span className="nav-chevron" aria-hidden />
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
-    </div>
+      <div className={`sidebar-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-hidden />
+    </>
   )
 }
 
@@ -1168,22 +1316,16 @@ function Composer({ onSend, onOpenApprovals }: { onSend: (text: string) => void;
   )
 }
 
-function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(currentTheme)
-  return (
-    <button
-      className="icon-btn"
-      type="button"
-      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-      onClick={() => {
-        const next: Theme = theme === 'dark' ? 'light' : 'dark'
-        applyTheme(next)
-        setTheme(next)
-      }}
-    >
-      <UiIcon name={theme === 'dark' ? 'sun' : 'moon'} />
-    </button>
-  )
+/** The assistant's opening line, derived from the live queue - reused by first load and New chat. */
+function greetingFor(pending: Decision[]): string {
+  if (pending.length === 0) return "Queue clear. I'll surface exceptions as soon as they appear."
+  if (pending.length === 1) return 'One approval is ready. Open the status bar to review the evidence.'
+  return `${pending.length} approvals are ready. Open the status bar to review highest risk first.`
+}
+
+/** True when the sidebar behaves as a mobile overlay (so opening a surface must close it). */
+function isOverlayViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
 }
 
 // ---------------------------------------------------------------------------
@@ -1198,7 +1340,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [scenarioMode, setScenarioMode] = useState<ScenarioMode>('approval')
-  const [menuOpen, setMenuOpen] = useState(false)
+  // Sidebar is persistent on desktop (open by default), an overlay on mobile (closed by default).
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isOverlayViewport())
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const transitionCtrl = useRef<AbortController | null>(null)
@@ -1224,6 +1367,13 @@ function App() {
     return cents > 0 ? `R${Math.round(cents / 100).toLocaleString('en-ZA')}` : null
   }, [resolved])
 
+  // Recents: the current live conversation only. When Postgres persistence lands, resolved
+  // conversations join this list; New chat archives the current one instead of clearing it.
+  const recents = useMemo<Recent[]>(() => {
+    const firstUser = messages.find((m) => m.role === 'user')
+    return [{ id: 'current', title: firstUser ? firstUser.text : "Today's operations", active: true }]
+  }, [messages])
+
   useEffect(() => {
     const controller = new AbortController()
     setLoadState('loading')
@@ -1247,14 +1397,7 @@ function App() {
       setData(payload)
       setDecisions(log)
       setSeed(seedData)
-      const pending = pendingQueue(log, payload.decision)
-      const greeting =
-        pending.length === 0
-          ? "Queue clear. I'll surface exceptions as soon as they appear."
-          : pending.length === 1
-            ? 'One approval is ready. Open the status bar to review the evidence.'
-            : `${pending.length} approvals are ready. Open the status bar to review highest risk first.`
-      setMessages([{ id: newMsgId(), role: 'assistant', text: greeting }])
+      setMessages([{ id: newMsgId(), role: 'assistant', text: greetingFor(pendingQueue(log, payload.decision)) }])
       setLoadState('ready')
     }
     load().catch((e) => {
@@ -1273,7 +1416,7 @@ function App() {
     const closeOverlay = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setApprovalOpen(false)
-      setMenuOpen(false)
+      if (isOverlayViewport()) setSidebarOpen(false)
     }
     window.addEventListener('keydown', closeOverlay)
     return () => window.removeEventListener('keydown', closeOverlay)
@@ -1288,8 +1431,19 @@ function App() {
     setMessages([])
     setBusyId(null)
     setScenarioMode(next)
-    setMenuOpen(false)
     setApprovalOpen(false)
+  }
+
+  // Opening a surface (approvals) or starting a new chat must reveal the chat on mobile, where the
+  // sidebar is a full overlay; on desktop the persistent sidebar stays put.
+  const openApprovals = () => {
+    setApprovalOpen(true)
+    if (isOverlayViewport()) setSidebarOpen(false)
+  }
+  const newChat = () => {
+    setApprovalOpen(false)
+    setMessages([{ id: newMsgId(), role: 'assistant', text: greetingFor(pendingQueue(decisions, data?.decision)) }])
+    if (isOverlayViewport()) setSidebarOpen(false)
   }
 
   const send = (text: string) => {
@@ -1356,44 +1510,53 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <button
-          className="icon-btn"
-          type="button"
-          aria-label="Open menu"
-          onClick={() => {
-            setApprovalOpen(false)
-            setMenuOpen(true)
-          }}
-        >
-          <UiIcon name="menu" />
-        </button>
-        <span className="brand">
-          <span className="brand-mark" />
-          <span className="brand-name">ShelfWise</span>
-        </span>
-        <div className="topbar-right">
-          <span className={`conn conn-${conn}`}>
-            <span className="conn-dot" /> {conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Connecting'}
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSelectRecent={() => {
+          if (isOverlayViewport()) setSidebarOpen(false)
+        }}
+        onNewChat={newChat}
+        onOpenApprovals={openApprovals}
+        recents={recents}
+        queue={queue}
+        data={data}
+        seed={seed}
+        recoveredToday={recoveredToday}
+        scenarioMode={scenarioMode}
+        onScenario={selectScenario}
+      />
+
+      <div className="app-main">
+        <header className="topbar">
+          <button
+            className="icon-btn"
+            type="button"
+            aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+            aria-expanded={sidebarOpen}
+            onClick={() => {
+              setApprovalOpen(false)
+              setSidebarOpen((v) => !v)
+            }}
+          >
+            <UiIcon name="menu" />
+          </button>
+          <span className="brand">
+            <span className="brand-mark" />
+            <span className="brand-name">ShelfWise</span>
           </span>
-          <ThemeToggle />
-        </div>
-      </header>
+          <div className="topbar-right">
+            <span className={`conn conn-${conn}`}>
+              <span className="conn-dot" /> {conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Connecting'}
+            </span>
+          </div>
+        </header>
 
-      {data ? (
-        <StatusBar
-          queue={queue}
-          open={approvalOpen}
-          onToggle={() => {
-            setMenuOpen(false)
-            setApprovalOpen((v) => !v)
-          }}
-        />
-      ) : null}
+        {data ? <StatusBar queue={queue} open={approvalOpen} onToggle={() => setApprovalOpen((v) => !v)} /> : null}
 
-      {/* Everything below the status bar is one positioned zone so the approval panel can slide
-          down from directly under it - the global chrome above is never covered or clipped. */}
-      <div className="chat-zone">
+        {/* Everything below the status bar is one positioned zone so the approval panel can slide
+            down from directly under it - the global chrome above is never covered or clipped. */}
+        <div className="chat-zone">
       <main className="chat" ref={scrollRef}>
         <div className={`chat-inner ${!error && messages.length <= 1 ? 'is-sparse' : ''}`}>
           {error ? (
@@ -1430,13 +1593,7 @@ function App() {
         </div>
       </main>
 
-      <Composer
-        onSend={send}
-        onOpenApprovals={() => {
-          setMenuOpen(false)
-          setApprovalOpen(true)
-        }}
-      />
+      <Composer onSend={send} onOpenApprovals={openApprovals} />
 
       {approvalOpen ? (
         <div className="approval-scrim is-open" onClick={() => setApprovalOpen(false)}>
@@ -1453,19 +1610,8 @@ function App() {
           </div>
         </div>
       ) : null}
+        </div>
       </div>
-
-      {menuOpen ? (
-        <MenuDrawer
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          data={data}
-          seed={seed}
-          recoveredToday={recoveredToday}
-          scenarioMode={scenarioMode}
-          onScenario={selectScenario}
-        />
-      ) : null}
     </div>
   )
 }
