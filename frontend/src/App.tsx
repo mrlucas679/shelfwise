@@ -1191,25 +1191,38 @@ function Sidebar({
               <section className="rail-section">
                 {batches.length > 0 ? (
                   <ul className="lot-list">
-                    {batches.map((b, i) => (
-                      <li className="lot-row" key={b.lot ?? i}>
-                        <span className="lot-id tnum">{b.lot ?? '-'}</span>
-                        <span className="tnum">{formatValue(b.units)} units</span>
-                        <span className="tnum">{b.days_to_expiry != null ? `${b.days_to_expiry}d left` : '-'}</span>
-                        <span
-                          className={`lot-status tone-${
-                            b.stock_status === 'priority_sell' ? 'warn' : b.stock_status === 'blocked' ? 'risk' : 'mute'
-                          }`}
-                        >
-                          {b.stock_status === 'priority_sell' ? 'Sell first' : formatLabel(b.stock_status ?? 'normal')}
-                        </span>
-                      </li>
-                    ))}
+                    {batches.map((b, i) => {
+                      // Time leads - it is what decides the action. The crate code is fine print.
+                      const d = b.days_to_expiry
+                      const when =
+                        d == null
+                          ? 'No expiry date'
+                          : d <= 0
+                            ? 'Expires today'
+                            : d === 1
+                              ? 'Expires tomorrow'
+                              : `Expires in ${d} days`
+                      return (
+                        <li className="lot-row" key={b.lot ?? i}>
+                          <span className="lot-main">
+                            <span className={d != null && d <= 1 ? 'tone-warn' : ''}>{when}</span>
+                            {b.lot ? <small className="lot-code tnum">Lot {b.lot}</small> : null}
+                          </span>
+                          <span className="lot-units tnum">{formatValue(b.units)} units</span>
+                          {b.stock_status === 'priority_sell' ? (
+                            <span className="lot-status tone-warn">Sell first</span>
+                          ) : b.stock_status === 'blocked' ? (
+                            <span className="lot-status tone-risk">Do not sell</span>
+                          ) : null}
+                        </li>
+                      )
+                    })}
                   </ul>
-                ) : null}
-                {intel?.batch_split?.conclusion || batches.length === 0 ? (
-                  <p className="muted">{humanizeOperationalText(intel?.batch_split?.conclusion ?? 'No batch detail available.')}</p>
-                ) : null}
+                ) : (
+                  <p className="muted">
+                    {humanizeOperationalText(intel?.batch_split?.conclusion ?? 'No batch detail available.')}
+                  </p>
+                )}
               </section>
             ) : null}
 

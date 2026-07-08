@@ -1576,28 +1576,50 @@ p.snapshot-title {
 
 .lot-list {
   display: grid;
-  gap: 5px;
-  margin: 10px 0 0;
+  gap: 2px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
 
+/* One batch per row: when it expires (the decision driver) leads, the crate code is fine
+   print underneath, units on the right, and a badge only when action is needed. */
 .lot-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) auto auto auto;
-  gap: 8px;
+  display: flex;
   align-items: baseline;
-  font-size: 11.5px;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
 }
 
-.lot-id {
+.lot-row:last-child {
+  border-bottom: 0;
+}
+
+.lot-main {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
+
+.lot-code {
+  display: block;
   overflow: hidden;
-  color: var(--dim);
+  color: var(--mute);
+  font-size: 10.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.lot-units {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 12px;
+}
+
 .lot-status {
+  flex-shrink: 0;
   font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
