@@ -150,7 +150,28 @@ app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
 app.router.add_event_handler("startup", cold_chain_demo.start)
 app.router.add_event_handler("shutdown", cold_chain_demo.stop)
-write_limiter = TokenBucket()
+def _env_positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _env_positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# Operator knob: unattended harness/soak runs legitimately push write rates far past
+# interactive-use defaults. Defaults stay identical when the env vars are unset.
+write_limiter = TokenBucket(
+    capacity=_env_positive_int("SHELFWISE_WRITE_RATE_CAPACITY", 240),
+    refill_per_s=_env_positive_float("SHELFWISE_WRITE_RATE_REFILL_PER_S", 8.0),
+)
 WRITE_LIMIT_DEP = Depends(rate_limit(write_limiter))
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
 

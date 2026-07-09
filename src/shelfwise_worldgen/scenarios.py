@@ -30,7 +30,29 @@ SCENARIOS: dict[str, Scenario] = {
         stage=4,
         incident_days=(1, 2, 3),
         description="Stage 4 outage pressure during payday week with refrigerated stock exposed.",
-    )
+    ),
+    "stage2_midmonth_lull": Scenario(
+        id="stage2_midmonth_lull",
+        seed=77,
+        start=date(2026, 6, 8),
+        days=7,
+        area="observatory_blk7",
+        stage=2,
+        incident_days=(4,),
+        description="Mild stage 2 week in the mid-month demand lull; routine ops discipline.",
+    ),
+    "stage6_blackout_weekend": Scenario(
+        id="stage6_blackout_weekend",
+        seed=133,
+        start=date(2026, 6, 26),
+        days=5,
+        area="observatory_blk7",
+        stage=6,
+        incident_days=(0, 1, 2),
+        description=(
+            "Severe stage 6 stretch over a payday weekend; cold chain under maximum pressure."
+        ),
+    ),
 }
 
 

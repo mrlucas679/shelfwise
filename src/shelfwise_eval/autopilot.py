@@ -1,0 +1,89 @@
+"""Deterministic reviewer that stands in for a human during unattended harness runs.
+
+The application's HITL gate is deliberately human. During an unattended soak run there
+is no human, so the harness supplies one: a fixed, documented, auditable policy that
+approves or rejects every pending decision through the same public endpoints a person
+would use. Every verdict carries its reason so the run's trail shows not just what was
+decided, but why.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+APPROVE = "approve"
+REJECT = "reject"
+SKIP = "skip"
+
+# R1,000.00 in minor units: small enough that a wrong call is cheap, large enough that
+# routine markdowns and facility checks sail through.
+DEFAULT_EXPOSURE_LIMIT_MINOR_UNITS = 100_000
+
+_EXPOSURE_KEYS = (
+    "revenue_exposure_minor_units",
+    "stock_at_risk_minor_units",
+    "stockout_exposure_minor_units",
+    "incremental_profit_minor_units",
+)
+
+
+def review_decision(
+    decision: dict[str, Any],
+    *,
+    exposure_limit_minor_units: int = DEFAULT_EXPOSURE_LIMIT_MINOR_UNITS,
+) -> dict[str, Any]:
+    """Return the autopilot verdict for one decision.
+
+    Policy, in order:
+    - not pending -> SKIP (never re-decide a resolved decision)
+    - critic verdict "approved" -> APPROVE (the critic already validated the evidence)
+    - critic verdict "review_required" -> APPROVE when the money at stake is at or under
+      the exposure limit, REJECT when it is larger (a human should have seen it; absent
+      one, the safe unattended default is to hold the action back)
+    - anything else (critic rejected, missing verdict) -> REJECT
+    """
+    status = str(decision.get("status") or "")
+    exposure = _exposure_minor_units(decision)
+    if status != "pending":
+        return _verdict(SKIP, f"status is {status or 'unknown'}, not pending", exposure)
+
+    verdict = str(decision.get("critic_verdict") or "")
+    if verdict == "approved":
+        return _verdict(APPROVE, "critic approved the evidence chain", exposure)
+    if verdict == "review_required":
+        if exposure <= exposure_limit_minor_units:
+            return _verdict(
+                APPROVE,
+                f"exposure {exposure} minor units within limit {exposure_limit_minor_units}",
+                exposure,
+            )
+        return _verdict(
+            REJECT,
+            f"exposure {exposure} minor units exceeds limit {exposure_limit_minor_units}",
+            exposure,
+        )
+    reason = f"unattended default for critic verdict '{verdict or 'missing'}'"
+    return _verdict(REJECT, reason, exposure)
+
+
+def _exposure_minor_units(decision: dict[str, Any]) -> int:
+    expected = decision.get("expected_outcome")
+    if not isinstance(expected, dict):
+        return 0
+    for key in _EXPOSURE_KEYS:
+        value = expected.get(key)
+        if value is not None:
+            try:
+                return abs(int(value))
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _verdict(action: str, reason: str, exposure: int) -> dict[str, Any]:
+    return {
+        "action": action,
+        "reason": reason,
+        "exposure_minor_units": exposure,
+        "reviewer": "autopilot",
+    }
