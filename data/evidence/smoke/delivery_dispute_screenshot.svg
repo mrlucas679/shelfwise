@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Delivery dispute screenshot">
+  <rect width="640" height="360" fill="#f8fafc"/>
+  <rect x="80" y="55" width="480" height="250" rx="8" fill="#ffffff" stroke="#334155" stroke-width="4"/>
+  <rect x="80" y="55" width="480" height="42" fill="#e2e8f0"/>
+  <text x="105" y="84" font-family="Arial" font-size="18" fill="#0f172a">Supplier portal - delivery POD</text>
+  <text x="112" y="145" font-family="Arial" font-size="20" fill="#111827">Invoice: INV-99210</text>
+  <text x="112" y="186" font-family="Arial" font-size="20" fill="#b91c1c">Dispute: 4 crates short</text>
+  <text x="112" y="227" font-family="Arial" font-size="20" fill="#111827">Signed quantity: 36 crates</text>
+  <text x="112" y="268" font-family="Arial" font-size="20" fill="#111827">Received quantity: 32 crates</text>
+</svg>

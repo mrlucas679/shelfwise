@@ -35,11 +35,11 @@ Then open the app:
 ## Test everything in one notebook (GPU / remote Jupyter)
 
 [`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
-is a self-contained test harness — clone the repo, open the notebook, **Run All**, done. No
+is a self-contained test harness â€” clone the repo, open the notebook, **Run All**, done. No
 extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
 already in this repo. It installs the project, runs lint, the full test suite, the golden-
 scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
-actual port — and ends with one summary table so a failure anywhere is impossible to miss. An
+actual port â€” and ends with one summary table so a failure anywhere is impossible to miss. An
 optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
 endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
 fully offline/deterministic.
@@ -181,6 +181,20 @@ ShelfWise keeps one OpenAI-compatible inference contract and uses both AMD progr
 
 Routine agents can use a smaller model. Critic, Executive, and Orchestrator are routed to the stronger
 model tier because they review evidence, catch contradictions, and make the final recommendation.
+
+## Gemma 4 fine-tuning pipeline
+
+`src/shelfwise/training/` holds the multimodal LoRA fine-tune pipeline for
+`google/gemma-4-12B-it` (config: `configs/train_gemma4_multimodal.yaml`). On the Jupyter GPU pod:
+
+```bash
+source .venv/bin/activate
+bash scripts/jupyter_gemma4_check.sh      # fast, no training - deps, tests, dry-run eval
+bash scripts/jupyter_gemma4_bootstrap.sh  # full shakedown: preflight, smoke train, full train
+```
+
+Outputs land under `runs/gemma4-multimodal/` (timestamped, checkpointed, resumable).
+See also `notebooks/02_shelfwise_gemma_finetune.ipynb` for the notebook-driven text-only variant.
 
 ## License
 

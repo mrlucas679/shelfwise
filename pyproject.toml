@@ -15,6 +15,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+training = [
+  "accelerate>=1.0",
+  "datasets>=3.0",
+  "peft>=0.13",
+  "tokenizers>=0.20",
+  "transformers>=4.45",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
@@ -29,6 +36,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
+  "src/shelfwise",
   "src/shelfwise_action",
   "src/shelfwise_backend",
   "src/shelfwise_catalog",
