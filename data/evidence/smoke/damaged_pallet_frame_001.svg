@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Sampled video frame of damaged pallet">
+  <rect width="640" height="360" fill="#f8fafc"/>
+  <polygon points="126,260 486,260 536,175 188,175" fill="#d6d3d1" stroke="#57534e" stroke-width="5"/>
+  <rect x="190" y="106" width="90" height="72" fill="#e0f2fe" stroke="#0369a1" stroke-width="4"/>
+  <rect x="282" y="106" width="90" height="72" fill="#e0f2fe" stroke="#0369a1" stroke-width="4"/>
+  <rect x="374" y="106" width="90" height="72" fill="#fecaca" stroke="#b91c1c" stroke-width="4"/>
+  <path d="M388 117 L449 165 M449 117 L388 165" stroke="#b91c1c" stroke-width="8"/>
+  <text x="98" y="318" font-family="Arial" font-size="24" fill="#111827">Sampled frame: top-right crate crushed during offload</text>
+</svg>

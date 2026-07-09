@@ -1,0 +1,3 @@
+Video fallback record:
+Raw video tensor loading is not assumed in the smoke harness. Use sampled frames listed in metadata.frame_paths.
+Clip summary: offload camera shows pallet B tipping and right-side crates being compressed.

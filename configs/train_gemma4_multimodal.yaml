@@ -1,0 +1,65 @@
+model_name_or_path: google/gemma-4-12B-it
+output_dir: runs/gemma4-multimodal
+run_name: gemma4-mm
+max_seq_length: 2048
+optional_max_seq_length: 4096
+bf16: true
+fp16: false
+gradient_checkpointing: true
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 0.0002
+warmup_ratio: 0.03
+max_steps: 2000
+max_train_hours: 8
+save_steps: 25
+eval_steps: 25
+logging_steps: 5
+resume_from_checkpoint: null
+
+shakedown:
+  smoke_steps: 20
+  simulation_seed: 20260710
+  train_examples: 120
+  eval_examples: 12
+  mixture:
+    supply_chain_reasoning: 0.30
+    multimodal_evidence: 0.25
+    simulation_incident: 0.20
+    report_action: 0.15
+    tool_call_structured: 0.10
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [patch_dense, embedding_projection, q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  allow_missing_multimodal_targets: false
+
+modality:
+  enable_text: true
+  enable_image: true
+  enable_audio: true
+  enable_video: true
+  raw_audio_video_fallback: transcript_and_frames
+  fail_when_enabled_modality_missing: false
+
+data:
+  train_path: data/training/shelfwise_multimodal_smoke.jsonl
+  eval_path: data/eval/shelfwise_multimodal_eval.jsonl
+  strict_evidence: true
+  video_frame_sample_count: 3
+  mask_user_system_tokens: true
+  left_padding: true
+
+safety:
+  fail_on_tokenizer_placeholder_max_length: true
+  fail_on_nan_loss: true
+  timestamp_output_dir: true
+  save_git_commit: true
+
+serving:
+  adapter_name: shelfwise
+  routine_model_name: shelfwise
+  base_url: http://127.0.0.1:8000
+  require_tool_call_parse: false

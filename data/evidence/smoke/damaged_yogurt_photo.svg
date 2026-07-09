@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Damaged yoghurt case">
+  <rect width="640" height="360" fill="#f8fafc"/>
+  <rect x="78" y="108" width="480" height="160" rx="8" fill="#d9e2ec" stroke="#64748b" stroke-width="4"/>
+  <rect x="115" y="135" width="112" height="84" fill="#fff7ed" stroke="#b45309" stroke-width="4"/>
+  <rect x="263" y="135" width="112" height="84" fill="#fff7ed" stroke="#b45309" stroke-width="4"/>
+  <rect x="410" y="135" width="112" height="84" fill="#fee2e2" stroke="#b91c1c" stroke-width="4"/>
+  <path d="M420 145 L510 210 M510 145 L420 210" stroke="#b91c1c" stroke-width="10"/>
+  <text x="82" y="302" font-family="Arial" font-size="24" fill="#111827">Case photo: visible damage on right-side dairy pack</text>
+</svg>

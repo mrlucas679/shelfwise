@@ -1,0 +1,8 @@
+{
+  "sku": "DAIRY-YOG-500G",
+  "supplier": "Cape Fresh Dairies",
+  "temperature_c": 9.2,
+  "expected_temperature_max_c": 5.0,
+  "received_crates": 32,
+  "invoiced_crates": 36
+}

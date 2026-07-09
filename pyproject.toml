@@ -14,6 +14,13 @@ dev = [
   "pytest>=8",
   "ruff>=0.6",
 ]
+training = [
+  "accelerate>=1.0",
+  "datasets>=3.0",
+  "peft>=0.13",
+  "tokenizers>=0.20",
+  "transformers>=4.45",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -21,11 +28,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
+  "src/shelfwise",
   "src/shelfwise_action",
   "src/shelfwise_backend",
   "src/shelfwise_contracts",
   "src/shelfwise_data",
   "src/shelfwise_decision_science",
+  "src/shelfwise_eval",
   "src/shelfwise_inference",
   "src/shelfwise_memory",
 ]

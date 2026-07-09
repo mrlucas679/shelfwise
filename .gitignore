@@ -18,6 +18,7 @@ plot/
 research/
 dist/
 build/
+runs/
 node_modules/
 *.tsbuildinfo
 .DS_Store
