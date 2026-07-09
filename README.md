@@ -13,6 +13,7 @@ deterministic store-intelligence tools and human approval.
 ## Quick Start
 
 ```powershell
+python -m pip install -e ".[dev]"
 $env:PYTHONPATH="src"
 python -m pytest -q
 python -m uvicorn shelfwise_backend.app:app --host 127.0.0.1 --port 8000
@@ -29,6 +30,18 @@ npm run dev -- --host 127.0.0.1 --port 5173
 Then open the app:
 
 - `http://127.0.0.1:5173`
+
+## Test everything in one notebook (GPU / remote Jupyter)
+
+[`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
+is a self-contained test harness — clone the repo, open the notebook, **Run All**, done. No
+extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
+already in this repo. It installs the project, runs lint, the full test suite, the golden-
+scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
+actual port — and ends with one summary table so a failure anywhere is impossible to miss. An
+optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
+endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
+fully offline/deterministic.
 
 Connected API endpoints:
 
