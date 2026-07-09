@@ -165,6 +165,96 @@ def test_ingest_sale_runs_sales_cascade() -> None:
     assert body["cascade"]["decision"]["action"]["type"] == "record_sale"
 
 
+def _catalog_sale_event(
+    event_id: str,
+    *,
+    sku: str,
+    unit_price_cents: int,
+    catalog_price_cents: int,
+) -> dict[str, object]:
+    return {
+        "id": event_id,
+        "type": "sale",
+        "ts": "2026-07-06T10:14:00Z",
+        "actor": "store_12",
+        "source": "pos_csv",
+        "tenant_id": "sa_retail_demo",
+        "payload": {
+            "sku": sku,
+            "units": 3,
+            "unit_price_cents": unit_price_cents,
+            "catalog_price_cents": catalog_price_cents,
+        },
+    }
+
+
+def test_ingest_in_band_catalog_sale_records_without_minting_a_decision() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/ingest",
+        json=_catalog_sale_event(
+            "evt_sale_inband_p1",
+            sku="P00000042",
+            unit_price_cents=2_090,
+            catalog_price_cents=1_999,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["cascade"] is None
+
+
+def test_ingest_outlier_catalog_sale_mints_pending_price_exception() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/ingest",
+        json=_catalog_sale_event(
+            "evt_sale_outlier_p2",
+            sku="P00000077",
+            unit_price_cents=1_099,
+            catalog_price_cents=1_999,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "accepted"
+    cascade = body["cascade"]
+    assert cascade["scenario"] == "pos_price_outlier_review"
+    decision = cascade["decision"]
+    assert decision["status"] == "pending"
+    assert decision["role"] == "sales_manager"
+    assert decision["action"]["type"] == "review_price_exception"
+    assert decision["action"]["params"]["sku"] == "P00000077"
+
+    listed = client.get(f"/decisions/{decision['id']}")
+    assert listed.status_code == 200
+    assert listed.json()["decision"]["status"] == "pending"
+
+
+def test_ingest_catalog_sale_without_reference_price_stays_quiet() -> None:
+    client = TestClient(app)
+
+    event = _catalog_sale_event(
+        "evt_sale_no_reference_p3",
+        sku="P00000088",
+        unit_price_cents=1_099,
+        catalog_price_cents=1_999,
+    )
+    del event["payload"]["catalog_price_cents"]
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["cascade"] is None
+
+
 def test_ingest_cold_chain_alert_runs_facilities_cascade() -> None:
     client = TestClient(app)
 

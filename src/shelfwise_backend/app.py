@@ -51,6 +51,7 @@ from shelfwise_worldgen import create_worldgen_run_store
 from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
 from .cascade import (
+    run_catalog_price_check,
     run_cold_chain_cascade,
     run_critic_rejection_cascade,
     run_golden_cascade,
@@ -1380,6 +1381,13 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
         return _record_cascade(result)
     if event.type is EventType.SALE and sku == "4011":
         result = run_sales_cascade(event)
+        _attach_event_causality(result, event)
+        result["decision"] = decision_store.upsert(result["decision"])
+        return _record_cascade(result)
+    if event.type is EventType.SALE:
+        result = run_catalog_price_check(event)
+        if result is None:
+            return None
         _attach_event_causality(result, event)
         result["decision"] = decision_store.upsert(result["decision"])
         return _record_cascade(result)

@@ -115,6 +115,37 @@ def test_world_accepts_a_catalog_assortment():
     assert {event.payload["sku"] for event in events if "sku" in event.payload}
 
 
+def test_sales_carry_catalog_reference_price():
+    events = list(World(WorldConfig(seed=5, days=2)).run())
+    sales = [event for event in events if event.type is EventType.SALE]
+    assert sales
+    for sale in sales:
+        assert int(sale.payload["catalog_price_cents"]) > 0
+        assert int(sale.payload["unit_price_cents"]) > 0
+
+
+def test_mispricing_is_rare_and_deterministic():
+    assortment = sample_assortment(11, size=400)
+    config = WorldConfig(seed=11, days=3, products=assortment)
+
+    def _outlier_count(events) -> tuple[int, int]:
+        sales = [event for event in events if event.type is EventType.SALE]
+        outliers = 0
+        for sale in sales:
+            observed = int(sale.payload["unit_price_cents"])
+            catalog = int(sale.payload["catalog_price_cents"])
+            if abs(observed - catalog) > catalog * 0.15:
+                outliers += 1
+        return outliers, len(sales)
+
+    first_outliers, first_sales = _outlier_count(World(config).run())
+    second_outliers, _ = _outlier_count(World(config).run())
+
+    assert first_outliers == second_outliers, "mispricing must be seed-deterministic"
+    assert first_outliers > 0, "some sales should be genuinely mispriced"
+    assert first_outliers < first_sales * 0.06, "mispricing should stay rare"
+
+
 def test_memory_seed_covers_catalog_with_cold_chain_join_keys():
     assortment = sample_assortment(9, size=80)
     seed = build_memory_seed(WorldConfig(seed=9, products=assortment))

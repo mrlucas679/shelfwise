@@ -721,6 +721,137 @@ def run_sales_cascade(event: Event | None = None) -> dict[str, Any]:
     }
 
 
+# Normal till variance (promotions, rounding, shelf-band pricing) sits within +/-10% of the
+# catalogue price; anything past this band is a genuine exception worth a manager's attention.
+# A store selling thousands of SKUs cannot page a human for routine variance, so in-band sales
+# deliberately return None (recorded as demand signals, no decision minted).
+PRICE_EXCEPTION_TOLERANCE = Decimal("0.15")
+_PRICE_OUTLIER_SCENARIO_ID = "pos_price_outlier_review"
+
+
+def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
+    """Check any SKU's observed till price against its catalogue price.
+
+    This is the whole-store generalization of run_sales_cascade's price-integrity idea:
+    it works for every product that carries both an observed and a catalogue price, not
+    just the seeded hero SKU. Only genuine outliers produce a pending HITL decision.
+    """
+    payload = event.payload
+    try:
+        unit_price_c = int(payload["unit_price_cents"])
+        catalog_price_c = int(payload["catalog_price_cents"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if catalog_price_c <= 0 or unit_price_c < 0:
+        return None
+
+    started = perf_counter()
+    delta_pct = (Decimal(unit_price_c) - Decimal(catalog_price_c)) / Decimal(catalog_price_c)
+    span = _span(
+        "decision_science.check_price_band",
+        started,
+        {"delta_pct": str(delta_pct), "tolerance": str(PRICE_EXCEPTION_TOLERANCE)},
+    )
+    if abs(delta_pct) <= PRICE_EXCEPTION_TOLERANCE:
+        return None
+
+    correlation_id = event.correlation_id
+    sku = str(payload.get("sku", "unknown"))
+    units = _int_payload(payload, "units", 1)
+    observed = Money(minor_units=unit_price_c)
+    catalog = Money(minor_units=catalog_price_c)
+    exposure = Money(minor_units=(unit_price_c - catalog_price_c) * max(units, 1))
+    delta_display = f"{(delta_pct * 100).quantize(Decimal('0.1'))}%"
+    source_pos = SourceRef.dataset("worldgen_pos", f"sale:{event.id}")
+    source_catalog = SourceRef.dataset("worldgen_catalog", f"catalog:sku:{sku}")
+
+    action = RecommendedAction(
+        "review_price_exception",
+        {
+            "sku": sku,
+            "observed_unit_price": str(observed.amount),
+            "catalog_unit_price": str(catalog.amount),
+            "units": str(units),
+            "price_delta_pct": delta_display,
+        },
+        RiskTier.MEDIUM,
+    )
+    evidence = [
+        EvidenceObject(
+            agent=AgentName.SALES,
+            conclusion=(
+                f"Till price R{observed.amount} for SKU {sku} sits {delta_display} away from "
+                f"catalogue price R{catalog.amount} - outside the normal variance band."
+            ),
+            supporting_data=[
+                _supporting_fact("observed_unit_price", observed, str(source_pos), "pos_event"),
+                _supporting_fact(
+                    "catalog_unit_price", catalog, str(source_catalog), "product_master"
+                ),
+                _supporting_fact(
+                    "price_delta_pct", delta_display, str(source_catalog), "price_band_check"
+                ),
+            ],
+            confidence=Decimal("0.78"),
+            recommended_action=action,
+            sources=(source_pos, source_catalog),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.CRITIC,
+            conclusion=(
+                "Price deviation exceeds the tolerated band; hold write-back until a manager "
+                "confirms whether this is a mislabel, an override, or a catalogue error."
+            ),
+            supporting_data=[
+                _supporting_fact("within_tolerance", False, "critic_gate", "price_band_check"),
+                _supporting_fact(
+                    "tolerance_pct",
+                    f"{(PRICE_EXCEPTION_TOLERANCE * 100).quantize(Decimal('1'))}%",
+                    "critic_gate",
+                    "price_band_check",
+                ),
+            ],
+            confidence=Decimal("0.86"),
+            recommended_action=action,
+            sources=(SourceRef.tool("critic_gate"),),
+            requires_human_review=True,
+        ),
+    ]
+    decision = Decision(
+        id=f"dec_{_slug(correlation_id)}",
+        status=DecisionStatus.PENDING,
+        action=action,
+        caused_by=(correlation_id,),
+        summary=(
+            f"Pending price exception for SKU {sku}: till R{observed.amount} vs "
+            f"catalogue R{catalog.amount} ({delta_display})."
+        ),
+    )
+    decision_payload = decision.to_dict()
+    decision_payload["tenant_id"] = str(event.tenant_id or "sa_retail_demo")
+    decision_payload["role"] = "sales_manager"
+    decision_payload["critic_verdict"] = "review_required"
+    decision_payload["expected_outcome"] = {
+        "revenue_exposure": exposure.to_dict(),
+        "revenue_exposure_minor_units": exposure.minor_units,
+        "price_delta_pct": delta_display,
+    }
+
+    return {
+        "correlation_id": correlation_id,
+        "scenario": _PRICE_OUTLIER_SCENARIO_ID,
+        "evidence": [item.to_dict() for item in evidence],
+        "decision": decision_payload,
+        "trace": [span.to_dict()],
+        "inference": load_inference_config().to_public_dict(),
+        "learning": {
+            "status": "armed",
+            "message": "After review, feed the confirmed cause back into catalogue hygiene.",
+        },
+    }
+
+
 def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
     """Run the measured cold-chain alert path into facilities HITL review."""
 

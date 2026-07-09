@@ -68,7 +68,8 @@ class World:
                         "store_id": self.cfg.store_id,
                         "sku": _sku(product),
                         "units": sold,
-                        "unit_price_cents": _price(product, rng),
+                        "unit_price_cents": _till_price(product, rng),
+                        "catalog_price_cents": _catalog_price(product),
                     },
                 )
             )
@@ -186,6 +187,29 @@ def _price(product: object, rng: Random) -> int:
     low = int(getattr(product, "price_low_c", getattr(product, "price_cents", 100)))
     high = int(getattr(product, "price_high_c", getattr(product, "price_cents", low)))
     return rng.randint(min(low, high), max(low, high))
+
+
+MISPRICE_RATE = 0.02
+_MISPRICE_FACTORS = (0.55, 0.65, 1.45, 1.6)
+
+
+def _till_price(product: object, rng: Random) -> int:
+    """Observed till price: normal band variance, with rare deterministic mispricing.
+
+    Most sales stay inside the product's normal price band; a small, seed-driven
+    fraction land far outside it (a stale shelf label, a fat-fingered override).
+    The world only emits the odd number - deciding whether it is a problem is the
+    application's job, never the simulator's.
+    """
+    price = _price(product, rng)
+    if rng.random() < MISPRICE_RATE:
+        price = max(99, int(price * rng.choice(_MISPRICE_FACTORS)))
+    return price
+
+
+def _catalog_price(product: object) -> int:
+    """Return the master-data catalogue price for either product implementation."""
+    return int(getattr(product, "price_cents", 0))
 
 
 __all__ = ["World", "WorldConfig"]
