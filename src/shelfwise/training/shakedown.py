@@ -46,12 +46,17 @@ def run_shakedown(
             "Video is frame-sampled unless the processor receives raw video tensors.",
         ],
     }
+    # 2000 steps x (batch 1 x grad-accum 8) consumes 16k samples; 120 unique rows would mean
+    # ~133 epochs of the same examples - memorization, not learning. Default to ~4 epochs of
+    # fresh data and let the operator scale via env without touching code.
+    train_examples = _env_positive_int("SHAKEDOWN_TRAIN_EXAMPLES", 4000)
+    eval_examples = _env_positive_int("SHAKEDOWN_EVAL_EXAMPLES", 200)
     dataset_report = build_shakedown_datasets(
         output_dir=datasets_dir,
         repo_root=repo_root,
-        seed=20260710,
-        train_examples=120,
-        eval_examples=12,
+        seed=_env_positive_int("SHAKEDOWN_SEED", 20260710),
+        train_examples=train_examples,
+        eval_examples=eval_examples,
     )
     report["dataset"] = dataset_report
     report["stages"].append("simulation_dataset_generation")
@@ -181,3 +186,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def _env_positive_int(name: str, default: int) -> int:
+    import os
+
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
