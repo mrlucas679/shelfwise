@@ -1042,13 +1042,26 @@ def demo_worldgen_drill(
     scenario_id: str,
     limit: int = 80,
     seed_override: int | None = None,
+    assortment_size: int | None = None,
+    catalog_scale: str = "supermarket",
 ) -> dict[str, object]:
     if limit <= 0 or limit > 500:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    if assortment_size is not None and not (0 < assortment_size <= 20_000):
+        raise HTTPException(
+            status_code=422, detail="assortment_size must be between 1 and 20000"
+        )
     try:
-        world, schedule = build_worldgen_scenario(scenario_id, seed_override=seed_override)
+        world, schedule = build_worldgen_scenario(
+            scenario_id,
+            seed_override=seed_override,
+            assortment_size=assortment_size,
+            catalog_scale=catalog_scale,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Scenario not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     run_id = f"worldrun_{uuid4().hex[:12]}"
     records: list[dict[str, object]] = []

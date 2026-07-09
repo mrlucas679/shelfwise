@@ -90,6 +90,24 @@ def test_scenarios_carry_no_answer():
     assert not hasattr(scenario, "expected_decision")
 
 
+def test_assortment_size_swaps_in_the_full_generated_catalog():
+    world, _schedule = build("stage4_payday_coldchain", assortment_size=500)
+    assert len(world.products) == 500
+    departments = {product.department for product in world.products}
+    assert len(departments) > 5, "a real assortment should span many departments"
+
+
+def test_default_build_keeps_the_small_ground_truth_set():
+    world, _schedule = build("stage4_payday_coldchain")
+    assert len(world.products) == 6
+
+
+def test_assortment_is_deterministic_for_the_same_seed():
+    first, _schedule = build("stage4_payday_coldchain", seed_override=7, assortment_size=200)
+    second, _schedule = build("stage4_payday_coldchain", seed_override=7, assortment_size=200)
+    assert [p.product_id for p in first.products] == [p.product_id for p in second.products]
+
+
 def test_world_accepts_a_catalog_assortment():
     assortment = sample_assortment(9, size=80)
     events = list(World(WorldConfig(seed=9, days=1, products=assortment)).run())
@@ -191,6 +209,41 @@ def test_worldgen_demo_rejects_unknown_scenario():
     response = client.get("/demo/worldgen/not-a-scenario")
 
     assert response.status_code == 404
+
+
+def test_worldgen_demo_can_sweep_the_full_generated_catalog():
+    client = TestClient(app)
+
+    response = client.get(
+        "/demo/worldgen/stage4_payday_coldchain"
+        "?limit=50&assortment_size=300&seed_override=99"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["events_total"] > 0
+
+    events = client.get("/events?limit=200").json()["events"]
+    skus = {event["payload"].get("sku") for event in events if "sku" in event.get("payload", {})}
+    assert len(skus) > 5, "a 300-product assortment should surface many distinct SKUs"
+
+
+def test_worldgen_demo_rejects_out_of_range_assortment_size():
+    client = TestClient(app)
+
+    response = client.get("/demo/worldgen/stage4_payday_coldchain?assortment_size=0")
+
+    assert response.status_code == 422
+
+
+def test_worldgen_demo_rejects_unknown_catalog_scale():
+    client = TestClient(app)
+
+    response = client.get(
+        "/demo/worldgen/stage4_payday_coldchain?assortment_size=50&catalog_scale=not-a-scale"
+    )
+
+    assert response.status_code == 422
 
 
 def test_worldgen_run_store_filters_by_tenant_and_validates_limit():
