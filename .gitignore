@@ -10,6 +10,7 @@ venv/
 !.env.example
 .runtime-logs/
 data/training/
+data/harness_runs/
 .agents/
 .claude/
 .codex/
