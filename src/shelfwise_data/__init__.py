@@ -1,3 +1,5 @@
+from .context import build_context, build_thresholds
+from .csv_connector import CsvConnector
 from .seed import (
     DEFAULT_DATASETS,
     HERO_SKU,
@@ -37,6 +39,7 @@ __all__ = [
     "HERO_SKU",
     "REFERENCE_NOW",
     "BatchPosition",
+    "CsvConnector",
     "DecisionOutcome",
     "DeliveryReceipt",
     "DeliveryReconciliation",
@@ -50,7 +53,9 @@ __all__ = [
     "SupplierCoverPlan",
     "SupplierCoverRequest",
     "SupplierRow",
+    "build_context",
     "build_store_intelligence_demo",
+    "build_thresholds",
     "load_products",
     "load_sales",
     "load_seeded_scenario",

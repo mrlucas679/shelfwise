@@ -36,6 +36,13 @@ http://localhost:8000/health
 http://localhost:8000/readiness
 http://localhost:8000/demo/golden
 http://localhost:8000/demo/critic-rejection
+http://localhost:8000/demo/procurement
+http://localhost:8000/demo/sales
+http://localhost:8000/demo/cold-chain
+http://localhost:8000/products/attention
+http://localhost:8000/products/search?q=amasi
+http://localhost:8000/mlops/observability
+http://localhost:8000/connectors/systems
 ```
 
 ## What To Look For
@@ -47,6 +54,9 @@ http://localhost:8000/demo/critic-rejection
 - The side rail includes a decision log row so the audit trail is visible during the demo.
 - The side rail shows numeric proof: FEFO sell-first units, normal units, delivery gap, supplier
   action, and outcome-learning signal.
+- Product-scale lookup stays search-first in the workspace; the sidebar only shows bounded attention
+  groups such as `Sell first`, while selected product cards reveal FEFO lot rotation one level
+  deeper.
 - The golden cascade reads the planted store scenario from `data/datasets/*.csv`, exposed through
   `/data/seed/summary`.
 - Every recommendation includes sources and supporting data.
@@ -54,9 +64,16 @@ http://localhost:8000/demo/critic-rejection
 - The action can be approved or rejected through the UI or HITL endpoints.
 - The Critic rejection scenario blocks an unsupported supplier-switch claim and downgrades it to
   monitor until sourced backup-supplier evidence exists.
-- Approval records a mocked write-back receipt, measured outcome, and visible threshold-adjustment
-  learning event.
+- Approval records a HITL-gated write-back task, measured outcome, and visible
+  threshold-adjustment learning event.
+- Approved actions create HITL-gated pending write-back tasks; no source system mutation is exposed.
 - Trace spans show the deterministic decision-science tools behind the recommendation.
+- `/mlops/observability` shows tenant decision, inference, connector, event, write-back, worker, and
+  learning metrics.
+- `/connectors/systems` and `/connectors/{system}/intake` show the provenance-backed connector layer
+  for SAP, Odoo, SYSPRO, Shopify, Square, and Lightspeed-style payloads.
+- The API has prompt-injection fencing, write-path rate limiting, JWT/API-key gates, upload sniffing,
+  formula neutralization, and a 6 MB default app-level request body cap.
 - `/demo/golden` exposes `store_intelligence` for batch split, delivery reconciliation, supplier
   cover, and learning summary.
 - `/intelligence/*` endpoints let those same store skills run against new request payloads.

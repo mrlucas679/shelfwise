@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import urlsplit, urlunsplit
 
 
 class ProviderKind(StrEnum):
@@ -55,10 +56,13 @@ class InferenceConfig:
         }
 
     def chat_completions_url(self) -> str:
-        base_url = self.base_url.rstrip("/")
-        if base_url.endswith("/v1"):
-            return f"{base_url}/chat/completions"
-        return f"{base_url}/v1/chat/completions"
+        # Use urlsplit/urlunsplit (not plain string concatenation) so a base_url that
+        # already carries a query string (e.g. a proxied notebook endpoint requiring
+        # `?token=...`) still gets the path appended *before* the query, not after it.
+        scheme, netloc, path, query, fragment = urlsplit(self.base_url)
+        path = path.rstrip("/")
+        path = f"{path}/chat/completions" if path.endswith("/v1") else f"{path}/v1/chat/completions"
+        return urlunsplit((scheme, netloc, path, query, fragment))
 
 
 def _detect_provider(base_url: str) -> ProviderKind:

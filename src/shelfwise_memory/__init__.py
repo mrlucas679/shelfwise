@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from threading import Lock
 from typing import Any
+
+from shelfwise_storage import connect, jsonb
+from shelfwise_storage.rls import apply_tenant_rls
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +40,7 @@ class LearningEvent:
         }
 
 
-class LearningStore:
+class InMemoryLearningStore:
     """Deterministic memory layer for the demo's visible learning moment."""
 
     def __init__(self) -> None:
@@ -73,58 +77,233 @@ class LearningStore:
             action = decision.get("action") or {}
             params = action.get("params") or {}
             sku = str(params.get("sku") or "unknown")
-            expected = decision.get("expected_outcome") or {}
-            predicted_units = _int(expected.get("predicted_sell_through_units"), default=0)
-            predicted_waste = _int(expected.get("predicted_waste_units"), default=0)
-            uplift_units = _uplift_units(predicted_units)
-            actual_units = predicted_units + uplift_units
-            actual_waste = max(predicted_waste - uplift_units, 0)
-            margin_cents = _int(expected.get("markdown_margin_minor_units"), default=0)
-            expected_recovered_cents = _int(
-                expected.get("incremental_profit_minor_units"),
-                default=0,
-            )
-            actual_recovered_cents = expected_recovered_cents + uplift_units * margin_cents
             metric = f"{sku}:markdown_sell_through_target_units"
-            previous_threshold = self._thresholds.get(metric, predicted_units)
-            updated_threshold = max(previous_threshold, actual_units)
-            self._thresholds[metric] = updated_threshold
-
-            outcome = {
-                "units_cleared": actual_units,
-                "waste_units": actual_waste,
-                "rand_recovered": _money_dict(actual_recovered_cents),
-                "success_score": _success_score(
-                    predicted_units=predicted_units,
-                    actual_units=actual_units,
-                    predicted_waste=predicted_waste,
-                    actual_waste=actual_waste,
-                ),
-            }
-            created_at = datetime.now(UTC).isoformat()
-            event = LearningEvent(
-                id=f"learn_{decision_id.removeprefix('dec_')}",
-                decision_id=decision_id,
-                sku=sku,
-                metric=metric,
-                previous_threshold=previous_threshold,
-                updated_threshold=updated_threshold,
-                delta_units=updated_threshold - previous_threshold,
-                outcome=outcome,
-                message=(
-                    f"Threshold adjusted for SKU {sku}: expected {predicted_units} units, "
-                    f"measured {actual_units}; next markdown target is {updated_threshold}."
-                ),
-                created_at=created_at,
+            event = _build_learning_event(
+                decision,
+                previous_threshold=self._thresholds.get(metric),
             )
+            self._thresholds[metric] = event.updated_threshold
             self._events_by_decision[decision_id] = event
             return event.to_dict()
+
+
+class PostgresLearningStore:
+    """Postgres-backed learning store for approved outcomes and threshold memory."""
+
+    def __init__(self, database_url: str) -> None:
+        if not database_url:
+            raise ValueError("DATABASE_URL is required for PostgresLearningStore")
+        self._database_url = database_url
+        self._ensure_schema()
+
+    def thresholds(self) -> dict[str, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "select metric, threshold_units from shelfwise_learning_thresholds"
+            ).fetchall()
+        return {row["metric"]: int(row["threshold_units"]) for row in rows}
+
+    def list_events(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                select payload
+                from shelfwise_learning_events
+                order by created_at desc, decision_id
+                """
+            ).fetchall()
+        return [deepcopy(row["payload"]) for row in rows]
+
+    def clear(self) -> None:
+        with self._connect() as conn:
+            conn.execute("delete from shelfwise_learning_events")
+            conn.execute("delete from shelfwise_learning_thresholds")
+            conn.commit()
+
+    def record_approved_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        if decision.get("status") != "approved":
+            raise ValueError("learning requires an approved decision")
+        decision_id = str(decision.get("id", ""))
+        if not decision_id:
+            raise ValueError("decision must include id")
+
+        with self._connect() as conn:
+            existing = conn.execute(
+                "select payload from shelfwise_learning_events where decision_id = %s",
+                (decision_id,),
+            ).fetchone()
+            if existing is not None:
+                return deepcopy(existing["payload"])
+
+            action = decision.get("action") or {}
+            params = action.get("params") or {}
+            tenant_id = _tenant_id(decision)
+            sku = str(params.get("sku") or "unknown")
+            metric = f"{sku}:markdown_sell_through_target_units"
+            threshold_row = conn.execute(
+                """
+                select threshold_units
+                from shelfwise_learning_thresholds
+                where tenant_id = %s and metric = %s
+                for update
+                """,
+                (tenant_id, metric),
+            ).fetchone()
+            previous_threshold = (
+                int(threshold_row["threshold_units"]) if threshold_row is not None else None
+            )
+            event = _build_learning_event(decision, previous_threshold=previous_threshold)
+            payload = event.to_dict()
+            conn.execute(
+                """
+                insert into shelfwise_learning_thresholds
+                    (tenant_id, metric, sku, threshold_units, updated_at)
+                values (%s, %s, %s, %s, %s)
+                on conflict (tenant_id, metric) do update
+                set threshold_units = excluded.threshold_units,
+                    updated_at = excluded.updated_at
+                """,
+                (tenant_id, event.metric, event.sku, event.updated_threshold, event.created_at),
+            )
+            conn.execute(
+                """
+                insert into shelfwise_learning_events (tenant_id, decision_id, payload, created_at)
+                values (%s, %s, %s, %s)
+                """,
+                (tenant_id, event.decision_id, jsonb(payload), event.created_at),
+            )
+            conn.commit()
+            return payload
+
+    def _ensure_schema(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                create table if not exists shelfwise_learning_thresholds (
+                    tenant_id text not null default 'default',
+                    metric text not null,
+                    sku text not null,
+                    threshold_units integer not null,
+                    updated_at timestamptz not null,
+                    primary key (tenant_id, metric)
+                )
+                """
+            )
+            conn.execute(
+                """
+                alter table shelfwise_learning_thresholds
+                add column if not exists tenant_id text not null default 'default'
+                """
+            )
+            conn.execute(
+                """
+                create unique index if not exists ux_shelfwise_learning_thresholds_tenant_metric
+                on shelfwise_learning_thresholds (tenant_id, metric)
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists shelfwise_learning_events (
+                    tenant_id text not null default 'default',
+                    decision_id text not null,
+                    payload jsonb not null,
+                    created_at timestamptz not null,
+                    primary key (tenant_id, decision_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                alter table shelfwise_learning_events
+                add column if not exists tenant_id text not null default 'default'
+                """
+            )
+            conn.execute(
+                """
+                create index if not exists idx_shelfwise_learning_events_tenant_created
+                on shelfwise_learning_events (tenant_id, created_at desc)
+                """
+            )
+            apply_tenant_rls(
+                conn,
+                ("shelfwise_learning_thresholds", "shelfwise_learning_events"),
+            )
+            conn.commit()
+
+    def _connect(self) -> Any:
+        return connect(self._database_url)
+
+
+def create_learning_store() -> InMemoryLearningStore | PostgresLearningStore:
+    backend = os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower()
+    if backend == "memory":
+        return InMemoryLearningStore()
+    if backend == "postgres":
+        return PostgresLearningStore(os.getenv("DATABASE_URL", ""))
+    raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
 
 
 def _int(value: object, *, default: int) -> int:
     if value is None or value == "":
         return default
     return int(Decimal(str(value)).to_integral_value())
+
+
+def _tenant_id(decision: dict[str, Any]) -> str:
+    tenant_id = str(decision.get("tenant_id") or "").strip()
+    return tenant_id or "default"
+
+
+def _build_learning_event(
+    decision: dict[str, Any],
+    *,
+    previous_threshold: int | None,
+) -> LearningEvent:
+    decision_id = str(decision.get("id", ""))
+    action = decision.get("action") or {}
+    params = action.get("params") or {}
+    sku = str(params.get("sku") or "unknown")
+    expected = decision.get("expected_outcome") or {}
+    predicted_units = _int(expected.get("predicted_sell_through_units"), default=0)
+    predicted_waste = _int(expected.get("predicted_waste_units"), default=0)
+    uplift_units = _uplift_units(predicted_units)
+    actual_units = predicted_units + uplift_units
+    actual_waste = max(predicted_waste - uplift_units, 0)
+    margin_cents = _int(expected.get("markdown_margin_minor_units"), default=0)
+    expected_recovered_cents = _int(
+        expected.get("incremental_profit_minor_units"),
+        default=0,
+    )
+    actual_recovered_cents = expected_recovered_cents + uplift_units * margin_cents
+    metric = f"{sku}:markdown_sell_through_target_units"
+    base_threshold = predicted_units if previous_threshold is None else previous_threshold
+    updated_threshold = max(base_threshold, actual_units)
+    outcome = {
+        "units_cleared": actual_units,
+        "waste_units": actual_waste,
+        "rand_recovered": _money_dict(actual_recovered_cents),
+        "success_score": _success_score(
+            predicted_units=predicted_units,
+            actual_units=actual_units,
+            predicted_waste=predicted_waste,
+            actual_waste=actual_waste,
+        ),
+    }
+    return LearningEvent(
+        id=f"learn_{decision_id.removeprefix('dec_')}",
+        decision_id=decision_id,
+        sku=sku,
+        metric=metric,
+        previous_threshold=base_threshold,
+        updated_threshold=updated_threshold,
+        delta_units=updated_threshold - base_threshold,
+        outcome=outcome,
+        message=(
+            f"Threshold adjusted for SKU {sku}: expected {predicted_units} units, "
+            f"measured {actual_units}; next markdown target is {updated_threshold}."
+        ),
+        created_at=datetime.now(UTC).isoformat(),
+    )
 
 
 def _uplift_units(predicted_units: int) -> int:
@@ -151,4 +330,13 @@ def _success_score(
     return str(score.quantize(Decimal("0.01")))
 
 
-__all__ = ["LearningEvent", "LearningStore"]
+LearningStore = InMemoryLearningStore
+
+
+__all__ = [
+    "InMemoryLearningStore",
+    "LearningEvent",
+    "LearningStore",
+    "PostgresLearningStore",
+    "create_learning_store",
+]

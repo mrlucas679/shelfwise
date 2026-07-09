@@ -6,6 +6,11 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115",
+  "httpx>=0.27",
+  "psycopg[binary]>=3.2",
+  "pydantic>=2.7",
+  "python-multipart>=0.0.20",
+  "redis>=5",
   "uvicorn[standard]>=0.30",
 ]
 
@@ -13,6 +18,9 @@ dependencies = [
 dev = [
   "pytest>=8",
   "ruff>=0.6",
+]
+tsfm = [
+  "httpx>=0.27",
 ]
 
 [build-system]
@@ -23,11 +31,20 @@ build-backend = "hatchling.build"
 packages = [
   "src/shelfwise_action",
   "src/shelfwise_backend",
+  "src/shelfwise_catalog",
+  "src/shelfwise_connectors",
   "src/shelfwise_contracts",
   "src/shelfwise_data",
   "src/shelfwise_decision_science",
+  "src/shelfwise_eval",
   "src/shelfwise_inference",
   "src/shelfwise_memory",
+  "src/shelfwise_multimodal",
+  "src/shelfwise_mlops",
+  "src/shelfwise_resilience",
+  "src/shelfwise_storage",
+  "src/shelfwise_synthdata",
+  "src/shelfwise_worldgen",
 ]
 
 [tool.pytest.ini_options]
