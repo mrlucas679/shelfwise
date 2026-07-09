@@ -47,6 +47,8 @@ type TraceSpan = { name?: string; status?: string; ms?: number; detail?: Record<
 type InferenceConfig = {
   provider?: string
   base_url_configured?: boolean
+  base_url_host?: string
+  accelerator?: string
   routine_model?: string
   strong_model?: string
   api_key_present?: boolean
@@ -258,18 +260,32 @@ type WorkspaceOpenOptions = { query?: string }
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
 type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
+declare global {
+  interface Window {
+    SHELFWISE_CONFIG?: {
+      apiBase?: string
+      apiKey?: string
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = 'http://localhost:8000'
 const DEMO_PATH = '/demo/golden'
 
+// Runtime config (public/shelfwise-config.js) lets a deployed bundle point at any backend
+// without a rebuild; build-time VITE_* vars stay as the fallback.
+function runtimeConfig(): Window['SHELFWISE_CONFIG'] {
+  return typeof window === 'undefined' ? undefined : window.SHELFWISE_CONFIG
+}
 function configuredBase(): string {
   const env = import.meta.env as Record<string, string | undefined>
-  return (env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
+  return (runtimeConfig()?.apiBase ?? env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
 }
 function apiKey(): string {
-  return ((import.meta.env as Record<string, string | undefined>).VITE_API_KEY ?? '').trim()
+  return (runtimeConfig()?.apiKey ?? (import.meta.env as Record<string, string | undefined>).VITE_API_KEY ?? '').trim()
 }
 function authHeaders(): Record<string, string> {
   const key = apiKey()
@@ -1190,6 +1206,37 @@ function ThemeRow() {
       <span className="set-label">Appearance</span>
       <span className="set-value">{theme === 'dark' ? 'Dark' : 'Light'}</span>
     </button>
+  )
+}
+
+function inferenceProviderLabel(config?: InferenceConfig | null): string {
+  if (!config?.provider) return 'Unknown'
+  if (config.provider === 'vllm_mi300x') return 'AMD vLLM'
+  if (config.provider === 'fireworks') return 'Fireworks'
+  return 'Offline'
+}
+
+function inferenceTone(config?: InferenceConfig | null): Tone {
+  if (config?.provider === 'vllm_mi300x') return 'ok'
+  if (config?.provider === 'fireworks') return 'info'
+  return 'mute'
+}
+
+/** Top-bar badge: which inference backend answered this snapshot (AMD vLLM, Fireworks, offline). */
+function InferencePill({ config }: { config?: InferenceConfig | null }) {
+  const label = inferenceProviderLabel(config)
+  const tone = inferenceTone(config)
+  const host = config?.base_url_host
+  const title = config?.provider === 'vllm_mi300x'
+    ? `AMD Developer Cloud / vLLM${host ? ` via ${host}` : ''}`
+    : config?.provider === 'fireworks'
+      ? 'Fireworks fallback configured'
+      : 'Deterministic offline mode; set LLM_BASE_URL before the MI300X demo'
+  return (
+    <span className={`inference-pill tone-${tone}`} title={title}>
+      <span className="inference-pill-label">{label}</span>
+      {config?.accelerator ? <span className="inference-pill-detail">{config.accelerator}</span> : null}
+    </span>
   )
 }
 
@@ -3079,6 +3126,7 @@ function App() {
             <span className="brand-name">ShelfWise</span>
           </span>
           <div className="topbar-right">
+            <InferencePill config={data?.inference} />
             <span className={`conn conn-${conn}`}>
               <span className="conn-dot" /> {conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Connecting'}
             </span>
