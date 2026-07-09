@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Refuse to run on the wrong interpreter: a 3.10 shell (venv not active) sends pip
+# into a cp310 backtracking spiral that wastes 20+ minutes before failing anyway.
+PYV="$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo none)"
+if [ "${PYV}" != "3.11" ]; then
+  echo "ERROR: python is ${PYV}, not 3.11 - the project venv is not active in this terminal."
+  echo "Fix:   source .venv/bin/activate"
+  echo "       (after a pod restart, run: bash scripts/pod_start.sh first)"
+  exit 1
+fi
+
 CONFIG_PATH="${1:-configs/train_gemma4_multimodal.yaml}"
 ADAPTER_PATH="${ADAPTER_PATH:-}"
 
