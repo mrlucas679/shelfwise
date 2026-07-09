@@ -29,6 +29,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Then open the app:
 
+- `GET http://localhost:8000/submission/readiness`
 - `http://127.0.0.1:5173`
 
 ## Test everything in one notebook (GPU / remote Jupyter)
@@ -64,6 +65,7 @@ Connected API endpoints:
 - `GET http://localhost:8000/events`
 - `GET http://localhost:8000/health`
 - `GET http://localhost:8000/inference/config`
+- `GET http://localhost:8000/inference/readiness`
 - `GET http://localhost:8000/inference/smoke`
 - `GET http://localhost:8000/learning`
 - `GET http://localhost:8000/mlops/accountability`
@@ -74,6 +76,7 @@ Connected API endpoints:
 - `GET http://localhost:8000/products/attention`
 - `GET http://localhost:8000/products/search`
 - `GET http://localhost:8000/readiness`
+- `GET http://localhost:8000/submission/readiness`
 - `GET http://localhost:8000/tools/platform/audit`
 - `GET http://localhost:8000/tools/platform`
 - `GET http://localhost:8000/trace/{correlation_id}`

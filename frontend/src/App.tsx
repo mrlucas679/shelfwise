@@ -1055,6 +1055,8 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Health', method: 'GET', path: '/health', detail: 'Liveness and public inference config.' },
   { label: 'Readiness', method: 'GET', path: '/readiness', detail: 'Backend checks, stores, worker, auth mode, and seed data.' },
   { label: 'Inference config', method: 'GET', path: '/inference/config', detail: 'Provider, routine model, strong model, and credential presence flags.' },
+  { label: 'Inference readiness', method: 'GET', path: '/inference/readiness', detail: 'Live AMD MI300X/vLLM or Fireworks readiness checks and next step.' },
+  { label: 'Submission readiness', method: 'GET', path: '/submission/readiness', detail: 'Hackathon submission prescreen checks and AMD compute proof.' },
   { label: 'Seed summary', method: 'GET', path: '/data/seed/summary', detail: 'Current seeded store scenario and focus product.' },
   { label: 'Product attention', method: 'GET', path: '/products/attention', detail: 'Bounded product groups that need action.' },
   { label: 'Product search', method: 'GET', path: '/products/search', detail: 'Bounded search-first catalogue lookup.' },

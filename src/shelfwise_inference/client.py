@@ -148,7 +148,7 @@ class OpenAICompatibleInferenceClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
                 raw = json.loads(response.read().decode("utf-8"))
             content = _extract_content(raw)
         except (urllib.error.URLError, json.JSONDecodeError, InferenceError) as exc:

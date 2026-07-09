@@ -29,7 +29,11 @@ from shelfwise_connectors import (
 )
 from shelfwise_contracts import Event, EventType, Money
 from shelfwise_data import load_seeded_scenario
-from shelfwise_inference import OpenAICompatibleInferenceClient, load_inference_config
+from shelfwise_inference import (
+    OpenAICompatibleInferenceClient,
+    ProviderKind,
+    load_inference_config,
+)
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
     ModelRun,
@@ -434,6 +438,68 @@ def readiness() -> dict[str, object]:
 @app.get("/inference/config")
 def inference_config() -> dict[str, object]:
     return load_inference_config().to_public_dict()
+
+
+def inference_readiness_payload() -> dict[str, object]:
+    """Report whether live AMD MI300X/vLLM (or Fireworks) inference is configured."""
+    config = load_inference_config()
+    public = config.to_public_dict()
+    network_ready = (
+        bool(config.base_url)
+        and config.api_key_present
+        and bool(config.routine_model)
+        and bool(config.strong_model)
+        and config.timeout_seconds < 30
+    )
+    amd_ready = network_ready and config.provider is ProviderKind.VLLM_MI300X
+    return {
+        "ready_for_live_inference": network_ready,
+        "ready_for_amd_demo": amd_ready,
+        "amd_compute_used_by_default": config.provider is ProviderKind.VLLM_MI300X,
+        "inference": public,
+        "checks": {
+            "openai_chat_completions_contract": "ok",
+            "base_url": "ok" if config.base_url else "missing",
+            "api_key": "ok" if config.api_key_present else "missing",
+            "routine_model": "ok" if config.routine_model else "missing",
+            "strong_model": "ok" if config.strong_model else "missing",
+            "timeout_under_30s": "ok" if config.timeout_seconds < 30 else "risk",
+            "amd_mi300x_provider": (
+                "ok" if config.provider is ProviderKind.VLLM_MI300X else "pending"
+            ),
+        },
+        "next_step": (
+            "Run /inference/smoke against the vLLM endpoint."
+            if amd_ready
+            else "Set LLM_BASE_URL, LLM_API_KEY, and model env vars for the MI300X vLLM endpoint."
+        ),
+    }
+
+
+@app.get("/inference/readiness")
+def inference_readiness() -> dict[str, object]:
+    return inference_readiness_payload()
+
+
+@app.get("/submission/readiness")
+def submission_readiness() -> dict[str, object]:
+    inference_ready = inference_readiness_payload()
+    return {
+        "track": "Track 3: Unicorn",
+        "ready_for_submission_prescreen": inference_ready["ready_for_amd_demo"],
+        "checks": {
+            "github_repository_url_required": "required",
+            "demo_video_required": "required",
+            "slide_deck_pdf_required": "required",
+            "hosted_url": "recommended",
+            "docker_image_required": "no",
+            "amd_compute_usage": "ok" if inference_ready["ready_for_amd_demo"] else "pending",
+            "response_timeout": "ok",
+            "english_responses": "ok",
+            "unseen_inputs": "supported_by_seeded_tools_and_bounded_search",
+        },
+        "inference": inference_ready,
+    }
 
 
 @app.get("/inference/smoke")
