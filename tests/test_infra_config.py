@@ -77,12 +77,11 @@ def test_readme_connected_api_list_matches_backend_schema() -> None:
 
 def _backend_endpoint_lines() -> list[str]:
     routes: dict[str, set[str]] = defaultdict(set)
-    for route in app.routes:
-        if not getattr(route, "include_in_schema", True):
-            continue
-        for method in getattr(route, "methods", []) or []:
-            if method in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-                routes[str(route.path)].add(method)
+    for path, operations in app.openapi()["paths"].items():
+        for method in operations:
+            upper = method.upper()
+            if upper in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                routes[path].add(upper)
     return [
         f"- `{'/'.join(sorted(methods))} http://localhost:8000{path}`"
         for path, methods in sorted(routes.items())

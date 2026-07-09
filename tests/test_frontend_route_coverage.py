@@ -18,25 +18,20 @@ ROUTE_LITERAL_RE = re.compile(r"""["'`](/[^"'`]+)["'`]""")
 REQUEST_HELPERS = ("fetchIfAvailable", "fetchOptional", "fetchDemo", "fetchJson", "postChat")
 
 
+_ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+
 def _backend_schema_paths() -> list[str]:
-    return sorted(
-        {
-            str(route.path)
-            for route in app.routes
-            if getattr(route, "include_in_schema", True)
-        }
-    )
+    return sorted(app.openapi()["paths"].keys())
 
 
 def _backend_schema_method_pairs() -> set[tuple[str, str]]:
     pairs: set[tuple[str, str]] = set()
-    for route in app.routes:
-        if not getattr(route, "include_in_schema", True):
-            continue
-        path = str(route.path)
-        for method in getattr(route, "methods", []) or []:
-            if method in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-                pairs.add((path, method))
+    for path, operations in app.openapi()["paths"].items():
+        for method in operations:
+            upper = method.upper()
+            if upper in _ALLOWED_METHODS:
+                pairs.add((path, upper))
     return pairs
 
 
