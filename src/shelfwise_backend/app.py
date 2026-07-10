@@ -58,6 +58,7 @@ from .cascade import (
     run_catalog_price_check,
     run_cold_chain_cascade,
     run_critic_rejection_cascade,
+    run_expiry_risk_check,
     run_golden_cascade,
     run_procurement_cascade,
     run_sales_cascade,
@@ -1164,6 +1165,7 @@ def demo_worldgen_drill(
 
     alert = _worldgen_cold_chain_alert(
         scenario_id=scenario_id,
+        seed=world.cfg.seed,
         tenant_id=world.cfg.tenant_id,
         actor=world.cfg.store_id,
         area=world.cfg.area,
@@ -1478,6 +1480,13 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
         _attach_event_causality(result, event)
         result["decision"] = decision_store.upsert(result["decision"])
         return _record_cascade(result)
+    if event.type is EventType.EXPIRY_ENTRY:
+        result = run_expiry_risk_check(event)
+        if result is None:
+            return None
+        _attach_event_causality(result, event)
+        result["decision"] = decision_store.upsert(result["decision"])
+        return _record_cascade(result)
     if event.type is EventType.COLD_CHAIN_ALERT:
         result = run_cold_chain_cascade(event)
         _attach_event_causality(result, event)
@@ -1519,6 +1528,7 @@ def _pipeline_summary(outcome: dict[str, Any]) -> dict[str, object]:
 def _worldgen_cold_chain_alert(
     *,
     scenario_id: str,
+    seed: int,
     tenant_id: str,
     actor: str,
     area: str,
@@ -1530,13 +1540,13 @@ def _worldgen_cold_chain_alert(
     measured_outage_hours = max(Decimal(stage) / Decimal("2"), Decimal("2.5"))
     return Event.parse_wire(
         {
-            "id": f"evt_{scenario_id}_cold_chain_alert",
+            "id": f"evt_{scenario_id}_{seed}_cold_chain_alert",
             "type": EventType.COLD_CHAIN_ALERT.value,
             "ts": alert_ts,
             "actor": actor,
             "source": "api",
             "tenant_id": tenant_id,
-            "correlation_id": f"worldgen:{scenario_id}:cold_chain",
+            "correlation_id": f"worldgen:{scenario_id}:{seed}:cold_chain",
             "payload": {
                 "site_id": actor,
                 "area": area,

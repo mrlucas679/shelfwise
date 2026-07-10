@@ -7,6 +7,7 @@ from typing import Any
 from shelfwise_backend.cascade import (
     run_catalog_price_check,
     run_cold_chain_cascade,
+    run_expiry_risk_check,
     run_golden_cascade,
     run_procurement_cascade,
     run_sales_cascade,
@@ -157,6 +158,10 @@ def default_cascade_handler(event: Event) -> dict[str, Any]:
         return _attach_event_causality(run_sales_cascade(event), event)
     if event.type is EventType.SALE:
         result = run_catalog_price_check(event)
+        if result is not None:
+            return _attach_event_causality(result, event)
+    if event.type is EventType.EXPIRY_ENTRY:
+        result = run_expiry_risk_check(event)
         if result is not None:
             return _attach_event_causality(result, event)
     if event.type is EventType.COLD_CHAIN_ALERT:

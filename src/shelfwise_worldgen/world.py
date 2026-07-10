@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -133,7 +134,11 @@ class World:
     ) -> Event:
         """Build a deterministic canonical event."""
         raw = f"{self.cfg.seed}|{event_type.value}|{ts.isoformat()}|{payload}"
-        event_id = f"evt_{seed_int(raw):08x}"
+        # crc32 is 32 bits: at ~750k events/run the birthday bound guarantees thousands of
+        # id collisions, which cascade into decision-id collisions and bogus "duplicates".
+        # blake2b at 96 bits is deterministic and collision-free at any realistic scale.
+        digest = hashlib.blake2b(raw.encode("utf-8"), digest_size=12).hexdigest()
+        event_id = f"evt_{digest}"
         return Event(
             id=event_id,
             type=event_type,

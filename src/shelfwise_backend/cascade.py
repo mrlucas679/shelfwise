@@ -683,7 +683,7 @@ def run_sales_cascade(event: Event | None = None) -> dict[str, Any]:
     ]
 
     decision = Decision(
-        id=f"dec_{_slug(correlation_id)}" if event is not None else f"dec_{_SALES_SCENARIO_ID}",
+        id=f"dec_{_slug(event.id)}" if event is not None else f"dec_{_SALES_SCENARIO_ID}",
         status=status,
         action=action,
         caused_by=(correlation_id,),
@@ -756,6 +756,7 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
         return None
 
     correlation_id = event.correlation_id
+    decision_key = event.id  # correlation ids are shared per run; event ids are unique
     sku = str(payload.get("sku", "unknown"))
     units = _int_payload(payload, "units", 1)
     observed = Money(minor_units=unit_price_c)
@@ -819,7 +820,7 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
         ),
     ]
     decision = Decision(
-        id=f"dec_{_slug(correlation_id)}",
+        id=f"dec_{_slug(decision_key)}",
         status=DecisionStatus.PENDING,
         action=action,
         caused_by=(correlation_id,),
@@ -848,6 +849,103 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
         "learning": {
             "status": "armed",
             "message": "After review, feed the confirmed cause back into catalogue hygiene.",
+        },
+    }
+
+
+# Fresh stock inside this window is a real markdown call a human should confirm; anything
+# with more runway is routine rotation the store handles without a decision.
+EXPIRY_REVIEW_MAX_DAYS = 2
+_EXPIRY_SCENARIO_ID = "expiry_risk_markdown_review"
+
+
+def run_expiry_risk_check(event: Event) -> dict[str, Any] | None:
+    """Turn an imminent-expiry batch into a pending inventory-manager review.
+
+    Third decision domain alongside price integrity and cold chain, so unattended
+    runs exercise more than one role and action type. Batches with comfortable
+    runway return None - no decision minted, the event stays a rotation signal.
+    """
+    payload = event.payload
+    try:
+        days = int(payload["days_to_expiry"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if days > EXPIRY_REVIEW_MAX_DAYS:
+        return None
+
+    started = perf_counter()
+    sku = str(payload.get("sku", "unknown"))
+    batch_id = str(payload.get("batch_id", ""))
+    correlation_id = event.correlation_id
+    decision_key = event.id  # correlation ids are shared per run; event ids are unique
+    span = _span(
+        "decision_science.check_expiry_window",
+        started,
+        {"days_to_expiry": str(days), "max_days": str(EXPIRY_REVIEW_MAX_DAYS)},
+    )
+    source = SourceRef.dataset("worldgen_wms", f"expiry:{event.id}")
+    action = RecommendedAction(
+        "review_expiry_markdown",
+        {"sku": sku, "batch_id": batch_id, "days_to_expiry": str(days)},
+        RiskTier.MEDIUM,
+    )
+    evidence = [
+        EvidenceObject(
+            agent=AgentName.INVENTORY,
+            conclusion=(
+                f"Batch {batch_id or sku} has {days} day(s) to expiry - inside the "
+                f"{EXPIRY_REVIEW_MAX_DAYS}-day markdown review window."
+            ),
+            supporting_data=[
+                _supporting_fact("days_to_expiry", days, str(source), "wms_expiry_entry"),
+                _supporting_fact(
+                    "review_window_days", EXPIRY_REVIEW_MAX_DAYS, str(source), "expiry_policy"
+                ),
+            ],
+            confidence=Decimal("0.82"),
+            recommended_action=action,
+            sources=(source,),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.CRITIC,
+            conclusion=(
+                "Imminent expiry confirmed by the WMS entry; hold the markdown until an "
+                "inventory manager confirms shelf state."
+            ),
+            supporting_data=[
+                _supporting_fact("within_review_window", True, "critic_gate", "expiry_policy")
+            ],
+            confidence=Decimal("0.85"),
+            recommended_action=action,
+            sources=(SourceRef.tool("critic_gate"),),
+            requires_human_review=True,
+        ),
+    ]
+    decision = Decision(
+        id=f"dec_{_slug(decision_key)}",
+        status=DecisionStatus.PENDING,
+        action=action,
+        caused_by=(correlation_id,),
+        summary=f"Pending expiry markdown review for SKU {sku}: {days} day(s) to expiry.",
+    )
+    decision_payload = decision.to_dict()
+    decision_payload["tenant_id"] = str(event.tenant_id or "sa_retail_demo")
+    decision_payload["role"] = "inventory_manager"
+    decision_payload["critic_verdict"] = "review_required"
+    decision_payload["expected_outcome"] = {"days_to_expiry": days, "batch_id": batch_id}
+
+    return {
+        "correlation_id": correlation_id,
+        "scenario": _EXPIRY_SCENARIO_ID,
+        "evidence": [item.to_dict() for item in evidence],
+        "decision": decision_payload,
+        "trace": [span.to_dict()],
+        "inference": load_inference_config().to_public_dict(),
+        "learning": {
+            "status": "armed",
+            "message": "Confirmed markdowns feed the expiry review window threshold.",
         },
     }
 
