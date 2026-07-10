@@ -4,6 +4,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from shelfwise_inference.client import (
+    InferenceError,
     InferenceResult,
     OpenAICompatibleInferenceClient,
     RunRecorder,
@@ -11,8 +12,10 @@ from shelfwise_inference.client import (
 from shelfwise_inference.config import STRONG_AGENT_NAMES, InferenceConfig, load_inference_config
 from shelfwise_inference.orchestration import (
     AgentArchitecture,
+    AgentOrchestrationError,
     ArchitectureMode,
     ExecutionMode,
+    LiveInferenceRequiredError,
     ModelCall,
     RoleModelTarget,
     enforce_execution_mode,
@@ -73,20 +76,27 @@ class OpenAIModelRuntime:
     ) -> ModelCall:
         """Submit one routed request and normalize its evidence for orchestration."""
         target = self.architecture.target_for(role)
-        result = self._client.chat_completions(
-            agent=role,
-            messages=messages,
-            tools=tools or None,
-            tool_choice=tool_choice,
-            response_format=response_format,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            tenant_id=tenant_id,
-            correlation_id=correlation_id,
-            schema_version=schema_version,
-            model=target.model,
-            base_url=target.endpoint,
-        )
+        try:
+            result = self._client.chat_completions(
+                agent=role,
+                messages=messages,
+                tools=tools or None,
+                tool_choice=tool_choice,
+                response_format=response_format,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tenant_id=tenant_id,
+                correlation_id=correlation_id,
+                schema_version=schema_version,
+                model=target.model,
+                base_url=target.endpoint,
+            )
+        except InferenceError as exc:
+            if self.execution_mode is ExecutionMode.LIVE_REQUIRED:
+                raise LiveInferenceRequiredError(
+                    f"live_required model call to role {role!r} failed: {exc}"
+                ) from exc
+            raise AgentOrchestrationError(f"model call to role {role!r} failed: {exc}") from exc
         if not isinstance(result, InferenceResult):
             raise TypeError("model client returned an invalid inference result")
         message = result.message or {"role": "assistant", "content": result.content}

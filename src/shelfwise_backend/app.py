@@ -35,6 +35,7 @@ from shelfwise_inference import (
     ProviderKind,
     load_inference_config,
 )
+from shelfwise_inference.orchestration import ExecutionMode
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
     ModelRun,
@@ -55,6 +56,7 @@ from shelfwise_storage import (
 from shelfwise_worldgen import create_worldgen_run_store
 from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
+from .agentic_cascade import AgenticCascadeError, run_golden_cascade_via_agents
 from .cascade import (
     run_catalog_price_check,
     run_cold_chain_cascade,
@@ -1105,6 +1107,26 @@ def demo_golden_get() -> dict[str, object]:
     return _preview_demo_cascade(run_golden_cascade())
 
 
+@app.post("/demo/golden/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
+    """Run the golden scenario's Critic/Executive verdicts through a real Gemma tool loop.
+
+    Unlike /demo/golden (deterministic math + hand-authored evidence), this route requires
+    an actual model call and tool-calling round trip. With live_required=true (default) it
+    hard-fails with 503 instead of silently falling back to an offline/deterministic answer.
+    """
+    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    try:
+        result = run_golden_cascade_via_agents(
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _record_cascade(result)
+
+
 @app.post("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
 def demo_critic_rejection() -> dict[str, object]:
     return _record_cascade(run_critic_rejection_cascade())
@@ -1603,7 +1625,13 @@ def _attach_decision_governance(result: dict[str, Any]) -> None:
         else {}
     )
     recovered_cents = int(expected.get("incremental_profit_minor_units") or 0)
-    total_tokens = _estimate_cascade_tokens(result)
+    measured_tokens = _measured_model_call_tokens(result)
+    economics_method = "estimated_deterministic_cascade_tokens"
+    if measured_tokens is not None:
+        total_tokens = measured_tokens
+        economics_method = "measured_model_call_usage"
+    else:
+        total_tokens = _estimate_cascade_tokens(result)
     rate = _inference_rate()
     decision["economics"] = decision_economics(
         rand_recovered=Money(minor_units=recovered_cents, currency="ZAR"),
@@ -1623,8 +1651,24 @@ def _attach_decision_governance(result: dict[str, Any]) -> None:
         "evidence_count": len(
             result.get("evidence") if isinstance(result.get("evidence"), list) else []
         ),
-        "economics_method": "estimated_deterministic_cascade_tokens",
+        "economics_method": economics_method,
     }
+
+
+def _measured_model_call_tokens(result: dict[str, Any]) -> int | None:
+    """Sum real per-call token usage when a result carries genuine model call traces."""
+    model_calls = result.get("model_calls")
+    if not isinstance(model_calls, list) or not model_calls:
+        return None
+    total = 0
+    for call in model_calls:
+        if not isinstance(call, dict):
+            return None
+        usage = call.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        total += int(usage.get("total_tokens") or 0)
+    return max(1, total)
 
 
 def _estimate_cascade_tokens(result: dict[str, Any]) -> int:

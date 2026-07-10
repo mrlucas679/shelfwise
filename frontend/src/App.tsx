@@ -1133,6 +1133,7 @@ const GATED_ENDPOINTS = [
   { label: 'Trace detail', method: 'GET', path: '/trace/{correlation_id}', group: 'operations', detail: 'Parameterized trace detail from the trace registry.' },
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
   { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
+  { label: 'Golden demo (agentic)', method: 'POST', path: '/demo/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Procurement demo', method: 'GET/POST', path: '/demo/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
   { label: 'Sales demo', method: 'GET/POST', path: '/demo/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
   { label: 'Cold-chain demo', method: 'GET/POST', path: '/demo/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
