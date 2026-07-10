@@ -6,7 +6,11 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 .runtime-logs/
+data/training/
+data/harness_runs/
 .agents/
 .claude/
 .codex/
@@ -22,3 +26,14 @@ runs/
 node_modules/
 *.tsbuildinfo
 .DS_Store
+
+# GPU/notebook training artifacts - never ship model weights or notebook checkpoints
+notebooks/.ipynb_checkpoints/
+.ipynb_checkpoints/
+*.pt
+*.safetensors
+*.bin
+*.gguf
+
+# Local browser-verification debug artifacts (Claude Preview MCP output)
+.playwright-mcp/

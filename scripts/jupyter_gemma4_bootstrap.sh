@@ -10,17 +10,23 @@ git status --short --branch
 
 echo "[2/5] python"
 python --version
+echo "Configured boundary: W7900 Jupyter training; MI300X endpoint serving is separate."
 
 echo "[3/5] install package + training extras"
 python -m pip install --upgrade pip
 python -m pip install -e ".[training]"
 
 echo "[4/5] dataset/config unit checks"
-python -m pytest tests/test_gemma4_training_harness.py -q
+python -m pytest \
+  tests/test_training_profiles.py \
+  tests/test_training_evaluation_gate.py \
+  tests/test_shakedown_settings.py \
+  tests/test_serving_gate.py \
+  -q
 
 echo "[5/5] full ShelfWise AI shakedown"
 python -m shelfwise.training.shakedown \
   --config "${CONFIG_PATH}" \
   --run_name "${RUN_NAME}"
 
-echo "Jupyter GPU bootstrap complete. Check runs/gemma4-multimodal/ for outputs."
+echo "Jupyter training shakedown complete. MI300X inference is proven only by generated_inference."

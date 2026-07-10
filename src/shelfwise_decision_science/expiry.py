@@ -35,7 +35,10 @@ def score_expiry_risk(
     expected_sold = forecast_daily * effective_days
     waste_units = max(decimal(units_on_hand) - expected_sold, Decimal("0"))
     velocity_risk = clamp(safe_div(sell_through_days - effective_days, sell_through_days))
-    risk = clamp(velocity_risk * Decimal("0.75") + decimal(cold_chain_risk) * Decimal("0.35"))
+    # Weights must sum to 1.0 for a proper convex blend; cold-chain risk already lowers
+    # effective_days above (shrinking shelf life feeds into velocity_risk), so this second
+    # term is a further escalation on top of that, not the sole cold-chain signal.
+    risk = clamp(velocity_risk * Decimal("0.75") + decimal(cold_chain_risk) * Decimal("0.25"))
     return ExpiryRisk(
         sku=sku,
         risk=q2(risk),

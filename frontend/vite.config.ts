@@ -18,6 +18,8 @@ export default defineConfig({
       '/health': backend,
       '/readiness': backend,
       '/inference': backend,
+      '/products': backend,
+      '/submission': backend,
     },
   },
 })

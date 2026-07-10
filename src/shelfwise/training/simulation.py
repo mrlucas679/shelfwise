@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import random
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
+from .config import DEFAULT_MIXTURE_WEIGHTS
 from .dataset import load_training_rows, summarize_rows
 
 
@@ -50,13 +52,7 @@ CASE_TYPES = (
     "ambiguous missing evidence",
 )
 
-MIXTURE_WEIGHTS = {
-    "supply_chain_reasoning": 0.30,
-    "multimodal_evidence": 0.25,
-    "simulation_incident": 0.20,
-    "report_action": 0.15,
-    "tool_call_structured": 0.10,
-}
+MIXTURE_WEIGHTS = DEFAULT_MIXTURE_WEIGHTS
 
 EVIDENCE_BY_CASE = {
     "damaged goods during transport": [
@@ -128,13 +124,21 @@ def build_shakedown_datasets(
     seed: int = 20260710,
     train_examples: int = 120,
     eval_examples: int = 12,
+    mixture_weights: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Generate world-simulation training/eval JSONL plus a mixture report."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     train_path = output_dir / "shelfwise_world_shakedown_train.jsonl"
     eval_path = output_dir / "shelfwise_world_shakedown_eval.jsonl"
-    rows = list(_generate_rows(seed=seed, count=train_examples + eval_examples))
+    effective_mixture = dict(mixture_weights or MIXTURE_WEIGHTS)
+    rows = list(
+        _generate_rows(
+            seed=seed,
+            count=train_examples + eval_examples,
+            mixture_weights=effective_mixture,
+        )
+    )
     train_rows = rows[:train_examples]
     eval_rows = rows[train_examples:]
     _write_jsonl(train_path, train_rows)
@@ -144,7 +148,8 @@ def build_shakedown_datasets(
     report = {
         "train_path": str(train_path),
         "eval_path": str(eval_path),
-        "mixture_weights": MIXTURE_WEIGHTS,
+        "mixture_weights": effective_mixture,
+        "source_generators": ["shelfwise_worldgen", "shelfwise_synthdata"],
         "train_summary": summarize_rows(strict_train),
         "eval_summary": summarize_rows(strict_eval),
         "dataset_mixture_breakdown": dict(Counter(row["mixture"] for row in rows)),
@@ -160,19 +165,53 @@ def build_shakedown_datasets(
     return report
 
 
-def _generate_rows(*, seed: int, count: int) -> list[dict[str, Any]]:
+def _generate_rows(
+    *,
+    seed: int,
+    count: int,
+    mixture_weights: Mapping[str, float],
+) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     rows: list[dict[str, Any]] = []
     base = date(2026, 7, 10)
-    mixture_names = list(MIXTURE_WEIGHTS)
-    mixture_weights = [MIXTURE_WEIGHTS[name] for name in mixture_names]
+    mixture_names = list(mixture_weights)
+    weights = [mixture_weights[name] for name in mixture_names]
+    canonical_events, golden_scenarios = _shared_generator_context(seed, count)
     for index in range(count):
         product = rng.choice(PRODUCTS)
         case_label = CASE_TYPES[index % len(CASE_TYPES)]
-        mixture = rng.choices(mixture_names, weights=mixture_weights, k=1)[0]
+        mixture = rng.choices(mixture_names, weights=weights, k=1)[0]
         event = _world_event(seed, index, product, case_label, base)
+        event["canonical_world_event"] = canonical_events[index % len(canonical_events)]
+        event["synthetic_golden_scenario"] = golden_scenarios[index % len(golden_scenarios)]
         rows.append(_row_from_event(index, product, case_label, mixture, event))
     return rows
+
+
+def _shared_generator_context(
+    seed: int,
+    count: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Read canonical world and golden-scenario APIs without owning those packages."""
+
+    from shelfwise_synthdata.generators import CATEGORIES, generate_golden
+    from shelfwise_worldgen.world import World, WorldConfig
+
+    canonical_events = [event.to_dict() for event in World(WorldConfig(seed=seed)).run()]
+    per_category = max(1, (count + len(CATEGORIES) - 1) // len(CATEGORIES))
+    golden_scenarios = [
+        {
+            "id": scenario.id,
+            "category": scenario.category,
+            "expected": scenario.expected,
+            "invariants": scenario.invariants,
+            "synthetic_tag": scenario.tag.model_dump(mode="json"),
+        }
+        for scenario in generate_golden(seed, n_per_category=per_category)
+    ]
+    if not canonical_events or not golden_scenarios:
+        raise RuntimeError("worldgen and synthdata must each produce at least one record")
+    return canonical_events, golden_scenarios
 
 
 def _world_event(

@@ -1,4 +1,6 @@
+model_profile: gemma-4-12b-it
 model_name_or_path: google/gemma-4-12B-it
+model_revision: main
 output_dir: runs/gemma4-multimodal
 run_name: gemma4-mm
 max_seq_length: 2048
@@ -58,8 +60,24 @@ safety:
   timestamp_output_dir: true
   save_git_commit: true
 
+evaluation:
+  max_new_tokens: 384
+  min_risk_accuracy: 0.75
+  min_mean_actionability_score: 0.25
+  min_mean_grounding_score: 0.25
+  max_reference_echo_rate: 0.0
+
+runtime:
+  training_target: w7900_jupyter
+  serving_target: mi300x_endpoint
+
 serving:
   adapter_name: shelfwise
   routine_model_name: shelfwise
-  base_url: http://127.0.0.1:8000
+  base_url: null
+  base_url_env: SHELFWISE_MI300X_BASE_URL
+  api_key_env: SHELFWISE_MI300X_API_KEY
+  gate_mode: metadata_only
+  request_timeout_seconds: 60
+  max_tokens: 128
   require_tool_call_parse: false

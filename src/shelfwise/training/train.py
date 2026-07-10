@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .collator import ShelfWiseDataCollator, build_tokenized_example, preview_batch
+from .compatibility import validate_adapter_compatibility, write_adapter_manifest
 from .config import load_training_config
 from .dataset import load_training_rows, summarize_rows
 from .runtime import git_commit, timestamped_run_dir, write_json
@@ -38,6 +39,11 @@ def run_training(
 ) -> Path:
     repo_root = Path.cwd()
     config = load_training_config(config_path)
+    if config.resume_from_checkpoint:
+        resume_path = Path(config.resume_from_checkpoint)
+        if not resume_path.is_absolute():
+            resume_path = repo_root / resume_path
+        validate_adapter_compatibility(resume_path, config)
     effective_run_name = run_name or config.run_name
     base_output_dir = Path(output_dir) if output_dir is not None else repo_root / config.output_dir
     output_dir = timestamped_run_dir(
@@ -67,12 +73,21 @@ def run_training(
         TrainingArguments,
     )
 
-    processor = AutoProcessor.from_pretrained(config.model_name_or_path, trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        config.model_name_or_path,
+        revision=config.model_revision,
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model_name_or_path,
+        revision=config.model_revision,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name_or_path,
+        revision=config.model_revision,
         torch_dtype=torch.bfloat16 if config.bf16 else None,
         device_map="auto",
         trust_remote_code=True,
@@ -87,6 +102,7 @@ def run_training(
             lora_alpha=config.lora.alpha,
             lora_dropout=config.lora.dropout,
             target_modules=list(config.lora.target_modules),
+            revision=config.model_revision,
         ),
     )
     examples = [
@@ -136,6 +152,8 @@ def run_training(
     tokenizer.save_pretrained(adapter_dir)
     if hasattr(processor, "save_pretrained"):
         processor.save_pretrained(adapter_dir)
+    write_adapter_manifest(adapter_dir, config)
+    validate_adapter_compatibility(adapter_dir, config)
     print(f"training complete: {output_dir}")
     return output_dir
 

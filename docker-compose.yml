@@ -1,15 +1,73 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      # Local-development-only defaults. POSTGRES_USER is a Postgres superuser (standard
+      # for this image) and is used solely to bootstrap the schema and the restricted
+      # shelfwise_app role below - the backend service never connects as it. Rotate/
+      # override every value here before running this compose file anywhere other than
+      # a local machine or an ephemeral demo.
+      POSTGRES_USER: shelfwise
+      POSTGRES_PASSWORD: shelfwise
+      POSTGRES_DB: shelfwise
+      POSTGRES_APP_PASSWORD: shelfwise_app_local_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shelfwise -d shelfwise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   backend:
     build: .
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
+    cpus: "1.5"
+    pids_limit: 256
     ports:
       - "8000:8000"
     env_file:
       - .env.example
+    environment:
+      SHELFWISE_STORE_BACKEND: postgres
+      SHELFWISE_BUS_BACKEND: redis
+      # Connects as the restricted shelfwise_app role (see init_app_role.sh), never as
+      # the postgres superuser - a superuser connection would silently bypass every
+      # tenant row-level-security policy this app depends on.
+      DATABASE_URL: postgresql://shelfwise_app:shelfwise_app_local_only@postgres:5432/shelfwise
+      REDIS_URL: redis://redis:6379/0
+      MULTIMODAL_ENABLED: "false"
+      WORKER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
   frontend:
     build: ./frontend
     ports:
@@ -22,3 +80,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+volumes:
+  postgres-data:

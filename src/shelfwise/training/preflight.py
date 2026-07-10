@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .collator import ShelfWiseDataCollator, build_tokenized_example, preview_batch
+from .compatibility import validate_adapter_compatibility, write_adapter_manifest
 from .config import MULTIMODAL_TARGETS, load_training_config
 from .dataset import load_training_rows, summarize_rows
 from .runtime import (
@@ -37,8 +38,16 @@ def _load_model_stack(config: Any) -> tuple[Any, Any, Any]:
             "pip install transformers peft datasets accelerate tokenizers"
         ) from exc
     try:
-        processor = AutoProcessor.from_pretrained(config.model_name_or_path, trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path, trust_remote_code=True)
+        processor = AutoProcessor.from_pretrained(
+            config.model_name_or_path,
+            revision=config.model_revision,
+            trust_remote_code=True,
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            config.model_name_or_path,
+            revision=config.model_revision,
+            trust_remote_code=True,
+        )
     except Exception as exc:
         raise PreflightFailure(
             f"Processor/tokenizer load failed for {config.model_name_or_path}: {exc}"
@@ -49,6 +58,7 @@ def _load_model_stack(config: Any) -> tuple[Any, Any, Any]:
         dtype = torch.bfloat16 if config.bf16 else None
         model = AutoModelForCausalLM.from_pretrained(
             config.model_name_or_path,
+            revision=config.model_revision,
             torch_dtype=dtype,
             device_map="auto",
             trust_remote_code=True,
@@ -137,6 +147,7 @@ def run_preflight(
         lora_alpha=config.lora.alpha,
         lora_dropout=config.lora.dropout,
         target_modules=list(config.lora.target_modules),
+        revision=config.model_revision,
     )
     model = get_peft_model(model, peft_config)
     trainable = sum(
@@ -167,6 +178,8 @@ def run_preflight(
         adapter_dir = Path(tmp) / "adapter"
         model.save_pretrained(adapter_dir)
         tokenizer.save_pretrained(adapter_dir)
+        write_adapter_manifest(adapter_dir, config)
+        validate_adapter_compatibility(adapter_dir, config)
         from peft import PeftModel
 
         PeftModel.from_pretrained(model.base_model.model, adapter_dir)

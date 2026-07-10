@@ -22,6 +22,7 @@ def run_shakedown(
     skip_preflight: bool = False,
     skip_training: bool = False,
     skip_serving_check: bool = False,
+    existing_adapter_path: str | Path | None = None,
 ) -> Path:
     """Run the gated full ShelfWise AI shakedown pipeline."""
 
@@ -36,10 +37,23 @@ def run_shakedown(
     report: dict[str, Any] = {
         "run_name": run_name,
         "git_commit": git_commit(repo_root),
+        "model_profile": config.profile_name,
         "model_name": config.model_name_or_path,
+        "model_revision": config.model_revision,
         "processor_class": "Gemma4UnifiedProcessor",
         "lora_target_modules": list(config.lora.target_modules),
         "max_seq_length": config.max_seq_length,
+        "runtime_boundary": {
+            "training_target": config.runtime.training_target,
+            "serving_target": config.runtime.serving_target,
+        },
+        "shakedown_settings": {
+            "smoke_steps": config.shakedown.smoke_steps,
+            "simulation_seed": config.shakedown.simulation_seed,
+            "train_examples": config.shakedown.train_examples,
+            "eval_examples": config.shakedown.eval_examples,
+            "mixture_weights": config.shakedown.mixture_weights,
+        },
         "stages": [],
         "known_limitations": [
             "Audio is transcript-based unless the processor receives raw audio tensors.",
@@ -49,9 +63,10 @@ def run_shakedown(
     dataset_report = build_shakedown_datasets(
         output_dir=datasets_dir,
         repo_root=repo_root,
-        seed=20260710,
-        train_examples=120,
-        eval_examples=12,
+        seed=config.shakedown.simulation_seed,
+        train_examples=config.shakedown.train_examples,
+        eval_examples=config.shakedown.eval_examples,
+        mixture_weights=config.shakedown.mixture_weights,
     )
     report["dataset"] = dataset_report
     report["stages"].append("simulation_dataset_generation")
@@ -66,6 +81,9 @@ def run_shakedown(
             output_dir=run_dir / "evaluation",
         )
         report["evaluation_dir"] = str(eval_dir)
+        report["evaluation_summary"] = _load_eval_summary(eval_dir)
+        report["training_evaluation_ready"] = False
+        report["deployment_ready"] = False
         report["stages"].append("dry_run_eval")
         _write_final_report(run_dir, report)
         return run_dir
@@ -80,7 +98,7 @@ def run_shakedown(
         smoke_dir = run_training(
             config_path,
             run_name="smoke",
-            max_steps=20,
+            max_steps=config.shakedown.smoke_steps,
             train_path=train_path,
             output_dir=run_dir / "training",
         )
@@ -97,20 +115,37 @@ def run_shakedown(
         report["final_adapter_path"] = str(full_dir / "final_adapter")
         report["stages"].append("full_train")
 
+    selected_adapter = (
+        (full_dir or smoke_dir) / "final_adapter"
+        if (full_dir or smoke_dir)
+        else Path(existing_adapter_path) if existing_adapter_path else None
+    )
     eval_dir = run_evaluation(
         config_path,
-        dry_run=True,
+        dry_run=selected_adapter is None,
         eval_path=eval_path,
         output_dir=run_dir / "evaluation",
+        adapter_path=selected_adapter,
     )
     report["evaluation_dir"] = str(eval_dir)
-    report["stages"].append("evaluation")
+    evaluation_summary = _load_eval_summary(eval_dir)
+    report["evaluation_summary"] = evaluation_summary
+    report["training_evaluation_ready"] = evaluation_summary["gate"]["passed"]
+    report["stages"].append(
+        "generated_evaluation" if selected_adapter is not None else "fixture_only_evaluation"
+    )
 
-    adapter_path = (full_dir or smoke_dir) / "final_adapter" if (full_dir or smoke_dir) else None
-    if adapter_path is not None and not skip_serving_check:
-        serving = run_serving_check(config_path, adapter_path=adapter_path, skip_model_load=False)
+    if selected_adapter is not None and not skip_serving_check:
+        serving = run_serving_check(
+            config_path,
+            adapter_path=selected_adapter,
+            mode=config.serving.gate_mode,
+        )
         report["serving_check"] = serving
-        report["stages"].append("serving_check")
+        report["deployment_ready"] = serving["gate"]["deployment_ready"]
+        report["stages"].append(f"serving_check_{config.serving.gate_mode}")
+    else:
+        report["deployment_ready"] = False
 
     _write_final_report(run_dir, report)
     return run_dir
@@ -124,6 +159,8 @@ def _write_final_report(run_dir: Path, report: dict[str, Any]) -> None:
         f"- Run name: `{report['run_name']}`",
         f"- Git commit: `{report.get('git_commit')}`",
         f"- Model: `{report['model_name']}`",
+        f"- Model profile: `{report['model_profile']}`",
+        f"- Model revision: `{report['model_revision']}`",
         f"- Processor: `{report['processor_class']}`",
         f"- Max sequence length: `{report['max_seq_length']}`",
         f"- Stages completed: `{', '.join(report['stages'])}`",
@@ -141,6 +178,8 @@ def _write_final_report(run_dir: Path, report: dict[str, Any]) -> None:
         f"- Full training dir: `{report.get('full_training_dir', 'not run')}`",
         f"- Final adapter path: `{report.get('final_adapter_path', 'not produced')}`",
         f"- Evaluation dir: `{report.get('evaluation_dir', 'not run')}`",
+        f"- Generated evaluation ready: `{report.get('training_evaluation_ready', False)}`",
+        f"- MI300X deployment ready: `{report.get('deployment_ready', False)}`",
         "",
         "## Known Limitations",
         "",
@@ -152,12 +191,16 @@ def _write_final_report(run_dir: Path, report: dict[str, Any]) -> None:
             "## Recommended Next Improvements",
             "",
             "- Replace transcript/frame fallbacks with raw processor tensors once verified.",
-            "- Add model-generated eval instead of dry-run eval after adapter serving is stable.",
-            "- Merge the fuller `gpu-notebook-testing` worldgen package deliberately.",
+            "- Deploy the compatible adapter to the MI300X endpoint and run generated_inference.",
+            "- Pin a model revision commit instead of `main` before a release candidate run.",
         ]
     )
     (run_dir / "shakedown_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"shakedown report: {run_dir / 'shakedown_report.md'}")
+
+
+def _load_eval_summary(eval_dir: Path) -> dict[str, Any]:
+    return json.loads((eval_dir / "eval_summary.json").read_text(encoding="utf-8"))
 
 
 def main() -> None:
@@ -168,6 +211,7 @@ def main() -> None:
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--skip-training", action="store_true")
     parser.add_argument("--skip-serving-check", action="store_true")
+    parser.add_argument("--adapter-path")
     args = parser.parse_args()
     run_shakedown(
         args.config,
@@ -176,6 +220,7 @@ def main() -> None:
         skip_preflight=args.skip_preflight,
         skip_training=args.skip_training,
         skip_serving_check=args.skip_serving_check,
+        existing_adapter_path=args.adapter_path,
     )
 
 

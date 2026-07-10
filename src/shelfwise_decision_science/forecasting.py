@@ -23,6 +23,12 @@ def forecast_demand(
     horizon_days: int,
     payday_multiplier: Decimal = Decimal("1.35"),
 ) -> DemandForecast:
+    """Moving-average forecast, optionally uplifted for a payday demand spike.
+
+    The default multiplier matches the calibrated golden payday-yoghurt scenario. Any
+    caller whose story is NOT payday-driven must pass `payday_multiplier=Decimal("1")`
+    explicitly - the uplift is not a general-purpose demand adjustment.
+    """
     if horizon_days <= 0:
         raise ValueError("horizon_days must be positive")
     if not recent_daily_units:

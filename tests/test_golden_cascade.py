@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend import run_critic_rejection_cascade, run_golden_cascade
-from shelfwise_backend.app import app
+from shelfwise_backend import (
+    run_cold_chain_cascade,
+    run_critic_rejection_cascade,
+    run_golden_cascade,
+    run_procurement_cascade,
+    run_sales_cascade,
+)
+from shelfwise_backend.app import app, model_run_registry, prompt_registry
+from shelfwise_contracts import Event, EventSource, EventType
 from shelfwise_inference import OpenAICompatibleInferenceClient
+from shelfwise_mlops import ModelRun
 
 
 def test_golden_cascade_returns_all_demo_agents() -> None:
@@ -68,6 +76,99 @@ def test_critic_rejection_cascade_downgrades_unsupported_action() -> None:
     assert any(fact["fact"] == "critic_passed" and fact["value"] == "False" for fact in support)
 
 
+def test_procurement_cascade_uses_reorder_policy_and_supplier_ranking() -> None:
+    result = run_procurement_cascade()
+    agents = [item["agent"] for item in result["evidence"]]
+    support = [
+        fact
+        for evidence in result["evidence"]
+        for fact in evidence["supporting_data"]
+    ]
+
+    assert result["scenario"] == "procurement_reorder_supplier_cover"
+    assert "procurement" in agents
+    assert result["decision"]["status"] == "pending"
+    assert result["decision"]["role"] == "procurement_manager"
+    assert result["decision"]["action"]["type"] == "reorder"
+    assert result["decision"]["action"]["params"]["supplier_id"] == (
+        result["supplier_ranking"]["ranked"][0]["supplier_id"]
+    )
+    assert result["reorder_policy"]["method"] == (
+        "safety_stock_reorder_point_normal_lead_time_demand"
+    )
+    assert any(fact["fact"] == "suggested_order_units" for fact in support)
+    assert any(fact["fact"] == "supplier_coverage" for fact in support)
+
+
+def test_sales_cascade_records_clean_pos_sale() -> None:
+    result = run_sales_cascade()
+    support = [
+        fact
+        for evidence in result["evidence"]
+        for fact in evidence["supporting_data"]
+    ]
+
+    assert result["scenario"] == "pos_sale_price_integrity"
+    assert result["decision"]["status"] == "approved"
+    assert result["decision"]["role"] == "sales_manager"
+    assert result["decision"]["action"]["type"] == "record_sale"
+    assert result["decision"]["expected_outcome"]["line_revenue_minor_units"] == 90000
+    assert any(fact["fact"] == "price_delta" and fact["value"] == "0.00" for fact in support)
+
+
+def test_sales_cascade_routes_price_exception_to_review() -> None:
+    event = Event(
+        id="evt_sale_exception",
+        type=EventType.SALE,
+        ts="2026-07-06T10:14:00Z",
+        actor="store_12",
+        source=EventSource.POS_CSV,
+        tenant_id="sa_retail_demo",
+        payload={"sku": "4011", "location": "store_12", "quantity": 2, "unit_price": "20.00"},
+    )
+
+    result = run_sales_cascade(event)
+
+    assert result["correlation_id"] == "evt_sale_exception"
+    assert result["decision"]["status"] == "pending"
+    assert result["decision"]["action"]["type"] == "review_price_exception"
+    assert result["decision"]["expected_outcome"]["price_delta"] == "-10.00"
+
+
+def test_cold_chain_cascade_routes_facilities_review() -> None:
+    event = Event(
+        id="evt_cold_chain_fridge_dairy_1",
+        type=EventType.COLD_CHAIN_ALERT,
+        ts="2026-07-06T10:14:00Z",
+        actor="store_12",
+        source=EventSource.API,
+        tenant_id="sa_retail_demo",
+        payload={
+            "site_id": "store_12",
+            "asset_id": "fridge_dairy_1",
+            "category": "dairy",
+            "diagnosis": "generator_failed",
+            "severity": 2,
+            "predicted_minutes_to_unsafe": "18",
+            "measured_outage_hours": "4",
+            "temp_c": "8.2",
+            "stock_at_risk": {"minor_units": 643500, "currency": "ZAR"},
+        },
+    )
+
+    result = run_cold_chain_cascade(event)
+    agents = [item["agent"] for item in result["evidence"]]
+
+    assert agents == ["cold_chain", "expiry", "critic", "executive"]
+    assert result["scenario"] == "cold_chain_generator_failure_facilities_review"
+    assert result["decision"]["status"] == "pending"
+    assert result["decision"]["role"] == "facilities_manager"
+    assert result["decision"]["action"]["type"] == "dispatch_facilities_check"
+    assert result["decision"]["action"]["params"]["asset_id"] == "fridge_dairy_1"
+    assert result["decision"]["expected_outcome"]["stock_at_risk_minor_units"] == 643500
+    assert result["decision"]["critic_verdict"] == "approved"
+
+
 def test_inference_routing_keeps_strong_model_for_critic_and_executive() -> None:
     result = run_golden_cascade()
     routing = result["inference"]["routing"]
@@ -79,7 +180,7 @@ def test_inference_routing_keeps_strong_model_for_critic_and_executive() -> None
 
 def test_hitl_approve_flow() -> None:
     client = TestClient(app)
-    run_response = client.get("/demo/golden")
+    run_response = client.post("/demo/golden")
     assert run_response.status_code == 200
 
     decision = run_response.json()["decision"]
@@ -92,17 +193,91 @@ def test_hitl_approve_flow() -> None:
 
     assert approved["status"] == "approved"
     assert approved["review"]["status"] == "approved"
-    assert approved["write_back"]["status"] == "mocked_success"
+    assert approved["write_back"]["status"] == "pending_external_write"
+    assert approved["write_back"]["idempotency_key"] == f"writeback:{decision['id']}"
+    assert approved["write_back"]["rollback_instructions"]["policy"] == (
+        "recommend_only_no_source_mutation"
+    )
     assert approved["outcome"]["units_cleared"] == 75
     assert approved["outcome"]["rand_recovered"]["amount"] == "109.56"
     assert approved["learning_event"]["updated_threshold"] >= 75
     assert learning_event["updated_threshold"] >= learning_event["previous_threshold"]
     assert "Threshold adjusted" in learning_event["message"]
 
+    task_response = client.get("/writeback/tasks")
+    assert task_response.status_code == 200
+    tasks = task_response.json()["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["idempotency_key"] == approved["write_back"]["idempotency_key"]
+
+
+def test_hitl_reject_flow() -> None:
+    """The manual reject path had zero test coverage - only critic auto-rejection did."""
+    client = TestClient(app)
+    run_response = client.post("/demo/golden")
+    decision_id = run_response.json()["decision"]["id"]
+
+    reject_response = client.post(f"/decisions/{decision_id}/reject")
+
+    assert reject_response.status_code == 200
+    rejected = reject_response.json()["decision"]
+    assert rejected["status"] == "rejected"
+    assert rejected["review"]["status"] == "rejected"
+    assert reject_response.json()["learning_event"] is None
+
+    # Terminal-state guard: re-rejecting an already-rejected decision is idempotent, not an error.
+    second = client.post(f"/decisions/{decision_id}/reject")
+    assert second.status_code == 200
+    assert second.json()["decision"]["status"] == "rejected"
+
+    unknown = client.post("/decisions/dec_does_not_exist/reject")
+    assert unknown.status_code == 404
+
+
+def test_demo_decision_carries_governance_and_economics() -> None:
+    client = TestClient(app)
+    response = client.post("/demo/golden")
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    economics = decision["economics"]
+    governance = decision["governance"]
+
+    assert economics["cost"]["minor_units"] >= 0
+    assert economics["recovered"]["minor_units"] == decision["expected_outcome"][
+        "incremental_profit_minor_units"
+    ]
+    assert economics["total_tokens"] > 0
+    assert governance["provider"] == "offline"
+    assert governance["evidence_count"] == len(response.json()["evidence"])
+
+
+def test_demo_golden_read_does_not_reset_resolved_decision() -> None:
+    client = TestClient(app)
+    run_response = client.post("/demo/golden")
+    decision = run_response.json()["decision"]
+    approve_response = client.post(f"/decisions/{decision['id']}/approve")
+    assert approve_response.status_code == 200
+    assert approve_response.json()["decision"]["status"] == "approved"
+
+    preview_response = client.get("/demo/golden")
+    stored_response = client.get(f"/decisions/{decision['id']}")
+    repeated_response = client.post("/demo/golden")
+
+    assert preview_response.status_code == 200
+    assert preview_response.json()["decision"]["status"] == "pending"
+    assert preview_response.json()["decision"]["id"] != decision["id"]
+    assert stored_response.json()["decision"]["status"] == "approved"
+    assert repeated_response.status_code == 200
+    repeated_decision = repeated_response.json()["decision"]
+    assert repeated_decision["id"] != decision["id"]
+    assert repeated_decision["status"] == "pending"
+    assert repeated_decision["review"] is None
+
 
 def test_demo_golden_exposes_store_intelligence_numbers() -> None:
     client = TestClient(app)
-    response = client.get("/demo/golden")
+    response = client.post("/demo/golden")
 
     assert response.status_code == 200
     intelligence = response.json()["store_intelligence"]
@@ -115,7 +290,7 @@ def test_demo_golden_exposes_store_intelligence_numbers() -> None:
 
 def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> None:
     client = TestClient(app)
-    response = client.get("/demo/critic-rejection")
+    response = client.post("/demo/critic-rejection")
 
     assert response.status_code == 200
     decision = response.json()["decision"]
@@ -130,9 +305,48 @@ def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> Non
     assert body["learning_event"] is None
 
 
+def test_demo_procurement_endpoint_persists_pending_reorder() -> None:
+    client = TestClient(app)
+    response = client.post("/demo/procurement")
+
+    assert response.status_code == 200
+    body = response.json()
+    decision = body["decision"]
+    assert decision["action"]["type"] == "reorder"
+    assert decision["status"] == "pending"
+    assert decision["expected_outcome"]["stockout_exposure_minor_units"] > 0
+
+    decisions_response = client.get("/decisions")
+    assert decisions_response.status_code == 200
+    assert any(item["id"] == decision["id"] for item in decisions_response.json()["decisions"])
+
+
+def test_demo_sales_endpoint_persists_recorded_sale() -> None:
+    client = TestClient(app)
+    response = client.get("/demo/sales")
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    assert decision["status"] == "approved"
+    assert decision["action"]["type"] == "record_sale"
+    assert decision["expected_outcome"]["line_revenue_minor_units"] == 90000
+
+
+def test_demo_cold_chain_endpoint_persists_facilities_decision() -> None:
+    client = TestClient(app)
+    response = client.get("/demo/cold-chain")
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    assert decision["status"] == "pending"
+    assert decision["role"] == "facilities_manager"
+    assert decision["action"]["type"] == "dispatch_facilities_check"
+    assert decision["expected_outcome"]["stock_at_risk_minor_units"] > 0
+
+
 def test_decisions_endpoint_lists_demo_decisions() -> None:
     client = TestClient(app)
-    run_response = client.get("/demo/golden")
+    run_response = client.post("/demo/golden")
     assert run_response.status_code == 200
     decision = run_response.json()["decision"]
 
@@ -158,11 +372,12 @@ def test_readiness_endpoint_reports_backend_ready() -> None:
     assert body["checks"]["learning"] == "ok"
     assert body["checks"]["critic_rejection"] == "ok"
     assert body["checks"]["seed_data"] == "ok"
+    assert body["checks"]["amd_demo"] in {"ok", "pending"}
 
 
 def test_learning_endpoint_reports_threshold_events() -> None:
     client = TestClient(app)
-    run_response = client.get("/demo/golden")
+    run_response = client.post("/demo/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     assert approve_response.status_code == 200
@@ -186,7 +401,16 @@ def test_seed_summary_endpoint_returns_loaded_csv_context() -> None:
     assert seed["units_on_hand"] == 240
 
 
-def test_inference_client_is_offline_safe() -> None:
+def test_inference_client_is_offline_safe(monkeypatch) -> None:
+    for key in (
+        "LLM_BASE_URL",
+        "LLM_API_KEY",
+        "LLM_MODEL",
+        "LLM_ROUTINE_MODEL",
+        "LLM_STRONG_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     result = OpenAICompatibleInferenceClient().complete(
         agent="critic",
         system="system",
@@ -195,3 +419,59 @@ def test_inference_client_is_offline_safe() -> None:
 
     assert result.used_network is False
     assert result.provider == "offline"
+    assert result.input_tokens > 0
+    assert result.output_tokens > 0
+
+
+def test_inference_smoke_records_model_run() -> None:
+    client = TestClient(app)
+
+    response = client.get("/inference/smoke")
+    runs_response = client.get("/mlops/model-runs")
+    prompts_response = client.get("/mlops/prompts")
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    prompt = response.json()["prompt_version"]
+    assert result["run_id"]
+    assert result["usage"]["total_tokens"] > 0
+    assert prompt["id"] == "smoke:v1"
+    assert prompt["agent"] == "critic"
+    assert prompt["sha"] == prompt_registry.get("smoke:v1").sha
+    assert runs_response.status_code == 200
+    runs = runs_response.json()["model_runs"]
+    assert len(runs) == 1
+    assert runs[0]["id"] == result["run_id"]
+    assert runs[0]["agent"] == "critic"
+    assert runs[0]["prompt_version"] == "smoke:v1"
+    assert prompts_response.status_code == 200
+    prompts = prompts_response.json()["prompt_versions"]
+    assert len(prompts) == 1
+    assert prompts[0]["id"] == runs[0]["prompt_version"]
+
+
+def test_accountability_endpoint_joins_decisions_and_model_runs() -> None:
+    client = TestClient(app)
+    run_response = client.post("/demo/golden")
+    decision = run_response.json()["decision"]
+    approve_response = client.post(f"/decisions/{decision['id']}/approve")
+    assert approve_response.status_code == 200
+
+    OpenAICompatibleInferenceClient(
+        recorder=lambda payload: model_run_registry.record(ModelRun(**payload))
+    ).complete(
+        agent="executive",
+        system="system",
+        user="user",
+        tenant_id="sa_retail_demo",
+        prompt_version="exec:v1",
+    )
+    response = client.get("/mlops/accountability?tenant_id=sa_retail_demo")
+
+    assert response.status_code == 200
+    report = response.json()["report"]
+    assert report["decisions_total"] == 1
+    assert report["approved_total"] == 1
+    assert report["recovered"]["minor_units"] > 0
+    assert report["models_used"] == ["offline-strong"]
+    assert report["prompt_versions"] == ["exec:v1"]

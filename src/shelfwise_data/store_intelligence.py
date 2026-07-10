@@ -396,20 +396,20 @@ def summarize_outcome(outcome: DecisionOutcome) -> OutcomeSummary:
 def build_store_intelligence_demo() -> dict[str, Any]:
     as_of = date(2026, 7, 6)
     batch_split = split_stock_by_fefo(
-        sku="milk_2l",
+        sku="4011",
         as_of=as_of,
         batches=(
             StockBatch(
-                sku="milk_2l",
-                lot="MILK-OLD-0707",
+                sku="4011",
+                lot="AMASI-OLD-0707",
                 units=10,
                 expiry_date=date(2026, 7, 7),
                 received_date=date(2026, 7, 3),
                 location="fridge_a",
             ),
             StockBatch(
-                sku="milk_2l",
-                lot="MILK-NEW-0713",
+                sku="4011",
+                lot="AMASI-NEW-0713",
                 units=20,
                 expiry_date=date(2026, 7, 13),
                 received_date=date(2026, 7, 6),
@@ -419,7 +419,7 @@ def build_store_intelligence_demo() -> dict[str, Any]:
     )
     delivery = reconcile_delivery(
         DeliveryReceipt(
-            sku="milk_2l",
+            sku="4011",
             ordered_units=50,
             asn_units=50,
             received_units=38,
@@ -429,7 +429,7 @@ def build_store_intelligence_demo() -> dict[str, Any]:
     )
     supplier_cover = plan_supplier_cover(
         SupplierCoverRequest(
-            sku="milk_2l",
+            sku="4011",
             units_on_hand=12,
             forecast_daily_units=Decimal("10"),
             supplier_lead_time_days=Decimal("3"),

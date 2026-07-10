@@ -9,6 +9,8 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,10 +24,16 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
       - name: Lint backend
-        run: python -m ruff check src tests
+        run: python -m ruff check src tests scripts
 
       - name: Test backend
         run: python -m pytest -q
+
+      - name: Run ShelfWise eval gate
+        run: python -m shelfwise_eval
+
+      - name: Run backend smoke
+        run: python scripts/smoke.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
