@@ -1154,9 +1154,8 @@ def demo_worldgen_drill(
     run_id = f"worldrun_{uuid4().hex[:12]}"
     records: list[dict[str, object]] = []
     cascades: list[dict[str, Any]] = []
-    for event in world.run():
-        if len(records) >= limit:
-            break
+    stream = list(world.run())
+    for event in _stride_sample(stream, limit):
         outcome = _record_pipeline_event(event)
         records.append(_pipeline_summary(outcome))
         cascade = outcome.get("cascade")
@@ -1210,6 +1209,7 @@ def demo_worldgen_drill(
         "scenario_id": scenario_id,
         "synthetic": True,
         "worker_enabled": worker_enabled(),
+        "stream_events_total": len(stream),
         "events_total": len(records),
         "events_accepted": sum(1 for item in records if item["status"] == "accepted"),
         "duplicates": sum(1 for item in records if item["status"] == "duplicate"),
@@ -1484,6 +1484,20 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
         result["decision"] = decision_store.upsert(result["decision"])
         return _record_cascade(result)
     return None
+
+
+def _stride_sample(events: list[Event], limit: int) -> list[Event]:
+    """Take an evenly spaced, chronological sample across the WHOLE event stream.
+
+    Taking the first N events instead starves the pipeline: the world emits every
+    product's 08:00 stock update before its first sale of the day, so with a large
+    assortment the window fills with a single event type and the sales/expiry
+    cascades never see one event. Deterministic: same stream + limit, same sample.
+    """
+    if len(events) <= limit:
+        return events
+    step = len(events) / limit
+    return [events[int(index * step)] for index in range(limit)]
 
 
 def _pipeline_summary(outcome: dict[str, Any]) -> dict[str, object]:

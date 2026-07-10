@@ -198,7 +198,8 @@ def test_narration_is_offline_safe_and_labeled():
 def test_worldgen_demo_drives_real_backend_pipeline():
     client = TestClient(app)
 
-    response = client.get("/demo/worldgen/stage4_payday_coldchain?limit=12")
+    # limit 500 covers the default 6-product week entirely, so every sale is processed
+    response = client.get("/demo/worldgen/stage4_payday_coldchain?limit=500")
 
     assert response.status_code == 200
     body = response.json()
@@ -206,11 +207,11 @@ def test_worldgen_demo_drives_real_backend_pipeline():
     assert run["run_id"].startswith("worldrun_")
     assert run["scenario_id"] == "stage4_payday_coldchain"
     assert run["tenant_id"] == "sa_retail_demo"
-    assert run["events_total"] == 13
+    assert run["events_total"] == body["stream_events_total"] + 1  # +1 injected alert
     assert run["decisions_total"] == len(body["decisions"])
     assert body["synthetic"] is True
-    assert body["events_total"] == 13
-    assert body["events_accepted"] == 13
+    assert body["events_total"] == len(body["events"])
+    assert body["events_accepted"] == body["events_total"]
     assert body["schedule_sample"]
     assert any(event["type"] == "stock_update" for event in body["events"])
     assert body["decisions"]
@@ -309,3 +310,34 @@ def test_worldgen_run_store_filters_by_tenant_and_validates_limit():
         assert "limit must be between 1 and 500" in str(exc)
     else:
         raise AssertionError("expected limit validation")
+
+
+def test_worldgen_drill_large_assortment_still_feeds_every_event_type():
+    """Regression: first-N slicing starved big assortments down to day-1 stock updates.
+
+    A 3000-product store emits all 08:00 stock updates before its first sale, so
+    taking the first 500 events fed the pipeline one event type only (observed in a
+    real run: 3 decisions from 841k events). Stride sampling across the whole stream
+    must keep sales - and therefore price-integrity decisions - flowing at any size.
+    """
+    client = TestClient(app)
+
+    response = client.get(
+        "/demo/worldgen/stage4_payday_coldchain",
+        params={"limit": 500, "assortment_size": 3000, "seed_override": 20260709},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stream_events_total"] > 500, "3000 products must overflow the limit"
+    event_types = {event["type"] for event in body["events"]}
+    assert "sale" in event_types, f"stride sample lost sales: {sorted(event_types)}"
+    assert len(event_types) >= 3, f"expected a mix of event types, got {sorted(event_types)}"
+    scenarios = {
+        cascade.get("scenario")
+        for cascade in body.get("cascades", [])
+        if cascade.get("scenario")
+    }
+    assert "pos_price_outlier_review" in scenarios, (
+        f"no price-outlier decision minted from 3000 products; cascades: {sorted(scenarios)}"
+    )
