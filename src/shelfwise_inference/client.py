@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from .config import InferenceConfig, ProviderKind, load_inference_config
@@ -28,6 +29,9 @@ class InferenceResult:
     correlation_id: str = ""
     status: str = "ok"
     raw: dict[str, Any] | None = None
+    message: dict[str, Any] | None = None
+    finish_reason: str = ""
+    fallback: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +49,9 @@ class InferenceResult:
             "correlation_id": self.correlation_id,
             "status": self.status,
             "raw": self.raw,
+            "message": self.message,
+            "finish_reason": self.finish_reason,
+            "fallback": self.fallback,
         }
 
 
@@ -85,16 +92,56 @@ class OpenAICompatibleInferenceClient:
         prompt_version: str = "v1",
         schema_version: str = "v1",
     ) -> InferenceResult:
+        """Submit a simple system/user completion through the generic chat transport."""
+        return self.chat_completions(
+            agent=agent,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tenant_id=tenant_id,
+            correlation_id=correlation_id,
+            prompt_version=prompt_version,
+            schema_version=schema_version,
+        )
+
+    def chat_completions(
+        self,
+        *,
+        agent: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 400,
+        tenant_id: str = "default",
+        correlation_id: str | None = None,
+        prompt_version: str = "v1",
+        schema_version: str = "v1",
+        model: str | None = None,
+        base_url: str | None = None,
+    ) -> InferenceResult:
+        """Submit OpenAI-compatible messages and optional tools without SDK coupling."""
         started = perf_counter()
         run_id = f"mr_{uuid4().hex[:12]}"
         effective_correlation_id = correlation_id or run_id
-        model = self._config.model_for_agent(agent)
-        input_tokens = _estimate_tokens(system) + _estimate_tokens(user)
-        if self._config.provider is ProviderKind.OFFLINE:
+        effective_model = model or self._config.model_for_agent(agent)
+        effective_base_url = self._config.base_url if base_url is None else base_url
+        provider = (
+            self._config.provider.value
+            if effective_base_url == self._config.base_url
+            else _provider_label(effective_base_url)
+        )
+        user = _last_user_text(messages)
+        input_tokens = _estimate_payload_tokens(messages, tools, response_format)
+        if provider == ProviderKind.OFFLINE.value:
             content = "offline: deterministic ShelfWise cascade is active"
             result = InferenceResult(
-                provider=self._config.provider.value,
-                model=model,
+                provider=ProviderKind.OFFLINE.value,
+                model=effective_model,
                 content=content,
                 used_network=False,
                 input_tokens=input_tokens,
@@ -102,6 +149,7 @@ class OpenAICompatibleInferenceClient:
                 latency_ms=_elapsed_ms(started),
                 run_id=run_id,
                 correlation_id=effective_correlation_id,
+                message={"role": "assistant", "content": content},
             )
             self._record_run(
                 result,
@@ -117,7 +165,8 @@ class OpenAICompatibleInferenceClient:
                 run_id=run_id,
                 correlation_id=effective_correlation_id,
                 agent=agent,
-                model=model,
+                model=effective_model,
+                provider=provider,
                 tenant_id=tenant_id,
                 prompt_version=prompt_version,
                 schema_version=schema_version,
@@ -128,16 +177,20 @@ class OpenAICompatibleInferenceClient:
             )
             raise InferenceError("LLM_API_KEY is required when LLM_BASE_URL is configured")
 
-        payload = {
-            "model": model,
+        payload: dict[str, Any] = {
+            "model": effective_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
         }
-        url = self._config.chat_completions_url()
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice or "auto"
+        elif tool_choice is not None:
+            raise InferenceError("tool_choice requires at least one tool")
+        if response_format is not None:
+            payload["response_format"] = response_format
+        url = _chat_completions_url(effective_base_url)
         request = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
@@ -150,7 +203,9 @@ class OpenAICompatibleInferenceClient:
         try:
             with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
                 raw = json.loads(response.read().decode("utf-8"))
-            content = _extract_content(raw)
+            message, finish_reason = _extract_message(raw, allow_tool_calls=bool(tools))
+            content = message.get("content")
+            content = content if isinstance(content, str) else ""
         except (urllib.error.URLError, json.JSONDecodeError, InferenceError) as exc:
             # A transport failure, a non-JSON 200 body, and a well-formed-but-wrong-shape
             # response (missing choices/message/content) are all provider failures - every
@@ -159,7 +214,8 @@ class OpenAICompatibleInferenceClient:
                 run_id=run_id,
                 correlation_id=effective_correlation_id,
                 agent=agent,
-                model=model,
+                model=effective_model,
+                provider=provider,
                 tenant_id=tenant_id,
                 prompt_version=prompt_version,
                 schema_version=schema_version,
@@ -176,8 +232,8 @@ class OpenAICompatibleInferenceClient:
             fallback_output=_estimate_tokens(content),
         )
         result = InferenceResult(
-            provider=self._config.provider.value,
-            model=model,
+            provider=provider,
+            model=effective_model,
             content=content,
             used_network=True,
             input_tokens=input_tokens,
@@ -186,6 +242,8 @@ class OpenAICompatibleInferenceClient:
             run_id=run_id,
             correlation_id=effective_correlation_id,
             raw=raw,
+            message=message,
+            finish_reason=finish_reason,
         )
         self._record_run(
             result,
@@ -235,6 +293,7 @@ class OpenAICompatibleInferenceClient:
         correlation_id: str,
         agent: str,
         model: str,
+        provider: str,
         tenant_id: str,
         prompt_version: str,
         schema_version: str,
@@ -252,7 +311,7 @@ class OpenAICompatibleInferenceClient:
                 "correlation_id": correlation_id,
                 "agent": agent,
                 "model": model,
-                "provider": self._config.provider.value,
+                "provider": provider,
                 "prompt_version": prompt_version,
                 "schema_version": schema_version,
                 "input_tokens": input_tokens,
@@ -265,17 +324,73 @@ class OpenAICompatibleInferenceClient:
         )
 
 
-def _extract_content(raw: dict[str, Any]) -> str:
+def _extract_message(
+    raw: dict[str, Any],
+    *,
+    allow_tool_calls: bool,
+) -> tuple[dict[str, Any], str]:
+    """Extract one assistant message while allowing content-less tool calls."""
     choices = raw.get("choices")
     if not isinstance(choices, list) or not choices:
         raise InferenceError("Inference response missing choices")
-    message = choices[0].get("message")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise InferenceError("Inference response contains an invalid choice")
+    message = choice.get("message")
     if not isinstance(message, dict):
         raise InferenceError("Inference response missing message")
     content = message.get("content")
-    if not isinstance(content, str):
+    has_tool_call = bool(message.get("tool_calls")) or isinstance(
+        message.get("function_call"), dict
+    )
+    if not isinstance(content, str) and not (allow_tool_calls and has_tool_call):
         raise InferenceError("Inference response missing text content")
-    return content
+    normalized = dict(message)
+    normalized.setdefault("role", "assistant")
+    finish_reason = choice.get("finish_reason")
+    return normalized, finish_reason if isinstance(finish_reason, str) else ""
+
+
+def _chat_completions_url(base_url: str) -> str:
+    """Append the OpenAI chat path while preserving proxy query parameters."""
+    scheme, netloc, path, query, fragment = urlsplit(base_url)
+    path = path.rstrip("/")
+    path = f"{path}/chat/completions" if path.endswith("/v1") else f"{path}/v1/chat/completions"
+    return urlunsplit((scheme, netloc, path, query, fragment))
+
+
+def _provider_label(base_url: str) -> str:
+    """Derive a public provider label for endpoint overrides."""
+    lowered = base_url.lower()
+    if not lowered:
+        return ProviderKind.OFFLINE.value
+    if "fireworks" in lowered:
+        return ProviderKind.FIREWORKS.value
+    return ProviderKind.VLLM_MI300X.value
+
+
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """Return the last user payload for the existing bounded run recorder."""
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content", "")
+        return content if isinstance(content, str) else json.dumps(content, sort_keys=True)
+    return ""
+
+
+def _estimate_payload_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    response_format: dict[str, Any] | None,
+) -> int:
+    """Estimate input tokens when a provider omits usage metadata."""
+    payload = {"messages": messages}
+    if tools:
+        payload["tools"] = tools
+    if response_format:
+        payload["response_format"] = response_format
+    return _estimate_tokens(json.dumps(payload, sort_keys=True, default=str))
 
 
 def _usage_from_raw(

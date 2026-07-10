@@ -15,16 +15,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest>=8",
-  "ruff>=0.6",
-]
 training = [
   "accelerate>=1.0",
   "datasets>=3.0",
   "peft>=0.13",
   "tokenizers>=0.20",
   "transformers>=4.45",
+]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
 ]
 tsfm = [
   "httpx>=0.27",
@@ -42,6 +42,7 @@ packages = [
   "src/shelfwise",
   "src/shelfwise_action",
   "src/shelfwise_backend",
+  "src/shelfwise_capabilities",
   "src/shelfwise_catalog",
   "src/shelfwise_connectors",
   "src/shelfwise_contracts",

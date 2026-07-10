@@ -1,0 +1,1393 @@
+{
+  "$defs": {
+    "AgentCapability": {
+      "additionalProperties": false,
+      "description": "A decision role declared by contracts or inference metadata.",
+      "properties": {
+        "agent_name": {
+          "title": "Agent Name",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "agent",
+          "default": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metadata_only": {
+          "default": false,
+          "title": "Metadata Only",
+          "type": "boolean"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "agent_name"
+      ],
+      "title": "AgentCapability",
+      "type": "object"
+    },
+    "BusBackendCapability": {
+      "additionalProperties": false,
+      "description": "Event-bus backend selectable through the bus factory.",
+      "properties": {
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "bus_backend",
+          "default": "bus_backend",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "backend"
+      ],
+      "title": "BusBackendCapability",
+      "type": "object"
+    },
+    "CapabilityRelationship": {
+      "additionalProperties": false,
+      "description": "Typed edge from one capability to another manifest record.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RelationshipKind"
+        },
+        "target": {
+          "minLength": 3,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "CapabilityRelationship",
+      "type": "object"
+    },
+    "CapabilityStatus": {
+      "description": "Ordered evidence levels for a capability claim.",
+      "enum": [
+        "declaration_only",
+        "partial",
+        "implemented",
+        "verified",
+        "demo_verified"
+      ],
+      "title": "CapabilityStatus",
+      "type": "string"
+    },
+    "ConnectorCapability": {
+      "additionalProperties": false,
+      "description": "Connector state across enum declaration, catalogue, and mapper registration.",
+      "properties": {
+        "catalogued": {
+          "title": "Catalogued",
+          "type": "boolean"
+        },
+        "declared": {
+          "title": "Declared",
+          "type": "boolean"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "connector",
+          "default": "connector",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mapped": {
+          "title": "Mapped",
+          "type": "boolean"
+        },
+        "mapper_registered_claim": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mapper Registered Claim"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "transport": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transport"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "system",
+        "declared",
+        "catalogued",
+        "mapped"
+      ],
+      "title": "ConnectorCapability",
+      "type": "object"
+    },
+    "DeploymentProfileCapability": {
+      "additionalProperties": false,
+      "description": "Runnable or configured deployment profile.",
+      "properties": {
+        "bus_backend": {
+          "title": "Bus Backend",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "inference_provider": {
+          "title": "Inference Provider",
+          "type": "string"
+        },
+        "kind": {
+          "const": "deployment_profile",
+          "default": "deployment_profile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "storage_backend": {
+          "title": "Storage Backend",
+          "type": "string"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        },
+        "worker_enabled": {
+          "title": "Worker Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "profile",
+        "storage_backend",
+        "bus_backend",
+        "worker_enabled",
+        "inference_provider"
+      ],
+      "title": "DeploymentProfileCapability",
+      "type": "object"
+    },
+    "EventConsumerCapability": {
+      "additionalProperties": false,
+      "description": "A worker branch that consumes one canonical event type.",
+      "properties": {
+        "consumer": {
+          "title": "Consumer",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "event_consumer",
+          "default": "event_consumer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "consumer",
+        "event_type"
+      ],
+      "title": "EventConsumerCapability",
+      "type": "object"
+    },
+    "EventTypeCapability": {
+      "additionalProperties": false,
+      "description": "Canonical event type and its discovered consumers.",
+      "properties": {
+        "consumers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Consumers",
+          "type": "array"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "event_type",
+          "default": "event_type",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "event_type"
+      ],
+      "title": "EventTypeCapability",
+      "type": "object"
+    },
+    "FrontendSurfaceCapability": {
+      "additionalProperties": false,
+      "description": "User-visible frontend workspace or operational panel.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "frontend_surface",
+          "default": "frontend_surface",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "surface": {
+          "title": "Surface",
+          "type": "string"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "surface"
+      ],
+      "title": "FrontendSurfaceCapability",
+      "type": "object"
+    },
+    "MultimodalFeatureCapability": {
+      "additionalProperties": false,
+      "description": "Speech, vision, or event-intake feature entry point.",
+      "properties": {
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "feature": {
+          "title": "Feature",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "multimodal_feature",
+          "default": "multimodal_feature",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "feature",
+        "entrypoint"
+      ],
+      "title": "MultimodalFeatureCapability",
+      "type": "object"
+    },
+    "OpenAPIRouteCapability": {
+      "additionalProperties": false,
+      "description": "One OpenAPI path and HTTP method pair.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "openapi_route",
+          "default": "openapi_route",
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "DELETE",
+            "GET",
+            "PATCH",
+            "POST",
+            "PUT"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "operation_id": {
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^/",
+          "title": "Path",
+          "type": "string"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "path",
+        "method",
+        "operation_id"
+      ],
+      "title": "OpenAPIRouteCapability",
+      "type": "object"
+    },
+    "RelationshipKind": {
+      "description": "Supported dependency edges between capability records.",
+      "enum": [
+        "requires",
+        "consumes",
+        "exposes",
+        "uses"
+      ],
+      "title": "RelationshipKind",
+      "type": "string"
+    },
+    "SourceLocation": {
+      "additionalProperties": false,
+      "description": "Stable source pointer proving where a capability was discovered.",
+      "properties": {
+        "line": {
+          "minimum": 1,
+          "title": "Line",
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol"
+        }
+      },
+      "required": [
+        "path",
+        "line"
+      ],
+      "title": "SourceLocation",
+      "type": "object"
+    },
+    "StorageBackendCapability": {
+      "additionalProperties": false,
+      "description": "Storage backend selectable through repository factories.",
+      "properties": {
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "factories": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Factories",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "storage_backend",
+          "default": "storage_backend",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "backend",
+        "factories"
+      ],
+      "title": "StorageBackendCapability",
+      "type": "object"
+    },
+    "ToolCapability": {
+      "additionalProperties": false,
+      "description": "Callable platform or multimodal tool exposed to an agent/runtime.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "tool",
+          "default": "tool",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "surface": {
+          "enum": [
+            "multimodal",
+            "platform"
+          ],
+          "title": "Surface",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "tool_name",
+        "surface"
+      ],
+      "title": "ToolCapability",
+      "type": "object"
+    },
+    "TrainingStageCapability": {
+      "additionalProperties": false,
+      "description": "Training pipeline stage and whether real runtime execution is verified.",
+      "properties": {
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "training_stage",
+          "default": "training_stage",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "runtime_verified": {
+          "title": "Runtime Verified",
+          "type": "boolean"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "stage",
+        "entrypoint",
+        "runtime_verified"
+      ],
+      "title": "TrainingStageCapability",
+      "type": "object"
+    },
+    "WorkerCapability": {
+      "additionalProperties": false,
+      "description": "Background worker or worker-loop implementation.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worker",
+          "default": "worker",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        },
+        "worker": {
+          "title": "Worker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "worker"
+      ],
+      "title": "WorkerCapability",
+      "type": "object"
+    },
+    "WorkflowCapability": {
+      "additionalProperties": false,
+      "description": "A deterministic workflow entry point.",
+      "properties": {
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "workflow",
+          "default": "workflow",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "entrypoint"
+      ],
+      "title": "WorkflowCapability",
+      "type": "object"
+    },
+    "WorldgenScenarioCapability": {
+      "additionalProperties": false,
+      "description": "Named deterministic world-generation scenario.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z_]+:.+",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worldgen_scenario",
+          "default": "worldgen_scenario",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "relationships": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "verification_nodeids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Nodeids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "sources",
+        "scenario_id",
+        "seed"
+      ],
+      "title": "WorldgenScenarioCapability",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Normalized, fingerprinted capability snapshot committed to the repository.",
+  "properties": {
+    "capabilities": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "agent": "#/$defs/AgentCapability",
+            "bus_backend": "#/$defs/BusBackendCapability",
+            "connector": "#/$defs/ConnectorCapability",
+            "deployment_profile": "#/$defs/DeploymentProfileCapability",
+            "event_consumer": "#/$defs/EventConsumerCapability",
+            "event_type": "#/$defs/EventTypeCapability",
+            "frontend_surface": "#/$defs/FrontendSurfaceCapability",
+            "multimodal_feature": "#/$defs/MultimodalFeatureCapability",
+            "openapi_route": "#/$defs/OpenAPIRouteCapability",
+            "storage_backend": "#/$defs/StorageBackendCapability",
+            "tool": "#/$defs/ToolCapability",
+            "training_stage": "#/$defs/TrainingStageCapability",
+            "worker": "#/$defs/WorkerCapability",
+            "workflow": "#/$defs/WorkflowCapability",
+            "worldgen_scenario": "#/$defs/WorldgenScenarioCapability"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AgentCapability"
+          },
+          {
+            "$ref": "#/$defs/WorkflowCapability"
+          },
+          {
+            "$ref": "#/$defs/OpenAPIRouteCapability"
+          },
+          {
+            "$ref": "#/$defs/ConnectorCapability"
+          },
+          {
+            "$ref": "#/$defs/ToolCapability"
+          },
+          {
+            "$ref": "#/$defs/EventTypeCapability"
+          },
+          {
+            "$ref": "#/$defs/EventConsumerCapability"
+          },
+          {
+            "$ref": "#/$defs/StorageBackendCapability"
+          },
+          {
+            "$ref": "#/$defs/BusBackendCapability"
+          },
+          {
+            "$ref": "#/$defs/WorkerCapability"
+          },
+          {
+            "$ref": "#/$defs/WorldgenScenarioCapability"
+          },
+          {
+            "$ref": "#/$defs/MultimodalFeatureCapability"
+          },
+          {
+            "$ref": "#/$defs/TrainingStageCapability"
+          },
+          {
+            "$ref": "#/$defs/FrontendSurfaceCapability"
+          },
+          {
+            "$ref": "#/$defs/DeploymentProfileCapability"
+          }
+        ]
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "fingerprint": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "generator": {
+      "const": "shelfwise_capabilities",
+      "default": "shelfwise_capabilities",
+      "title": "Generator",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "fingerprint",
+    "capabilities"
+  ],
+  "title": "CapabilityManifest",
+  "type": "object"
+}

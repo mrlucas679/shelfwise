@@ -74,10 +74,7 @@ class InMemoryLearningStore:
             if existing is not None:
                 return existing.to_dict()
 
-            action = decision.get("action") or {}
-            params = action.get("params") or {}
-            sku = str(params.get("sku") or "unknown")
-            metric = f"{sku}:markdown_sell_through_target_units"
+            metric, _subject = _routed_metric(decision)
             event = _build_learning_event(
                 decision,
                 previous_threshold=self._thresholds.get(metric),
@@ -135,11 +132,8 @@ class PostgresLearningStore:
             if existing is not None:
                 return deepcopy(existing["payload"])
 
-            action = decision.get("action") or {}
-            params = action.get("params") or {}
             tenant_id = _tenant_id(decision)
-            sku = str(params.get("sku") or "unknown")
-            metric = f"{sku}:markdown_sell_through_target_units"
+            metric, _subject = _routed_metric(decision)
             threshold_row = conn.execute(
                 """
                 select threshold_units
@@ -254,7 +248,148 @@ def _tenant_id(decision: dict[str, Any]) -> str:
     return tenant_id or "default"
 
 
+def _routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
+    """Choose the learning metric for a decision by what was actually decided.
+
+    Forcing every action through the markdown sell-through metric produced provably
+    dead learning: facilities decisions landed on SKU "unknown" and every threshold
+    stayed zero. Each action type measures the quantity it actually moves.
+    """
+    action = decision.get("action") or {}
+    params = action.get("params") or {}
+    action_type = str(action.get("type") or "")
+    if action_type == "review_price_exception":
+        sku = str(params.get("sku") or "unknown")
+        return f"{sku}:price_exception_exposure_minor_units", sku
+    if action_type == "dispatch_facilities_check":
+        site = str(params.get("site_id") or params.get("asset_id") or "site_unknown")
+        return f"{site}:cold_chain_stock_at_risk_minor_units", site
+    if action_type == "review_expiry_markdown":
+        sku = str(params.get("sku") or "unknown")
+        return f"{sku}:expiry_review_days_to_expiry", sku
+    sku = str(params.get("sku") or "unknown")
+    return f"{sku}:markdown_sell_through_target_units", sku
+
+
+def _exposure_event(
+    decision: dict[str, Any],
+    *,
+    previous_threshold: int | None,
+    metric: str,
+    subject: str,
+    exposure_keys: tuple[str, ...],
+    label: str,
+) -> LearningEvent:
+    decision_id = str(decision.get("id", ""))
+    expected = decision.get("expected_outcome") or {}
+    exposure = 0
+    for key in exposure_keys:
+        value = expected.get(key)
+        if value is not None:
+            exposure = abs(_int(value, default=0))
+            break
+    base = 0 if previous_threshold is None else previous_threshold
+    updated = max(base, exposure)
+    # score discriminates by magnitude: small confirmed exposures score high, large ones low
+    score = (Decimal("0.99") - Decimal(min(exposure, 200_000)) / Decimal(250_000)).quantize(
+        Decimal("0.01")
+    )
+    outcome = {
+        "measured_minor_units": exposure,
+        "rand_recovered": _money_dict(exposure),
+        "success_score": str(score),
+    }
+    return LearningEvent(
+        id=f"learn_{decision_id.removeprefix('dec_')}",
+        decision_id=decision_id,
+        sku=subject,
+        metric=metric,
+        previous_threshold=base,
+        updated_threshold=updated,
+        delta_units=updated - base,
+        outcome=outcome,
+        message=(
+            f"{label} for {subject}: measured {exposure} minor units; "
+            f"largest confirmed is now {updated}."
+        ),
+        created_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def _expiry_review_event(
+    decision: dict[str, Any],
+    *,
+    previous_threshold: int | None,
+    metric: str,
+    subject: str,
+) -> LearningEvent:
+    decision_id = str(decision.get("id", ""))
+    expected = decision.get("expected_outcome") or {}
+    days = max(_int(expected.get("days_to_expiry"), default=0), 0)
+    base = 0 if previous_threshold is None else previous_threshold
+    updated = max(base, days if days > 0 else 1)
+    score = (Decimal(1) - Decimal(min(days, 10)) / Decimal(20)).quantize(Decimal("0.01"))
+    outcome = {
+        "days_to_expiry": days,
+        "rand_recovered": _money_dict(0),
+        "success_score": str(score),
+    }
+    return LearningEvent(
+        id=f"learn_{decision_id.removeprefix('dec_')}",
+        decision_id=decision_id,
+        sku=subject,
+        metric=metric,
+        previous_threshold=base,
+        updated_threshold=updated,
+        delta_units=updated - base,
+        outcome=outcome,
+        message=(
+            f"Expiry review for SKU {subject}: {days} day(s) to expiry; "
+            f"review window threshold now {updated}."
+        ),
+        created_at=datetime.now(UTC).isoformat(),
+    )
+
+
 def _build_learning_event(
+    decision: dict[str, Any],
+    *,
+    previous_threshold: int | None,
+) -> LearningEvent:
+    metric, subject = _routed_metric(decision)
+    action_type = str((decision.get("action") or {}).get("type") or "")
+    if action_type == "review_price_exception":
+        return _exposure_event(
+            decision,
+            previous_threshold=previous_threshold,
+            metric=metric,
+            subject=subject,
+            exposure_keys=("revenue_exposure_minor_units",),
+            label="Price-exception exposure",
+        )
+    if action_type == "dispatch_facilities_check":
+        return _exposure_event(
+            decision,
+            previous_threshold=previous_threshold,
+            metric=metric,
+            subject=subject,
+            exposure_keys=(
+                "stock_at_risk_minor_units",
+                "incremental_profit_minor_units",
+            ),
+            label="Cold-chain stock at risk",
+        )
+    if action_type == "review_expiry_markdown":
+        return _expiry_review_event(
+            decision,
+            previous_threshold=previous_threshold,
+            metric=metric,
+            subject=subject,
+        )
+    return _markdown_learning_event(decision, previous_threshold=previous_threshold)
+
+
+def _markdown_learning_event(
     decision: dict[str, Any],
     *,
     previous_threshold: int | None,
@@ -275,7 +410,7 @@ def _build_learning_event(
         default=0,
     )
     actual_recovered_cents = expected_recovered_cents + uplift_units * margin_cents
-    metric = f"{sku}:markdown_sell_through_target_units"
+    metric, _subject = _routed_metric(decision)
     base_threshold = predicted_units if previous_threshold is None else previous_threshold
     updated_threshold = max(base_threshold, actual_units)
     outcome = {

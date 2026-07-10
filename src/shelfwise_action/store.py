@@ -39,25 +39,6 @@ class InMemoryDecisionStore:
             self._decisions[decision_id] = record
             return deepcopy(record)
 
-    def replace(self, decision: dict[str, Any]) -> dict[str, Any]:
-        """Replace a decision record even if it was previously resolved.
-
-        This is intentionally separate from upsert. Normal HITL writes must be
-        idempotent, while seeded demo routes need to be replayable during a
-        live judging session or soak test.
-        """
-        decision_id = str(decision.get("id", ""))
-        if not decision_id:
-            raise ValueError("decision must include id")
-
-        with self._lock:
-            record = deepcopy(decision)
-            record.setdefault("created_at", _now())
-            record.setdefault("updated_at", record["created_at"])
-            record.setdefault("review", None)
-            self._decisions[decision_id] = record
-            return deepcopy(record)
-
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
             return [deepcopy(item) for item in self._decisions.values()]

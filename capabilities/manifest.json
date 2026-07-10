@@ -1,0 +1,3763 @@
+{
+  "capabilities": [
+    {
+      "agent_name": "cold_chain",
+      "id": "agent:cold_chain",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Cold Chain",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 22,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_cold_chain_cascade_routes_facilities_review"
+      ]
+    },
+    {
+      "agent_name": "critic",
+      "id": "agent:critic",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Critic",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 28,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        },
+        {
+          "line": 20,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "STRONG_AGENT_NAMES"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "demand",
+      "id": "agent:demand",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Demand",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 24,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "executive",
+      "id": "agent:executive",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Executive",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 29,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        },
+        {
+          "line": 20,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "STRONG_AGENT_NAMES"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "expiry",
+      "id": "agent:expiry",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Expiry",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 23,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "inventory",
+      "id": "agent:inventory",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Inventory",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 20,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "opportunity",
+      "id": "agent:opportunity",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Opportunity",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 26,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "agent_name": "orchestrator",
+      "id": "agent:orchestrator",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Orchestrator",
+      "note": "A bounded, schema-validating AgentOrchestrator is unit-tested but not yet wired into the backend cascade.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 20,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "STRONG_AGENT_NAMES"
+        },
+        {
+          "line": 227,
+          "path": "src/shelfwise_inference/orchestration.py",
+          "symbol": "AgentOrchestrator"
+        }
+      ],
+      "status": "partial",
+      "verification_nodeids": [
+        "tests/test_agent_orchestration.py::test_agent_executes_tool_feeds_result_back_and_returns_valid_json"
+      ]
+    },
+    {
+      "agent_name": "procurement",
+      "id": "agent:procurement",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Procurement",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 25,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_procurement_cascade_uses_reorder_policy_and_supplier_ranking"
+      ]
+    },
+    {
+      "agent_name": "sales",
+      "id": "agent:sales",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Sales",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 21,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_sales_cascade_records_clean_pos_sale"
+      ]
+    },
+    {
+      "agent_name": "simulation",
+      "id": "agent:simulation",
+      "kind": "agent",
+      "metadata_only": false,
+      "name": "Simulation",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 27,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "AgentName"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+      ]
+    },
+    {
+      "backend": "memory",
+      "id": "bus_backend:memory",
+      "kind": "bus_backend",
+      "name": "Memory event bus",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 295,
+          "path": "src/shelfwise_backend/event_bus.py",
+          "symbol": "create_event_bus"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_store_backends.py::test_redis_bus_requires_redis_url",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ]
+    },
+    {
+      "backend": "redis",
+      "id": "bus_backend:redis",
+      "kind": "bus_backend",
+      "name": "Redis event bus",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 297,
+          "path": "src/shelfwise_backend/event_bus.py",
+          "symbol": "create_event_bus"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_store_backends.py::test_redis_bus_requires_redis_url",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:csv",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "CSV export",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 12,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.CSV"
+        },
+        {
+          "line": 33,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 23,
+          "path": "src/shelfwise_data/csv_connector.py",
+          "symbol": "CsvConnector"
+        }
+      ],
+      "status": "verified",
+      "system": "csv",
+      "transport": "file",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": false,
+      "declared": true,
+      "id": "connector:dynamics",
+      "kind": "connector",
+      "mapped": false,
+      "mapper_registered_claim": null,
+      "name": "Dynamics",
+      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 16,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.DYNAMICS"
+        }
+      ],
+      "status": "declaration_only",
+      "system": "dynamics",
+      "transport": null,
+      "verification_nodeids": []
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:lightspeed",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "Lightspeed",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 19,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.LIGHTSPEED"
+        },
+        {
+          "line": 57,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 20,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "WEBHOOK_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "lightspeed",
+      "transport": "webhook_or_poll",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:odoo",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "Odoo",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 15,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.ODOO"
+        },
+        {
+          "line": 34,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 26,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "POLL_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "odoo",
+      "transport": "poll",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:sap",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "SAP S/4HANA or B1",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 13,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.SAP"
+        },
+        {
+          "line": 36,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 27,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "POLL_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "sap",
+      "transport": "poll",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:shopify",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "Shopify",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 17,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.SHOPIFY"
+        },
+        {
+          "line": 46,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 21,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "WEBHOOK_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "shopify",
+      "transport": "webhook",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:square",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "Square",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 18,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.SQUARE"
+        },
+        {
+          "line": 35,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 22,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "WEBHOOK_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "square",
+      "transport": "webhook",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": true,
+      "declared": true,
+      "id": "connector:syspro",
+      "kind": "connector",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "SYSPRO",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 14,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.SYSPRO"
+        },
+        {
+          "line": 56,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 28,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "POLL_MAPPERS"
+        }
+      ],
+      "status": "verified",
+      "system": "syspro",
+      "transport": "poll",
+      "verification_nodeids": [
+        "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      ]
+    },
+    {
+      "catalogued": false,
+      "declared": true,
+      "id": "connector:yoco",
+      "kind": "connector",
+      "mapped": false,
+      "mapper_registered_claim": null,
+      "name": "Yoco",
+      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 20,
+          "path": "src/shelfwise_connectors/canonical.py",
+          "symbol": "SourceSystem.YOCO"
+        }
+      ],
+      "status": "declaration_only",
+      "system": "yoco",
+      "transport": null,
+      "verification_nodeids": []
+    },
+    {
+      "bus_backend": "redis",
+      "id": "deployment_profile:docker_compose_demo",
+      "inference_provider": "offline",
+      "kind": "deployment_profile",
+      "name": "Docker Compose demo",
+      "note": "Compose wiring is configuration-tested; worker mode remains disabled by default.",
+      "profile": "docker_compose_demo",
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "bus_backend:redis"
+        },
+        {
+          "kind": "requires",
+          "target": "storage_backend:postgres"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "docker-compose.yml",
+          "symbol": "docker_compose_demo"
+        }
+      ],
+      "status": "verified",
+      "storage_backend": "postgres",
+      "verification_nodeids": [
+        "tests/test_infra_config.py::test_backend_container_sandbox_is_declared_in_compose",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ],
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "redis",
+      "id": "deployment_profile:fireworks_demo",
+      "inference_provider": "fireworks",
+      "kind": "deployment_profile",
+      "name": "Fireworks demo inference",
+      "note": "Provider routing is implemented, but this snapshot carries no live Fireworks proof.",
+      "profile": "fireworks_demo",
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "bus_backend:redis"
+        },
+        {
+          "kind": "requires",
+          "target": "storage_backend:postgres"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": ".env.example",
+          "symbol": "fireworks_demo"
+        },
+        {
+          "line": 1,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "fireworks_demo"
+        }
+      ],
+      "status": "partial",
+      "storage_backend": "postgres",
+      "verification_nodeids": [],
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "memory",
+      "id": "deployment_profile:local_development",
+      "inference_provider": "offline",
+      "kind": "deployment_profile",
+      "name": "Local development",
+      "note": "Default local profile uses deterministic in-memory stores and offline-safe inference.",
+      "profile": "local_development",
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "bus_backend:memory"
+        },
+        {
+          "kind": "requires",
+          "target": "storage_backend:memory"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": ".env.example",
+          "symbol": "local_development"
+        },
+        {
+          "line": 1,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "local_development"
+        }
+      ],
+      "status": "verified",
+      "storage_backend": "memory",
+      "verification_nodeids": [
+        "tests/test_infra_config.py::test_backend_container_sandbox_is_declared_in_compose",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ],
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "redis",
+      "id": "deployment_profile:mi300x_vllm_demo",
+      "inference_provider": "vllm_mi300x",
+      "kind": "deployment_profile",
+      "name": "MI300X vLLM demo inference",
+      "note": "MI300X/vLLM routing is configured, but live accelerator proof is intentionally not inferred.",
+      "profile": "mi300x_vllm_demo",
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "bus_backend:redis"
+        },
+        {
+          "kind": "requires",
+          "target": "storage_backend:postgres"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "configs/train_gemma4_multimodal.yaml",
+          "symbol": "mi300x_vllm_demo"
+        },
+        {
+          "line": 1,
+          "path": "src/shelfwise_inference/config.py",
+          "symbol": "mi300x_vllm_demo"
+        }
+      ],
+      "status": "partial",
+      "storage_backend": "postgres",
+      "verification_nodeids": [],
+      "worker_enabled": false
+    },
+    {
+      "consumer": "CascadeWorker.default_cascade_handler",
+      "event_type": "cold_chain_alert",
+      "id": "event_consumer:cascade_worker:cold_chain_alert",
+      "kind": "event_consumer",
+      "name": "Cascade worker consumes cold_chain_alert",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:cold_chain_alert"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 167,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "default_cascade_handler"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeWorker.default_cascade_handler",
+      "event_type": "expiry_entry",
+      "id": "event_consumer:cascade_worker:expiry_entry",
+      "kind": "event_consumer",
+      "name": "Cascade worker consumes expiry_entry",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:expiry_entry"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 163,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "default_cascade_handler"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeWorker.default_cascade_handler",
+      "event_type": "sale",
+      "id": "event_consumer:cascade_worker:sale",
+      "kind": "event_consumer",
+      "name": "Cascade worker consumes sale",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:sale"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 157,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "default_cascade_handler"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeWorker.default_cascade_handler",
+      "event_type": "scan",
+      "id": "event_consumer:cascade_worker:scan",
+      "kind": "event_consumer",
+      "name": "Cascade worker consumes scan",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:scan"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 152,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "default_cascade_handler"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeWorker.default_cascade_handler",
+      "event_type": "supplier_update",
+      "id": "event_consumer:cascade_worker:supplier_update",
+      "kind": "event_consumer",
+      "name": "Cascade worker consumes supplier_update",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:supplier_update"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 155,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "default_cascade_handler"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumers": [
+        "event_consumer:cascade_worker:cold_chain_alert"
+      ],
+      "event_type": "cold_chain_alert",
+      "id": "event_type:cold_chain_alert",
+      "kind": "event_type",
+      "name": "Cold Chain Alert",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 35,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.cold_chain_alert"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
+    },
+    {
+      "consumers": [
+        "event_consumer:cascade_worker:expiry_entry"
+      ],
+      "event_type": "expiry_entry",
+      "id": "event_type:expiry_entry",
+      "kind": "event_type",
+      "name": "Expiry Entry",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 37,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.expiry_entry"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
+    },
+    {
+      "consumers": [
+        "event_consumer:cascade_worker:sale"
+      ],
+      "event_type": "sale",
+      "id": "event_type:sale",
+      "kind": "event_type",
+      "name": "Sale",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 34,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.sale"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
+    },
+    {
+      "consumers": [
+        "event_consumer:cascade_worker:scan"
+      ],
+      "event_type": "scan",
+      "id": "event_type:scan",
+      "kind": "event_type",
+      "name": "Scan",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 33,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.scan"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
+    },
+    {
+      "consumers": [],
+      "event_type": "shipment",
+      "id": "event_type:shipment",
+      "kind": "event_type",
+      "name": "Shipment",
+      "note": "Canonical event type exists but CascadeWorker has no shipment consumer branch.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 39,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.shipment"
+        }
+      ],
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "consumers": [],
+      "event_type": "stock_update",
+      "id": "event_type:stock_update",
+      "kind": "event_type",
+      "name": "Stock Update",
+      "note": "Canonical event type exists but CascadeWorker has no stock-update consumer branch.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 36,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.stock_update"
+        }
+      ],
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "consumers": [
+        "event_consumer:cascade_worker:supplier_update"
+      ],
+      "event_type": "supplier_update",
+      "id": "event_type:supplier_update",
+      "kind": "event_type",
+      "name": "Supplier Update",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 38,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.supplier_update"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
+    },
+    {
+      "id": "frontend_surface:approval_queue",
+      "kind": "frontend_surface",
+      "name": "Approval Queue",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/decisions"
+        },
+        {
+          "kind": "uses",
+          "target": "openapi_route:post:/decisions/{decision_id}/approve"
+        },
+        {
+          "kind": "uses",
+          "target": "openapi_route:post:/decisions/{decision_id}/reject"
+        }
+      ],
+      "sources": [
+        {
+          "line": 967,
+          "path": "frontend/src/App.tsx",
+          "symbol": "ApprovalPanel"
+        }
+      ],
+      "status": "verified",
+      "surface": "approval_queue",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:chat",
+      "kind": "frontend_surface",
+      "name": "Chat",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:post:/chat"
+        }
+      ],
+      "sources": [
+        {
+          "line": 2763,
+          "path": "frontend/src/App.tsx",
+          "symbol": "Composer"
+        }
+      ],
+      "status": "verified",
+      "surface": "chat",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:cold-chain",
+      "kind": "frontend_surface",
+      "name": "Cold Chain",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/cold-chain/feed"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1053,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "cold-chain",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:connections",
+      "kind": "frontend_surface",
+      "name": "Connections",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/connectors/systems"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1054,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "connections",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:deliveries",
+      "kind": "frontend_surface",
+      "name": "Deliveries",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:post:/intelligence/deliveries/reconcile"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1052,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "deliveries",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:operations",
+      "kind": "frontend_surface",
+      "name": "Operations",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/health"
+        },
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/readiness"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1055,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "operations",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:products",
+      "kind": "frontend_surface",
+      "name": "Products",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/products/attention"
+        },
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/products/search"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1049,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "products",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:results",
+      "kind": "frontend_surface",
+      "name": "Results",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/decisions"
+        },
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/mlops/accountability"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1056,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "results",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:sell-first",
+      "kind": "frontend_surface",
+      "name": "Sell First",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:post:/intelligence/stock/fefo-split"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1051,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "sell-first",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:settings",
+      "kind": "frontend_surface",
+      "name": "Settings",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/tenants/me"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1047,
+          "path": "frontend/src/App.tsx",
+          "symbol": "SidebarPage"
+        }
+      ],
+      "status": "verified",
+      "surface": "settings",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:to-order",
+      "kind": "frontend_surface",
+      "name": "To Order",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "openapi_route:get:/products/attention"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1050,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "to-order",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_multimodal.vision:scan_image",
+      "feature": "image_scan",
+      "id": "multimodal_feature:image_scan",
+      "kind": "multimodal_feature",
+      "name": "Image Scan",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 19,
+          "path": "src/shelfwise_multimodal/vision.py",
+          "symbol": "scan_image"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_demo_fallback_returns_reviewed_structured_evidence"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_multimodal.stt:transcribe",
+      "feature": "speech_to_text",
+      "id": "multimodal_feature:speech_to_text",
+      "kind": "multimodal_feature",
+      "name": "Speech To Text",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 23,
+          "path": "src/shelfwise_multimodal/stt.py",
+          "symbol": "transcribe"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_demo_fallback_returns_reviewed_structured_evidence"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_multimodal.tts:synthesize",
+      "feature": "text_to_speech",
+      "id": "multimodal_feature:text_to_speech",
+      "kind": "multimodal_feature",
+      "name": "Text To Speech",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 22,
+          "path": "src/shelfwise_multimodal/tts.py",
+          "symbol": "synthesize"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_demo_fallback_returns_reviewed_structured_evidence"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_multimodal.voice_intake:to_event_candidate",
+      "feature": "voice_event_intake",
+      "id": "multimodal_feature:voice_event_intake",
+      "kind": "multimodal_feature",
+      "name": "Voice Event Intake",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 27,
+          "path": "src/shelfwise_multimodal/voice_intake.py",
+          "symbol": "to_event_candidate"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_demo_fallback_returns_reviewed_structured_evidence"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/catalog/products",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /catalog/products",
+      "note": null,
+      "operation_id": "list_products",
+      "path": "/catalog/products",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 832,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_products"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/catalog/products/{product_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /catalog/products/{product_id}",
+      "note": null,
+      "operation_id": "get_product",
+      "path": "/catalog/products/{product_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 837,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "get_product"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/catalog/products/{product_id}/variants",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /catalog/products/{product_id}/variants",
+      "note": null,
+      "operation_id": "list_product_variants",
+      "path": "/catalog/products/{product_id}/variants",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 868,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_product_variants"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/catalog/resolve",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /catalog/resolve",
+      "note": null,
+      "operation_id": "resolve_product_identifier",
+      "path": "/catalog/resolve",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 901,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "resolve_product_identifier"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/cold-chain/feed",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /cold-chain/feed",
+      "note": null,
+      "operation_id": "list_cold_chain_feed",
+      "path": "/cold-chain/feed",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 720,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_cold_chain_feed"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/connectors/inbound-records",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /connectors/inbound-records",
+      "note": null,
+      "operation_id": "list_inbound_records",
+      "path": "/connectors/inbound-records",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 805,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_inbound_records"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/connectors/me",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /connectors/me",
+      "note": null,
+      "operation_id": "list_tenant_connectors",
+      "path": "/connectors/me",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 790,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_tenant_connectors"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/connectors/systems",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /connectors/systems",
+      "note": null,
+      "operation_id": "list_connector_systems",
+      "path": "/connectors/systems",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 785,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_connector_systems"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/data/seed/summary",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /data/seed/summary",
+      "note": null,
+      "operation_id": "seed_summary",
+      "path": "/data/seed/summary",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 576,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "seed_summary"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/decisions",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /decisions",
+      "note": null,
+      "operation_id": "list_decisions",
+      "path": "/decisions",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1244,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_decisions"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/decisions/{decision_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /decisions/{decision_id}",
+      "note": null,
+      "operation_id": "get_decision",
+      "path": "/decisions/{decision_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1263,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "get_decision"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/cold-chain",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/cold-chain",
+      "note": null,
+      "operation_id": "demo_cold_chain_get",
+      "path": "/demo/cold-chain",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1143,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_cold_chain_get"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/critic-rejection",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/critic-rejection",
+      "note": null,
+      "operation_id": "demo_critic_rejection_get",
+      "path": "/demo/critic-rejection",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1113,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_critic_rejection_get"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/golden",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/golden",
+      "note": null,
+      "operation_id": "demo_golden_get",
+      "path": "/demo/golden",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1103,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_golden_get"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/procurement",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/procurement",
+      "note": null,
+      "operation_id": "demo_procurement_get",
+      "path": "/demo/procurement",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1123,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_procurement_get"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/sales",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/sales",
+      "note": null,
+      "operation_id": "demo_sales_get",
+      "path": "/demo/sales",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1133,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_sales_get"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/worldgen-runs",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/worldgen-runs",
+      "note": null,
+      "operation_id": "list_worldgen_runs",
+      "path": "/demo/worldgen-runs",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 725,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_worldgen_runs"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/worldgen-runs/{run_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/worldgen-runs/{run_id}",
+      "note": null,
+      "operation_id": "get_worldgen_run",
+      "path": "/demo/worldgen-runs/{run_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 737,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "get_worldgen_run"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/demo/worldgen/{scenario_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /demo/worldgen/{scenario_id}",
+      "note": null,
+      "operation_id": "demo_worldgen_drill",
+      "path": "/demo/worldgen/{scenario_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1148,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_worldgen_drill"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/detective/root-cause-sql",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /detective/root-cause-sql",
+      "note": null,
+      "operation_id": "detective_root_cause_sql",
+      "path": "/detective/root-cause-sql",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 680,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "detective_root_cause_sql"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/detective/root-cause/{target_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /detective/root-cause/{target_id}",
+      "note": null,
+      "operation_id": "detective_root_cause",
+      "path": "/detective/root-cause/{target_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 659,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "detective_root_cause"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/events",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /events",
+      "note": null,
+      "operation_id": "list_events",
+      "path": "/events",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 612,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_events"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/events/bus",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /events/bus",
+      "note": null,
+      "operation_id": "list_bus_events",
+      "path": "/events/bus",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 626,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_bus_events"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/health",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /health",
+      "note": null,
+      "operation_id": "health",
+      "path": "/health",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 405,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "health"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/inference/config",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /inference/config",
+      "note": null,
+      "operation_id": "inference_config",
+      "path": "/inference/config",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 468,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "inference_config"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/inference/readiness",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /inference/readiness",
+      "note": null,
+      "operation_id": "inference_readiness",
+      "path": "/inference/readiness",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 509,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "inference_readiness"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/inference/smoke",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /inference/smoke",
+      "note": null,
+      "operation_id": "inference_smoke",
+      "path": "/inference/smoke",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 535,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "inference_smoke"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/learning",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /learning",
+      "note": null,
+      "operation_id": "learning_summary",
+      "path": "/learning",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1249,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "learning_summary"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/mlops/accountability",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /mlops/accountability",
+      "note": null,
+      "operation_id": "accountability_report",
+      "path": "/mlops/accountability",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1003,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "accountability_report"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/mlops/model-runs",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /mlops/model-runs",
+      "note": null,
+      "operation_id": "list_model_runs",
+      "path": "/mlops/model-runs",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 745,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_model_runs"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/mlops/observability",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /mlops/observability",
+      "note": null,
+      "operation_id": "observability_snapshot",
+      "path": "/mlops/observability",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1018,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "observability_snapshot"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/mlops/prompts",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /mlops/prompts",
+      "note": null,
+      "operation_id": "list_prompt_versions",
+      "path": "/mlops/prompts",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 996,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_prompt_versions"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/mlops/tenant-facts",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /mlops/tenant-facts",
+      "note": null,
+      "operation_id": "list_tenant_facts",
+      "path": "/mlops/tenant-facts",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1047,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_tenant_facts"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/products/attention",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /products/attention",
+      "note": null,
+      "operation_id": "product_attention",
+      "path": "/products/attention",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 581,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "product_attention"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/products/search",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /products/search",
+      "note": null,
+      "operation_id": "product_search",
+      "path": "/products/search",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 589,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "product_search"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/readiness",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /readiness",
+      "note": null,
+      "operation_id": "readiness",
+      "path": "/readiness",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 415,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "readiness"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/submission/readiness",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /submission/readiness",
+      "note": null,
+      "operation_id": "submission_readiness",
+      "path": "/submission/readiness",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 514,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "submission_readiness"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/tenants/me",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /tenants/me",
+      "note": null,
+      "operation_id": "get_tenant_profile",
+      "path": "/tenants/me",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 752,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "get_tenant_profile"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/tools/platform",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /tools/platform",
+      "note": null,
+      "operation_id": "list_platform_tools",
+      "path": "/tools/platform",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 709,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_platform_tools"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/tools/platform/audit",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /tools/platform/audit",
+      "note": null,
+      "operation_id": "list_platform_tool_audit",
+      "path": "/tools/platform/audit",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 715,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_platform_tool_audit"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/trace/{correlation_id}",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /trace/{correlation_id}",
+      "note": null,
+      "operation_id": "get_trace",
+      "path": "/trace/{correlation_id}",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 639,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "get_trace"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/traces",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /traces",
+      "note": null,
+      "operation_id": "list_traces",
+      "path": "/traces",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 654,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_traces"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/worker/runs",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /worker/runs",
+      "note": null,
+      "operation_id": "list_worker_runs",
+      "path": "/worker/runs",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1067,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_worker_runs"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/worker/status",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /worker/status",
+      "note": null,
+      "operation_id": "worker_status",
+      "path": "/worker/status",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1072,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "worker_status"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/writeback/tasks",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /writeback/tasks",
+      "note": null,
+      "operation_id": "list_writeback_tasks",
+      "path": "/writeback/tasks",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1257,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_writeback_tasks"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/catalog/identifiers",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /catalog/identifiers",
+      "note": null,
+      "operation_id": "upsert_product_identifier",
+      "path": "/catalog/identifiers",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 877,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "upsert_product_identifier"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/catalog/products",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /catalog/products",
+      "note": null,
+      "operation_id": "upsert_product",
+      "path": "/catalog/products",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 817,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "upsert_product"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/catalog/products/{product_id}/variants",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /catalog/products/{product_id}/variants",
+      "note": null,
+      "operation_id": "upsert_product_variant",
+      "path": "/catalog/products/{product_id}/variants",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 848,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "upsert_product_variant"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/chat",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /chat",
+      "note": null,
+      "operation_id": "chat",
+      "path": "/chat",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 685,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "chat"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/connectors/{system}/intake",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /connectors/{system}/intake",
+      "note": null,
+      "operation_id": "intake_connector_payload",
+      "path": "/connectors/{system}/intake",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 921,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "intake_connector_payload"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/decisions/{decision_id}/approve",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /decisions/{decision_id}/approve",
+      "note": null,
+      "operation_id": "approve_decision",
+      "path": "/decisions/{decision_id}/approve",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1308,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "approve_decision"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/decisions/{decision_id}/reject",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /decisions/{decision_id}/reject",
+      "note": null,
+      "operation_id": "reject_decision",
+      "path": "/decisions/{decision_id}/reject",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1383,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "reject_decision"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/cold-chain",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/cold-chain",
+      "note": null,
+      "operation_id": "demo_cold_chain",
+      "path": "/demo/cold-chain",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1138,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_cold_chain"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/critic-rejection",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/critic-rejection",
+      "note": null,
+      "operation_id": "demo_critic_rejection",
+      "path": "/demo/critic-rejection",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1108,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_critic_rejection"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/golden",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/golden",
+      "note": null,
+      "operation_id": "demo_golden",
+      "path": "/demo/golden",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1098,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_golden"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/procurement",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/procurement",
+      "note": null,
+      "operation_id": "demo_procurement",
+      "path": "/demo/procurement",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1118,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_procurement"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/sales",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/sales",
+      "note": null,
+      "operation_id": "demo_sales",
+      "path": "/demo/sales",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1128,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_sales"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/ingest",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /ingest",
+      "note": null,
+      "operation_id": "ingest_event",
+      "path": "/ingest",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 597,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "ingest_event"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/intelligence/deliveries/reconcile",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /intelligence/deliveries/reconcile",
+      "note": null,
+      "operation_id": "reconcile_delivery_endpoint",
+      "path": "/intelligence/deliveries/reconcile",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 90,
+          "path": "src/shelfwise_backend/intelligence_api.py",
+          "symbol": "reconcile_delivery_endpoint"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/intelligence/outcomes/summarize",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /intelligence/outcomes/summarize",
+      "note": null,
+      "operation_id": "summarize_outcome_endpoint",
+      "path": "/intelligence/outcomes/summarize",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 128,
+          "path": "src/shelfwise_backend/intelligence_api.py",
+          "symbol": "summarize_outcome_endpoint"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/intelligence/stock/fefo-split",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /intelligence/stock/fefo-split",
+      "note": null,
+      "operation_id": "split_stock_endpoint",
+      "path": "/intelligence/stock/fefo-split",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 66,
+          "path": "src/shelfwise_backend/intelligence_api.py",
+          "symbol": "split_stock_endpoint"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/intelligence/suppliers/cover-plan",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /intelligence/suppliers/cover-plan",
+      "note": null,
+      "operation_id": "plan_supplier_cover_endpoint",
+      "path": "/intelligence/suppliers/cover-plan",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 111,
+          "path": "src/shelfwise_backend/intelligence_api.py",
+          "symbol": "plan_supplier_cover_endpoint"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/mlops/consolidate-memory",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /mlops/consolidate-memory",
+      "note": null,
+      "operation_id": "consolidate_memory",
+      "path": "/mlops/consolidate-memory",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1059,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "consolidate_memory"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/scan/barcode",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /scan/barcode",
+      "note": null,
+      "operation_id": "scan_barcode",
+      "path": "/scan/barcode",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 130,
+          "path": "src/shelfwise_multimodal/router.py",
+          "symbol": "scan_barcode"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/scan/image",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /scan/image",
+      "note": null,
+      "operation_id": "scan_image_upload",
+      "path": "/scan/image",
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:image_scan"
+        }
+      ],
+      "sources": [
+        {
+          "line": 142,
+          "path": "src/shelfwise_multimodal/router.py",
+          "symbol": "scan_image_upload"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/scan/receipt",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /scan/receipt",
+      "note": null,
+      "operation_id": "scan_receipt",
+      "path": "/scan/receipt",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 135,
+          "path": "src/shelfwise_multimodal/router.py",
+          "symbol": "scan_receipt"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/tenants/me",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /tenants/me",
+      "note": null,
+      "operation_id": "upsert_tenant_profile",
+      "path": "/tenants/me",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 760,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "upsert_tenant_profile"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/voice/in",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /voice/in",
+      "note": null,
+      "operation_id": "voice_in",
+      "path": "/voice/in",
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:speech_to_text"
+        }
+      ],
+      "sources": [
+        {
+          "line": 85,
+          "path": "src/shelfwise_multimodal/router.py",
+          "symbol": "voice_in"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/voice/out",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /voice/out",
+      "note": null,
+      "operation_id": "voice_out",
+      "path": "/voice/out",
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:text_to_speech"
+        }
+      ],
+      "sources": [
+        {
+          "line": 107,
+          "path": "src/shelfwise_multimodal/router.py",
+          "symbol": "voice_out"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/worker/process-one",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /worker/process-one",
+      "note": null,
+      "operation_id": "process_one_worker_event",
+      "path": "/worker/process-one",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1077,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "process_one_worker_event"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "backend": "memory",
+      "factories": [
+        "create_decision_store",
+        "create_event_store",
+        "create_inbound_record_store",
+        "create_journal",
+        "create_learning_store",
+        "create_model_run_registry",
+        "create_product_catalog_store",
+        "create_prompt_registry",
+        "create_tenant_fact_store",
+        "create_tenant_profile_store",
+        "create_worldgen_run_store",
+        "create_writeback_sink"
+      ],
+      "id": "storage_backend:memory",
+      "kind": "storage_backend",
+      "name": "Memory storage",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 266,
+          "path": "src/shelfwise_action/store.py",
+          "symbol": "create_decision_store"
+        },
+        {
+          "line": 153,
+          "path": "src/shelfwise_backend/event_store.py",
+          "symbol": "create_event_store"
+        },
+        {
+          "line": 278,
+          "path": "src/shelfwise_backend/worker/journal.py",
+          "symbol": "create_journal"
+        },
+        {
+          "line": 308,
+          "path": "src/shelfwise_catalog/store.py",
+          "symbol": "create_product_catalog_store"
+        },
+        {
+          "line": 241,
+          "path": "src/shelfwise_connectors/inbound_store.py",
+          "symbol": "create_inbound_record_store"
+        },
+        {
+          "line": 166,
+          "path": "src/shelfwise_connectors/writeback.py",
+          "symbol": "create_writeback_sink"
+        },
+        {
+          "line": 233,
+          "path": "src/shelfwise_memory/__init__.py",
+          "symbol": "create_learning_store"
+        },
+        {
+          "line": 203,
+          "path": "src/shelfwise_mlops/facts.py",
+          "symbol": "create_tenant_fact_store"
+        },
+        {
+          "line": 402,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_model_run_registry"
+        },
+        {
+          "line": 411,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_prompt_registry"
+        },
+        {
+          "line": 125,
+          "path": "src/shelfwise_storage/tenant_profiles.py",
+          "symbol": "create_tenant_profile_store"
+        },
+        {
+          "line": 138,
+          "path": "src/shelfwise_worldgen/store.py",
+          "symbol": "create_worldgen_run_store"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_store_backends.py::test_postgres_store_requires_database_url",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ]
+    },
+    {
+      "backend": "postgres",
+      "factories": [
+        "create_decision_store",
+        "create_event_store",
+        "create_inbound_record_store",
+        "create_journal",
+        "create_learning_store",
+        "create_model_run_registry",
+        "create_product_catalog_store",
+        "create_prompt_registry",
+        "create_tenant_fact_store",
+        "create_tenant_profile_store",
+        "create_worldgen_run_store",
+        "create_writeback_sink"
+      ],
+      "id": "storage_backend:postgres",
+      "kind": "storage_backend",
+      "name": "Postgres storage",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 268,
+          "path": "src/shelfwise_action/store.py",
+          "symbol": "create_decision_store"
+        },
+        {
+          "line": 155,
+          "path": "src/shelfwise_backend/event_store.py",
+          "symbol": "create_event_store"
+        },
+        {
+          "line": 280,
+          "path": "src/shelfwise_backend/worker/journal.py",
+          "symbol": "create_journal"
+        },
+        {
+          "line": 310,
+          "path": "src/shelfwise_catalog/store.py",
+          "symbol": "create_product_catalog_store"
+        },
+        {
+          "line": 243,
+          "path": "src/shelfwise_connectors/inbound_store.py",
+          "symbol": "create_inbound_record_store"
+        },
+        {
+          "line": 168,
+          "path": "src/shelfwise_connectors/writeback.py",
+          "symbol": "create_writeback_sink"
+        },
+        {
+          "line": 235,
+          "path": "src/shelfwise_memory/__init__.py",
+          "symbol": "create_learning_store"
+        },
+        {
+          "line": 205,
+          "path": "src/shelfwise_mlops/facts.py",
+          "symbol": "create_tenant_fact_store"
+        },
+        {
+          "line": 404,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_model_run_registry"
+        },
+        {
+          "line": 413,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_prompt_registry"
+        },
+        {
+          "line": 127,
+          "path": "src/shelfwise_storage/tenant_profiles.py",
+          "symbol": "create_tenant_profile_store"
+        },
+        {
+          "line": 140,
+          "path": "src/shelfwise_worldgen/store.py",
+          "symbol": "create_worldgen_run_store"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_store_backends.py::test_postgres_store_requires_database_url",
+        "tests/test_store_backends.py::test_store_factories_default_to_memory"
+      ]
+    },
+    {
+      "id": "tool:multimodal:scan_tool",
+      "kind": "tool",
+      "name": "Scan Tool",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:image_scan"
+        }
+      ],
+      "sources": [
+        {
+          "line": 40,
+          "path": "src/shelfwise_multimodal/tools.py",
+          "symbol": "scan_tool"
+        }
+      ],
+      "status": "verified",
+      "surface": "multimodal",
+      "tool_name": "scan_tool",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_scan_image_validates_type_size_and_returns_reviewed_fallback"
+      ]
+    },
+    {
+      "id": "tool:multimodal:voice_in_tool",
+      "kind": "tool",
+      "name": "Voice In Tool",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:speech_to_text"
+        }
+      ],
+      "sources": [
+        {
+          "line": 19,
+          "path": "src/shelfwise_multimodal/tools.py",
+          "symbol": "voice_in_tool"
+        }
+      ],
+      "status": "verified",
+      "surface": "multimodal",
+      "tool_name": "voice_in_tool",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_voice_in_validates_type_size_and_reviewable_shape"
+      ]
+    },
+    {
+      "id": "tool:multimodal:voice_out_tool",
+      "kind": "tool",
+      "name": "Voice Out Tool",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "uses",
+          "target": "multimodal_feature:text_to_speech"
+        }
+      ],
+      "sources": [
+        {
+          "line": 30,
+          "path": "src/shelfwise_multimodal/tools.py",
+          "symbol": "voice_out_tool"
+        }
+      ],
+      "status": "verified",
+      "surface": "multimodal",
+      "tool_name": "voice_out_tool",
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_voice_out_is_keyed_bounded_and_returns_audio"
+      ]
+    },
+    {
+      "id": "tool:platform:explain_decision",
+      "kind": "tool",
+      "name": "Explain Decision",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 147,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "explain_decision",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:get_stock",
+      "kind": "tool",
+      "name": "Get Stock",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 139,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_stock",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:get_thresholds",
+      "kind": "tool",
+      "name": "Get Thresholds",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 140,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_thresholds",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:list_open_decisions",
+      "kind": "tool",
+      "name": "List Open Decisions",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 141,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "list_open_decisions",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:simulate_markdown",
+      "kind": "tool",
+      "name": "Simulate Markdown",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 153,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "simulate_markdown",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise.training.evaluate:run_evaluation",
+      "id": "training_stage:evaluate",
+      "kind": "training_stage",
+      "name": "Evaluate",
+      "note": "Fixture evaluation is tested; model-generated evaluation is not verified in this snapshot.",
+      "relationships": [],
+      "runtime_verified": false,
+      "sources": [
+        {
+          "line": 222,
+          "path": "src/shelfwise/training/evaluate.py",
+          "symbol": "run_evaluation"
+        }
+      ],
+      "stage": "evaluate",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "entrypoint": "shelfwise.training.preflight:run_preflight",
+      "id": "training_stage:preflight",
+      "kind": "training_stage",
+      "name": "Preflight",
+      "note": "Preflight checks are implemented but current W7900D hardware execution is external evidence.",
+      "relationships": [],
+      "runtime_verified": false,
+      "sources": [
+        {
+          "line": 73,
+          "path": "src/shelfwise/training/preflight.py",
+          "symbol": "run_preflight"
+        }
+      ],
+      "stage": "preflight",
+      "status": "implemented",
+      "verification_nodeids": []
+    },
+    {
+      "entrypoint": "shelfwise.training.serving_check:run_serving_check",
+      "id": "training_stage:serving_check",
+      "kind": "training_stage",
+      "name": "Serving Check",
+      "note": "Metadata-only serving checks are tested; generated endpoint inference is not verified here.",
+      "relationships": [],
+      "runtime_verified": false,
+      "sources": [
+        {
+          "line": 25,
+          "path": "src/shelfwise/training/serving_check.py",
+          "symbol": "run_serving_check"
+        }
+      ],
+      "stage": "serving_check",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "entrypoint": "shelfwise.training.shakedown:run_shakedown",
+      "id": "training_stage:shakedown",
+      "kind": "training_stage",
+      "name": "Shakedown",
+      "note": "Dry-run orchestration is covered, while full training and serving execution remain unverified.",
+      "relationships": [],
+      "runtime_verified": false,
+      "sources": [
+        {
+          "line": 17,
+          "path": "src/shelfwise/training/shakedown.py",
+          "symbol": "run_shakedown"
+        }
+      ],
+      "stage": "shakedown",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "entrypoint": "shelfwise.training.simulation:build_shakedown_datasets",
+      "id": "training_stage:simulation_dataset",
+      "kind": "training_stage",
+      "name": "Simulation Dataset",
+      "note": null,
+      "relationships": [],
+      "runtime_verified": true,
+      "sources": [
+        {
+          "line": 120,
+          "path": "src/shelfwise/training/simulation.py",
+          "symbol": "build_shakedown_datasets"
+        }
+      ],
+      "stage": "simulation_dataset",
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_shakedown_pipeline.py::test_world_simulation_builds_mixed_training_rows"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise.training.train:run_training",
+      "id": "training_stage:train",
+      "kind": "training_stage",
+      "name": "Train",
+      "note": "Training entry point exists; this repository snapshot does not assert a completed hardware run.",
+      "relationships": [],
+      "runtime_verified": false,
+      "sources": [
+        {
+          "line": 32,
+          "path": "src/shelfwise/training/train.py",
+          "symbol": "run_training"
+        }
+      ],
+      "stage": "train",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "id": "worker:cascade_worker",
+      "kind": "worker",
+      "name": "CascadeWorker",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 44,
+          "path": "src/shelfwise_backend/worker/worker.py",
+          "symbol": "CascadeWorker"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ],
+      "worker": "CascadeWorker"
+    },
+    {
+      "id": "worker:memory_consolidation_worker",
+      "kind": "worker",
+      "name": "MemoryConsolidationWorker",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 15,
+          "path": "src/shelfwise_backend/worker/memory.py",
+          "symbol": "MemoryConsolidationWorker"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ],
+      "worker": "MemoryConsolidationWorker"
+    },
+    {
+      "id": "worker:worker_loop_service",
+      "kind": "worker",
+      "name": "WorkerLoopService",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 11,
+          "path": "src/shelfwise_backend/worker/service.py",
+          "symbol": "WorkerLoopService"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ],
+      "worker": "WorkerLoopService"
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_catalog_price_check",
+      "id": "workflow:catalog_price_check",
+      "kind": "workflow",
+      "name": "Catalog Price Check",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:sales"
+        }
+      ],
+      "sources": [
+        {
+          "line": 731,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_catalog_price_check"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_is_math_backed_and_traceable"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_cold_chain_cascade",
+      "id": "workflow:cold_chain",
+      "kind": "workflow",
+      "name": "Cold Chain",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:cold_chain"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        }
+      ],
+      "sources": [
+        {
+          "line": 952,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_cold_chain_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_cold_chain_cascade_routes_facilities_review"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_critic_rejection_cascade",
+      "id": "workflow:critic_rejection",
+      "kind": "workflow",
+      "name": "Critic Rejection",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        }
+      ],
+      "sources": [
+        {
+          "line": 1199,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_critic_rejection_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_critic_rejection_cascade_downgrades_unsupported_action"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_expiry_risk_check",
+      "id": "workflow:expiry_risk_check",
+      "kind": "workflow",
+      "name": "Expiry Risk Check",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:expiry"
+        }
+      ],
+      "sources": [
+        {
+          "line": 861,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_expiry_risk_check"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_is_math_backed_and_traceable"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_golden_cascade",
+      "id": "workflow:golden",
+      "kind": "workflow",
+      "name": "Golden",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:demand"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:expiry"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:inventory"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:opportunity"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:simulation"
+        }
+      ],
+      "sources": [
+        {
+          "line": 54,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_golden_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_is_math_backed_and_traceable"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_procurement_cascade",
+      "id": "workflow:procurement",
+      "kind": "workflow",
+      "name": "Procurement",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:procurement"
+        }
+      ],
+      "sources": [
+        {
+          "line": 319,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_procurement_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_procurement_cascade_uses_reorder_policy_and_supplier_ranking"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_sales_cascade",
+      "id": "workflow:sales",
+      "kind": "workflow",
+      "name": "Sales",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "requires",
+          "target": "agent:critic"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:executive"
+        },
+        {
+          "kind": "requires",
+          "target": "agent:sales"
+        }
+      ],
+      "sources": [
+        {
+          "line": 550,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_sales_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_sales_cascade_records_clean_pos_sale"
+      ]
+    },
+    {
+      "id": "worldgen_scenario:stage2_midmonth_lull",
+      "kind": "worldgen_scenario",
+      "name": "Stage2 Midmonth Lull",
+      "note": null,
+      "relationships": [],
+      "scenario_id": "stage2_midmonth_lull",
+      "seed": 77,
+      "sources": [
+        {
+          "line": 34,
+          "path": "src/shelfwise_worldgen/scenarios.py",
+          "symbol": "SCENARIOS"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worldgen_simulator.py::test_scenarios_carry_no_answer",
+        "tests/test_worldgen_simulator.py::test_world_is_deterministic"
+      ]
+    },
+    {
+      "id": "worldgen_scenario:stage4_payday_coldchain",
+      "kind": "worldgen_scenario",
+      "name": "Stage4 Payday Coldchain",
+      "note": null,
+      "relationships": [],
+      "scenario_id": "stage4_payday_coldchain",
+      "seed": 42,
+      "sources": [
+        {
+          "line": 24,
+          "path": "src/shelfwise_worldgen/scenarios.py",
+          "symbol": "SCENARIOS"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worldgen_simulator.py::test_scenarios_carry_no_answer",
+        "tests/test_worldgen_simulator.py::test_world_is_deterministic"
+      ]
+    },
+    {
+      "id": "worldgen_scenario:stage6_blackout_weekend",
+      "kind": "worldgen_scenario",
+      "name": "Stage6 Blackout Weekend",
+      "note": null,
+      "relationships": [],
+      "scenario_id": "stage6_blackout_weekend",
+      "seed": 133,
+      "sources": [
+        {
+          "line": 44,
+          "path": "src/shelfwise_worldgen/scenarios.py",
+          "symbol": "SCENARIOS"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worldgen_simulator.py::test_scenarios_carry_no_answer",
+        "tests/test_worldgen_simulator.py::test_world_is_deterministic"
+      ]
+    }
+  ],
+  "fingerprint": "sha256:3ddfd481e09aa41fe66cb54087e7aca6d5a67fe267ed53618dad37449581ec5e",
+  "generator": "shelfwise_capabilities",
+  "schema_version": "1.0"
+}

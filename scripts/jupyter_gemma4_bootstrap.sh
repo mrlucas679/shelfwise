@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Refuse to run on the wrong interpreter: a 3.10 shell (venv not active) sends pip
+# into a cp310 backtracking spiral that wastes 20+ minutes before failing anyway.
+PYV="$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo none)"
+if [ "${PYV}" != "3.11" ]; then
+  echo "ERROR: python is ${PYV}, not 3.11 - the project venv is not active in this terminal."
+  echo "Fix:   source .venv/bin/activate"
+  echo "       (after a pod restart, run: bash scripts/pod_start.sh first)"
+  exit 1
+fi
+
 CONFIG_PATH="${1:-configs/train_gemma4_multimodal.yaml}"
 RUN_NAME="${RUN_NAME:-shelfwise-mm-full-8h-001}"
 
@@ -22,6 +32,7 @@ python -m pytest \
   tests/test_training_evaluation_gate.py \
   tests/test_shakedown_settings.py \
   tests/test_serving_gate.py \
+  tests/test_gemma4_training_harness.py \
   -q
 
 echo "[5/5] full ShelfWise AI shakedown"

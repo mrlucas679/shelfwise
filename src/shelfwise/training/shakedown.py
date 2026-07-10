@@ -60,12 +60,23 @@ def run_shakedown(
             "Video is frame-sampled unless the processor receives raw video tensors.",
         ],
     }
+    # Config-driven defaults (see TrainingConfig.shakedown) are the source of truth; env vars
+    # only let an operator scale sample counts/seed at run time without touching the config file.
+    train_examples = _env_positive_int(
+        "SHAKEDOWN_TRAIN_EXAMPLES", config.shakedown.train_examples
+    )
+    eval_examples = _env_positive_int(
+        "SHAKEDOWN_EVAL_EXAMPLES", config.shakedown.eval_examples
+    )
+    simulation_seed = _env_positive_int(
+        "SHAKEDOWN_SEED", config.shakedown.simulation_seed
+    )
     dataset_report = build_shakedown_datasets(
         output_dir=datasets_dir,
         repo_root=repo_root,
-        seed=config.shakedown.simulation_seed,
-        train_examples=config.shakedown.train_examples,
-        eval_examples=config.shakedown.eval_examples,
+        seed=simulation_seed,
+        train_examples=train_examples,
+        eval_examples=eval_examples,
         mixture_weights=config.shakedown.mixture_weights,
     )
     report["dataset"] = dataset_report
@@ -222,6 +233,16 @@ def main() -> None:
         skip_serving_check=args.skip_serving_check,
         existing_adapter_path=args.adapter_path,
     )
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    import os
+
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 if __name__ == "__main__":

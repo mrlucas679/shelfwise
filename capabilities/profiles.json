@@ -1,0 +1,60 @@
+{
+  "profiles": [
+    {
+      "bus_backend": "redis",
+      "id": "docker_compose_demo",
+      "inference_provider": "offline",
+      "name": "Docker Compose demo",
+      "note": "Compose wiring is configuration-tested; worker mode remains disabled by default.",
+      "source_paths": [
+        "docker-compose.yml"
+      ],
+      "status": "verified",
+      "storage_backend": "postgres",
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "redis",
+      "id": "fireworks_demo",
+      "inference_provider": "fireworks",
+      "name": "Fireworks demo inference",
+      "note": "Provider routing is implemented, but this snapshot carries no live Fireworks proof.",
+      "source_paths": [
+        ".env.example",
+        "src/shelfwise_inference/config.py"
+      ],
+      "status": "partial",
+      "storage_backend": "postgres",
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "memory",
+      "id": "local_development",
+      "inference_provider": "offline",
+      "name": "Local development",
+      "note": "Default local profile uses deterministic in-memory stores and offline-safe inference.",
+      "source_paths": [
+        ".env.example",
+        "src/shelfwise_inference/config.py"
+      ],
+      "status": "verified",
+      "storage_backend": "memory",
+      "worker_enabled": false
+    },
+    {
+      "bus_backend": "redis",
+      "id": "mi300x_vllm_demo",
+      "inference_provider": "vllm_mi300x",
+      "name": "MI300X vLLM demo inference",
+      "note": "MI300X/vLLM routing is configured, but live accelerator proof is intentionally not inferred.",
+      "source_paths": [
+        "configs/train_gemma4_multimodal.yaml",
+        "src/shelfwise_inference/config.py"
+      ],
+      "status": "partial",
+      "storage_backend": "postgres",
+      "worker_enabled": false
+    }
+  ],
+  "schema_version": "1.0"
+}

@@ -14,7 +14,13 @@ from shelfwise_worldgen.sa_ground_truth import demand_multiplier, load_shedding_
 from shelfwise_worldgen.scenarios import SCENARIOS, build
 from shelfwise_worldgen.seed import build_memory_seed
 from shelfwise_worldgen.store import InMemoryWorldgenRunStore
-from shelfwise_worldgen.world import World, WorldConfig
+from shelfwise_worldgen.world import (
+    EVENT_TYPE_ROUTES,
+    World,
+    WorldConfig,
+    assert_world_event_contract,
+    span_event_stream,
+)
 
 
 def test_world_emits_only_canonical_valid_events():
@@ -29,6 +35,48 @@ def test_world_is_deterministic():
     first = [event.to_dict() for event in World(WorldConfig(seed=3, days=2)).run()]
     second = [event.to_dict() for event in World(WorldConfig(seed=3, days=2)).run()]
     assert first == second
+
+
+def test_world_spans_every_event_lane_with_an_explicit_route_contract():
+    events = list(World(WorldConfig(seed=31, days=2)).run())
+    contract = assert_world_event_contract(events)
+    sample = span_event_stream(events, len(EventType))
+
+    assert {event.type for event in sample} == set(EventType)
+    assert set(EVENT_TYPE_ROUTES) == set(EventType)
+    assert contract["stored_only"] == {
+        "shipment": "fulfilment fact retained until shipment reconciliation consumes it",
+        "stock_update": "inventory snapshot retained for joins and later demand reasoning",
+    }
+    assert all(route.consumer or route.stored_only for route in EVENT_TYPE_ROUTES.values())
+
+
+def test_world_event_ids_are_reproducible_and_disjoint_across_seeds_and_scenarios():
+    first, _ = build("stage4_payday_coldchain", seed_override=313)
+    replay, _ = build("stage4_payday_coldchain", seed_override=313)
+    reseeded, _ = build("stage4_payday_coldchain", seed_override=314)
+    overlapping_dates, _ = build("stage6_blackout_weekend", seed_override=313)
+
+    first_ids = [event.id for event in first.run()]
+    replay_ids = [event.id for event in replay.run()]
+    reseeded_ids = {event.id for event in reseeded.run()}
+    overlapping_ids = {event.id for event in overlapping_dates.run()}
+
+    assert first_ids == replay_ids
+    assert len(first_ids) == len(set(first_ids))
+    assert not set(first_ids) & reseeded_ids
+    assert not set(first_ids) & overlapping_ids
+
+
+def test_spanning_sampler_rejects_a_limit_that_cannot_cover_all_lanes():
+    events = list(World(WorldConfig(seed=32, days=2)).run())
+
+    try:
+        span_event_stream(events, len(EventType) - 1)
+    except ValueError as exc:
+        assert "cannot cover" in str(exc)
+    else:
+        raise AssertionError("expected event-lane coverage validation")
 
 
 def test_load_shedding_never_touches_the_event_stream():
@@ -198,7 +246,8 @@ def test_narration_is_offline_safe_and_labeled():
 def test_worldgen_demo_drives_real_backend_pipeline():
     client = TestClient(app)
 
-    response = client.get("/demo/worldgen/stage4_payday_coldchain?limit=12")
+    # limit 500 covers the default 6-product week entirely, so every sale is processed
+    response = client.get("/demo/worldgen/stage4_payday_coldchain?limit=500")
 
     assert response.status_code == 200
     body = response.json()
@@ -206,11 +255,11 @@ def test_worldgen_demo_drives_real_backend_pipeline():
     assert run["run_id"].startswith("worldrun_")
     assert run["scenario_id"] == "stage4_payday_coldchain"
     assert run["tenant_id"] == "sa_retail_demo"
-    assert run["events_total"] == 13
+    assert run["events_total"] == body["stream_events_total"] + 1  # +1 injected alert
     assert run["decisions_total"] == len(body["decisions"])
     assert body["synthetic"] is True
-    assert body["events_total"] == 13
-    assert body["events_accepted"] == 13
+    assert body["events_total"] == len(body["events"])
+    assert body["events_accepted"] == body["events_total"]
     assert body["schedule_sample"]
     assert any(event["type"] == "stock_update" for event in body["events"])
     assert body["decisions"]
@@ -309,3 +358,34 @@ def test_worldgen_run_store_filters_by_tenant_and_validates_limit():
         assert "limit must be between 1 and 500" in str(exc)
     else:
         raise AssertionError("expected limit validation")
+
+
+def test_worldgen_drill_large_assortment_still_feeds_every_event_type():
+    """Regression: first-N slicing starved big assortments down to day-1 stock updates.
+
+    A 3000-product store emits all 08:00 stock updates before its first sale, so
+    taking the first 500 events fed the pipeline one event type only (observed in a
+    real run: 3 decisions from 841k events). Stride sampling across the whole stream
+    must keep sales - and therefore price-integrity decisions - flowing at any size.
+    """
+    client = TestClient(app)
+
+    response = client.get(
+        "/demo/worldgen/stage4_payday_coldchain",
+        params={"limit": 500, "assortment_size": 3000, "seed_override": 20260709},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stream_events_total"] > 500, "3000 products must overflow the limit"
+    event_types = {event["type"] for event in body["events"]}
+    assert "sale" in event_types, f"stride sample lost sales: {sorted(event_types)}"
+    assert len(event_types) >= 3, f"expected a mix of event types, got {sorted(event_types)}"
+    scenarios = {
+        cascade.get("scenario")
+        for cascade in body.get("cascades", [])
+        if cascade.get("scenario")
+    }
+    assert "pos_price_outlier_review" in scenarios, (
+        f"no price-outlier decision minted from 3000 products; cascades: {sorted(scenarios)}"
+    )

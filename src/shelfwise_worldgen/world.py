@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from random import Random
+from typing import Any
 
 from shelfwise_contracts import Event, EventSource, EventType
 
@@ -11,14 +14,42 @@ from .sa_ground_truth import PRODUCTS, demand_multiplier, seed_int
 
 
 @dataclass(frozen=True, slots=True)
+class EventTypeRoute:
+    """Document whether a canonical event is consumed now or intentionally stored."""
+
+    consumer: str | None = None
+    stored_only: bool = False
+    reason: str = ""
+
+
+EVENT_TYPE_ROUTES: dict[EventType, EventTypeRoute] = {
+    EventType.SCAN: EventTypeRoute(consumer="golden_expiry_cascade"),
+    EventType.SALE: EventTypeRoute(consumer="sales_or_catalog_price_cascade"),
+    EventType.COLD_CHAIN_ALERT: EventTypeRoute(consumer="cold_chain_cascade"),
+    EventType.STOCK_UPDATE: EventTypeRoute(
+        stored_only=True,
+        reason="inventory snapshot retained for joins and later demand reasoning",
+    ),
+    EventType.EXPIRY_ENTRY: EventTypeRoute(consumer="expiry_risk_cascade"),
+    EventType.SUPPLIER_UPDATE: EventTypeRoute(consumer="procurement_cascade"),
+    EventType.SHIPMENT: EventTypeRoute(
+        stored_only=True,
+        reason="fulfilment fact retained until shipment reconciliation consumes it",
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
 class WorldConfig:
     seed: int
     start: date = date(2026, 6, 22)
     days: int = 7
+    scenario_id: str = "ad_hoc"
     tenant_id: str = "sa_retail_demo"
     store_id: str = "store_obs_main"
     area: str = "observatory_blk7"
     stage: int = 4
+    incident_days: tuple[int, ...] = (0,)
     products: Sequence[object] | None = None
 
 
@@ -34,7 +65,9 @@ class World:
         events: list[Event] = []
         for day_index in range(self.cfg.days):
             events.extend(self._day(day_index))
-        yield from sorted(events, key=lambda event: (event.ts, event.id))
+        ordered = sorted(events, key=lambda event: (event.ts, event.id))
+        _assert_unique_event_ids(ordered)
+        yield from ordered
 
     def _day(self, day_index: int) -> list[Event]:
         """Generate one retail day of stock, sales, expiry, and shipment events."""
@@ -91,6 +124,106 @@ class World:
                 )
             if opening - sold <= self._reorder_point(product):
                 self._reorder(events, current, product)
+        events.extend(self._control_events(current, day_index))
+        return events
+
+    def _control_events(self, current: date, day_index: int) -> list[Event]:
+        """Emit factual probes that keep every canonical stream lane exercised.
+
+        These are observations, not recommendations or expected answers. They make a
+        bounded stream sample representative even when a generated assortment contains
+        thousands of same-timestamp stock snapshots.
+        """
+        ts_base = datetime.combine(current, time(9), tzinfo=UTC)
+        events: list[Event] = []
+        if day_index == 0:
+            misprice_product = self.products[1] if len(self.products) > 1 else self.products[0]
+            misprice_catalog = max(_catalog_price(misprice_product), 100)
+            events.extend(
+                [
+                    self._mk(
+                        EventType.SCAN,
+                        ts_base,
+                        EventSource.SCANNER,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "location": self.cfg.store_id,
+                            "sku": "4011",
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.SALE,
+                        ts_base + timedelta(hours=1),
+                        EventSource.POS_CSV,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "sku": _sku(misprice_product),
+                            "units": 20,
+                            "unit_price_cents": max(1, misprice_catalog // 2),
+                            "catalog_price_cents": misprice_catalog,
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.EXPIRY_ENTRY,
+                        ts_base + timedelta(hours=3, minutes=45),
+                        EventSource.WMS_CSV,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "sku": "4020",
+                            "batch_id": f"B-PROBE-{current:%Y%m%d}",
+                            "category": "dairy",
+                            "storage": "chilled",
+                            "days_to_expiry": 1,
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.SUPPLIER_UPDATE,
+                        ts_base + timedelta(hours=6, minutes=30),
+                        EventSource.API,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "sku": "4011",
+                            "supplier": "dairyco",
+                            "lead_time_days": 3,
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.SHIPMENT,
+                        ts_base + timedelta(hours=7),
+                        EventSource.API,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "sku": "4011",
+                            "ordered_units": 80,
+                            "eta": (current + timedelta(days=2)).isoformat(),
+                            "synthetic_probe": True,
+                        },
+                    ),
+                ]
+            )
+        if day_index in self.cfg.incident_days:
+            events.append(
+                self._mk(
+                    EventType.COLD_CHAIN_ALERT,
+                    ts_base + timedelta(hours=6),
+                    EventSource.API,
+                    {
+                        "site_id": self.cfg.store_id,
+                        "asset_id": "fridge_dairy_1",
+                        "category": "dairy",
+                        "diagnosis": "generator_failed",
+                        "severity": 2,
+                        "predicted_minutes_to_unsafe": "18",
+                        "measured_outage_hours": "4",
+                        "stock_at_risk": {"minor_units": 643_500, "currency": "ZAR"},
+                        "synthetic_probe": True,
+                    },
+                )
+            )
         return events
 
     def _reorder(self, events: list[Event], current: date, product: object) -> None:
@@ -132,8 +265,22 @@ class World:
         payload: dict,
     ) -> Event:
         """Build a deterministic canonical event."""
-        raw = f"{self.cfg.seed}|{event_type.value}|{ts.isoformat()}|{payload}"
-        event_id = f"evt_{seed_int(raw):08x}"
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        raw = "|".join(
+            (
+                self.cfg.tenant_id,
+                self.cfg.scenario_id,
+                str(self.cfg.seed),
+                event_type.value,
+                ts.isoformat(),
+                payload_json,
+            )
+        )
+        # crc32 is 32 bits: at ~750k events/run the birthday bound guarantees thousands of
+        # id collisions, which cascade into decision-id collisions and bogus "duplicates".
+        # blake2b at 96 bits is deterministic and collision-free at any realistic scale.
+        digest = hashlib.blake2b(raw.encode("utf-8"), digest_size=12).hexdigest()
+        event_id = f"evt_{digest}"
         return Event(
             id=event_id,
             type=event_type,
@@ -142,7 +289,7 @@ class World:
             payload=payload,
             source=source,
             tenant_id=self.cfg.tenant_id,
-            correlation_id=f"world_{self.cfg.seed}",
+            correlation_id=f"world_{self.cfg.scenario_id}_{self.cfg.seed}",
         )
 
     def _opening_stock(self, product: object) -> int:
@@ -212,4 +359,99 @@ def _catalog_price(product: object) -> int:
     return int(getattr(product, "price_cents", 0))
 
 
-__all__ = ["World", "WorldConfig"]
+def span_event_stream(events: Sequence[Event], limit: int) -> list[Event]:
+    """Sample chronologically across a stream while preserving every event type.
+
+    The first occurrence of each present type is reserved, then the remaining slots are
+    filled at deterministic intervals across the complete stream. A caller cannot claim
+    full event-type coverage with fewer slots than the stream requires.
+    """
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    rows = list(events)
+    if len(rows) <= limit:
+        return rows
+
+    first_by_type: dict[EventType, int] = {}
+    for index, event in enumerate(rows):
+        first_by_type.setdefault(event.type, index)
+    if len(first_by_type) > limit:
+        raise ValueError(
+            f"limit {limit} cannot cover {len(first_by_type)} event types"
+        )
+
+    selected = set(first_by_type.values())
+    for slot in range(limit):
+        if len(selected) >= limit:
+            break
+        selected.add(min(int(slot * len(rows) / limit), len(rows) - 1))
+    if len(selected) < limit:
+        for index in range(len(rows)):
+            selected.add(index)
+            if len(selected) >= limit:
+                break
+    return [rows[index] for index in sorted(selected)[:limit]]
+
+
+def assert_world_event_contract(
+    events: Sequence[Event],
+    *,
+    require_all_types: bool = True,
+) -> dict[str, Any]:
+    """Fail on duplicate ids, missing event lanes, or an unowned event type."""
+    rows = list(events)
+    _assert_unique_event_ids(rows)
+    missing_routes = set(EventType) - set(EVENT_TYPE_ROUTES)
+    invalid_routes = {
+        event_type
+        for event_type, route in EVENT_TYPE_ROUTES.items()
+        if bool(route.consumer) == bool(route.stored_only)
+        or (not route.reason and route.stored_only)
+    }
+    if missing_routes or invalid_routes:
+        raise AssertionError(
+            "invalid event route contract: "
+            f"missing={sorted(item.value for item in missing_routes)} "
+            f"invalid={sorted(item.value for item in invalid_routes)}"
+        )
+    present = {event.type for event in rows}
+    missing_types = set(EventType) - present
+    if require_all_types and missing_types:
+        raise AssertionError(
+            f"world stream missing event types: {sorted(item.value for item in missing_types)}"
+        )
+    return {
+        "events": len(rows),
+        "event_types": sorted(item.value for item in present),
+        "consumers": {
+            event_type.value: route.consumer
+            for event_type, route in EVENT_TYPE_ROUTES.items()
+            if route.consumer
+        },
+        "stored_only": {
+            event_type.value: route.reason
+            for event_type, route in EVENT_TYPE_ROUTES.items()
+            if route.stored_only
+        },
+    }
+
+
+def _assert_unique_event_ids(events: Sequence[Event]) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for event in events:
+        if event.id in seen:
+            duplicates.add(event.id)
+        seen.add(event.id)
+    if duplicates:
+        raise AssertionError(f"world emitted duplicate event ids: {sorted(duplicates)}")
+
+
+__all__ = [
+    "EVENT_TYPE_ROUTES",
+    "EventTypeRoute",
+    "World",
+    "WorldConfig",
+    "assert_world_event_contract",
+    "span_event_stream",
+]

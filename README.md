@@ -35,11 +35,11 @@ Then open the app:
 ## Test everything in one notebook (GPU / remote Jupyter)
 
 [`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
-is a self-contained test harness — clone the repo, open the notebook, **Run All**, done. No
+is a self-contained test harness â€” clone the repo, open the notebook, **Run All**, done. No
 extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
 already in this repo. It installs the project, runs lint, the full test suite, the golden-
 scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
-actual port — and ends with one summary table so a failure anywhere is impossible to miss. An
+actual port â€” and ends with one summary table so a failure anywhere is impossible to miss. An
 optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
 endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
 fully offline/deterministic.
@@ -233,6 +233,7 @@ After pulling the update on the Jupyter GPU server, run the connected smoke path
 
 ```bash
 git pull
+bash scripts/jupyter_gemma4_check.sh
 bash scripts/jupyter_gemma4_bootstrap.sh
 ```
 
@@ -327,6 +328,10 @@ reconciliation, high-risk supplier patterns, safe cases, and ambiguous missing-e
 
 Resume from a checkpoint by setting `resume_from_checkpoint` in
 `configs/train_gemma4_multimodal.yaml`, then rerun the shakedown command with a new `--run_name`.
+
+Outputs land under `runs/gemma4-multimodal/` with timestamped checkpoints and reports. The quick
+check validates dependencies and fixture generation, but only a generated live-model evaluation
+and serving probe can mark a deployment ready.
 
 ## License
 

@@ -906,7 +906,7 @@ def build_report(
     return report_path
 
 
-def main() -> int:
+def _legacy_control_plane_main() -> int:
     """Run the complete architecture evaluation and write artifacts."""
     run_id = utc_run_id()
     run_dir = REPORT_ROOT / f"inference_architecture_eval_{run_id}"
@@ -1064,6 +1064,16 @@ def main() -> int:
     )
     print(report)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Delegate to the isolated cloud benchmark foundation."""
+    source_dir = ROOT / "src"
+    if str(source_dir) not in sys.path:
+        sys.path.insert(0, str(source_dir))
+    from shelfwise_benchmark.cli import main as benchmark_main
+
+    return benchmark_main(argv)
 
 
 if __name__ == "__main__":

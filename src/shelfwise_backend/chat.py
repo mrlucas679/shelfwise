@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from shelfwise_inference import InferenceError, OpenAICompatibleInferenceClient
 
+from .product_catalog import search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
 
 
@@ -26,7 +27,7 @@ def stream_chat_reply(
     correlation_id: str | None = None,
 ) -> Iterator[str]:
     """Yield a short chat answer while keeping raw user text fenced as data."""
-    answer = build_chat_reply(
+    answer, _meta = build_chat_reply_with_meta(
         question=question,
         state=state,
         client=client,
@@ -45,9 +46,47 @@ def build_chat_reply(
     correlation_id: str | None = None,
 ) -> str:
     """Build a chat answer from current backend state."""
+    answer, _meta = build_chat_reply_with_meta(
+        question=question,
+        state=state,
+        client=client,
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+    )
+    return answer
+
+
+def build_chat_reply_with_meta(
+    *,
+    question: str,
+    state: dict[str, Any],
+    client: OpenAICompatibleInferenceClient | None = None,
+    tenant_id: str = "default",
+    correlation_id: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Answer via the real product tools first, then the model (or offline fallback).
+
+    Every answer is grounded in the product the question actually asks about - the
+    catalogue search tool runs on both the model and offline paths, and the metadata
+    reports which source answered and which tools ran, so an unattended harness can
+    prove what was exercised instead of guessing from answer text.
+    """
     inference = client or OpenAICompatibleInferenceClient()
+    subject, product, tool_calls = _tool_context(question)
+    meta: dict[str, Any] = {
+        "tools_used": [call["tool"] for call in tool_calls],
+        "subject": subject,
+        "model": getattr(inference.config, "strong_model", ""),
+        "provider": getattr(getattr(inference.config, "provider", None), "value", "unknown"),
+        "answer_source": "offline",
+    }
+    state = dict(state)
+    state["tool_results"] = {"catalog_search": product, "subject": subject}
     if not inference.config.api_key_present:
-        return _offline_reply(question=question, state=state)
+        return (
+            _offline_reply(question=question, state=state, subject=subject, product=product),
+            meta,
+        )
     prompt = (
         f"{DATA_RULE}\n\n"
         f"<state_json>"
@@ -65,12 +104,70 @@ def build_chat_reply(
             correlation_id=correlation_id,
         )
     except InferenceError:
-        return _offline_reply(question=question, state=state)
-    return result.content.strip()[:2_000] or _offline_reply(question=question, state=state)
+        return (
+            _offline_reply(question=question, state=state, subject=subject, product=product),
+            meta,
+        )
+    answer = result.content.strip()[:2_000]
+    if not answer:
+        return (
+            _offline_reply(question=question, state=state, subject=subject, product=product),
+            meta,
+        )
+    meta["answer_source"] = "model"
+    return answer, meta
 
 
-def _offline_reply(*, question: str, state: dict[str, Any]) -> str:
+def _extract_product_query(question: str) -> str:
+    """Pull the longest Title-Case run out of the question - product names read that way."""
+    tokens = question.replace("?", " ").replace(",", " ").split()
+    best: list[str] = []
+    current: list[str] = []
+    for token in tokens:
+        qualifies = (token[:1].isupper() and (token[1:].islower() or len(token) == 1)) or (
+            any(ch.isdigit() for ch in token) and any(ch.isupper() for ch in token)
+        )
+        if qualifies:
+            current.append(token)
+        else:
+            if len(current) > len(best):
+                best = current
+            current = []
+    if len(current) > len(best):
+        best = current
+    return " ".join(best) if len(best) >= 2 else question[:80]
+
+
+def _tool_context(question: str) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+    subject = _extract_product_query(question)
+    tool_calls: list[dict[str, Any]] = [{"tool": "products.search", "query": subject}]
+    try:
+        result = search_product_catalog(query=subject, limit=3, synthetic_scan_budget=25_000)
+        products = result.get("products") or []
+    except (TypeError, ValueError):
+        products = []
+    product = products[0] if products else None
+    tool_calls[0]["hits"] = len(products)
+    return subject, product, tool_calls
+
+
+def _offline_reply(
+    *,
+    question: str,
+    state: dict[str, Any],
+    subject: str = "",
+    product: dict[str, Any] | None = None,
+) -> str:
     """Deterministic local answer for offline-safe development and tests."""
+    grounding = ""
+    if subject:
+        grounding = f" Asked about: {subject}."
+    if product:
+        price = product.get("price") or {}
+        grounding += (
+            f" Catalogue match: {product.get('name')} ({product.get('category')}), "
+            f"on hand {product.get('on_hand')}, price R{price.get('amount', '?')}."
+        )
     decisions = state.get("decisions") if isinstance(state.get("decisions"), list) else []
     open_decisions = [
         item
@@ -85,14 +182,14 @@ def _offline_reply(*, question: str, state: dict[str, Any]) -> str:
     if "why" in lower:
         return (
             f"The current recommendation is {action_type} because the latest evidence "
-            f"says: {summary}"
+            f"says: {summary}{grounding}"
         )
     if "risk" in lower:
         return (
             f"ShelfWise is tracking {len(open_decisions)} pending high-review "
-            f"decision(s). {summary}"
+            f"decision(s). {summary}{grounding}"
         )
-    return f"Current ShelfWise state: {summary}"
+    return f"Current ShelfWise state: {summary}{grounding}"
 
 
 def _chunk_words(text: str, *, words_per_chunk: int = 8) -> Iterator[str]:

@@ -1,0 +1,215 @@
+{
+  "annotations": {
+    "agent:cold_chain": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_cold_chain_cascade_routes_facilities_review"
+      ]
+    },
+    "agent:orchestrator": {
+      "note": "A bounded, schema-validating AgentOrchestrator is unit-tested but not yet wired into the backend cascade.",
+      "status": "partial",
+      "verification_nodeids": [
+        "tests/test_agent_orchestration.py::test_agent_executes_tool_feeds_result_back_and_returns_valid_json"
+      ]
+    },
+    "agent:procurement": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_procurement_cascade_uses_reorder_policy_and_supplier_ranking"
+      ]
+    },
+    "agent:sales": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_sales_cascade_records_clean_pos_sale"
+      ]
+    },
+    "connector:dynamics": {
+      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "status": "declaration_only",
+      "verification_nodeids": []
+    },
+    "connector:yoco": {
+      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "status": "declaration_only",
+      "verification_nodeids": []
+    },
+    "event_type:shipment": {
+      "note": "Canonical event type exists but CascadeWorker has no shipment consumer branch.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "event_type:stock_update": {
+      "note": "Canonical event type exists but CascadeWorker has no stock-update consumer branch.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "tool:multimodal:scan_tool": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_scan_image_validates_type_size_and_returns_reviewed_fallback"
+      ]
+    },
+    "tool:multimodal:voice_in_tool": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_voice_in_validates_type_size_and_reviewable_shape"
+      ]
+    },
+    "tool:multimodal:voice_out_tool": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_multimodal.py::test_voice_out_is_keyed_bounded_and_returns_audio"
+      ]
+    },
+    "training_stage:evaluate": {
+      "note": "Fixture evaluation is tested; model-generated evaluation is not verified in this snapshot.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "training_stage:preflight": {
+      "note": "Preflight checks are implemented but current W7900D hardware execution is external evidence.",
+      "status": "implemented",
+      "verification_nodeids": []
+    },
+    "training_stage:serving_check": {
+      "note": "Metadata-only serving checks are tested; generated endpoint inference is not verified here.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "training_stage:shakedown": {
+      "note": "Dry-run orchestration is covered, while full training and serving execution remain unverified.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "training_stage:train": {
+      "note": "Training entry point exists; this repository snapshot does not assert a completed hardware run.",
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    "workflow:cold_chain": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_cold_chain_cascade_routes_facilities_review"
+      ]
+    },
+    "workflow:critic_rejection": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_critic_rejection_cascade_downgrades_unsupported_action"
+      ]
+    },
+    "workflow:procurement": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_procurement_cascade_uses_reorder_policy_and_supplier_ranking"
+      ]
+    },
+    "workflow:sales": {
+      "note": null,
+      "status": null,
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_sales_cascade_records_clean_pos_sale"
+      ]
+    }
+  },
+  "default_verification_nodeids": {
+    "agent": [
+      "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
+    ],
+    "bus_backend": [
+      "tests/test_store_backends.py::test_redis_bus_requires_redis_url",
+      "tests/test_store_backends.py::test_store_factories_default_to_memory"
+    ],
+    "connector": [
+      "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
+      "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+    ],
+    "deployment_profile": [
+      "tests/test_infra_config.py::test_backend_container_sandbox_is_declared_in_compose",
+      "tests/test_store_backends.py::test_store_factories_default_to_memory"
+    ],
+    "event_consumer": [
+      "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+    ],
+    "event_type": [
+      "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+    ],
+    "frontend_surface": [
+      "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+      "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+    ],
+    "multimodal_feature": [
+      "tests/test_multimodal.py::test_demo_fallback_returns_reviewed_structured_evidence"
+    ],
+    "openapi_route": [
+      "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+      "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+    ],
+    "storage_backend": [
+      "tests/test_store_backends.py::test_postgres_store_requires_database_url",
+      "tests/test_store_backends.py::test_store_factories_default_to_memory"
+    ],
+    "tool": [
+      "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+    ],
+    "training_stage": [
+      "tests/test_shakedown_pipeline.py::test_world_simulation_builds_mixed_training_rows"
+    ],
+    "worker": [
+      "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+    ],
+    "workflow": [
+      "tests/test_golden_cascade.py::test_golden_cascade_is_math_backed_and_traceable"
+    ],
+    "worldgen_scenario": [
+      "tests/test_worldgen_simulator.py::test_scenarios_carry_no_answer",
+      "tests/test_worldgen_simulator.py::test_world_is_deterministic"
+    ]
+  },
+  "max_waiver_days": 45,
+  "required_capability_ids": [
+    "agent:orchestrator",
+    "bus_backend:memory",
+    "bus_backend:redis",
+    "connector:dynamics",
+    "connector:yoco",
+    "deployment_profile:local_development",
+    "storage_backend:memory",
+    "storage_backend:postgres",
+    "worker:cascade_worker"
+  ],
+  "required_kinds": [
+    "agent",
+    "bus_backend",
+    "connector",
+    "deployment_profile",
+    "event_consumer",
+    "event_type",
+    "frontend_surface",
+    "multimodal_feature",
+    "openapi_route",
+    "storage_backend",
+    "tool",
+    "training_stage",
+    "worker",
+    "workflow",
+    "worldgen_scenario"
+  ],
+  "schema_version": "1.0",
+  "verification_required_statuses": [
+    "demo_verified",
+    "verified"
+  ],
+  "waivers": []
+}

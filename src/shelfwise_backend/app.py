@@ -59,6 +59,7 @@ from .cascade import (
     run_catalog_price_check,
     run_cold_chain_cascade,
     run_critic_rejection_cascade,
+    run_expiry_risk_check,
     run_golden_cascade,
     run_procurement_cascade,
     run_sales_cascade,
@@ -156,7 +157,28 @@ app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
 app.router.add_event_handler("startup", cold_chain_demo.start)
 app.router.add_event_handler("shutdown", cold_chain_demo.stop)
-write_limiter = TokenBucket()
+def _env_positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _env_positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# Operator knob: unattended harness/soak runs legitimately push write rates far past
+# interactive-use defaults. Defaults stay identical when the env vars are unset.
+write_limiter = TokenBucket(
+    capacity=_env_positive_int("SHELFWISE_WRITE_RATE_CAPACITY", 240),
+    refill_per_s=_env_positive_float("SHELFWISE_WRITE_RATE_REFILL_PER_S", 8.0),
+)
 WRITE_LIMIT_DEP = Depends(rate_limit(write_limiter))
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
 
@@ -1152,9 +1174,8 @@ def demo_worldgen_drill(
     run_id = f"worldrun_{uuid4().hex[:12]}"
     records: list[dict[str, object]] = []
     cascades: list[dict[str, Any]] = []
-    for event in world.run():
-        if len(records) >= limit:
-            break
+    stream = list(world.run())
+    for event in _stride_sample(stream, limit):
         outcome = _record_pipeline_event(event)
         records.append(_pipeline_summary(outcome))
         cascade = outcome.get("cascade")
@@ -1163,6 +1184,7 @@ def demo_worldgen_drill(
 
     alert = _worldgen_cold_chain_alert(
         scenario_id=scenario_id,
+        seed=world.cfg.seed,
         tenant_id=world.cfg.tenant_id,
         actor=world.cfg.store_id,
         area=world.cfg.area,
@@ -1208,6 +1230,7 @@ def demo_worldgen_drill(
         "scenario_id": scenario_id,
         "synthetic": True,
         "worker_enabled": worker_enabled(),
+        "stream_events_total": len(stream),
         "events_total": len(records),
         "events_accepted": sum(1 for item in records if item["status"] == "accepted"),
         "duplicates": sum(1 for item in records if item["status"] == "duplicate"),
@@ -1472,11 +1495,31 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
             return None
         _attach_event_causality(result, event)
         return _record_cascade(result)
+    if event.type is EventType.EXPIRY_ENTRY:
+        result = run_expiry_risk_check(event)
+        if result is None:
+            return None
+        _attach_event_causality(result, event)
+        return _record_cascade(result)
     if event.type is EventType.COLD_CHAIN_ALERT:
         result = run_cold_chain_cascade(event)
         _attach_event_causality(result, event)
         return _record_cascade(result)
     return None
+
+
+def _stride_sample(events: list[Event], limit: int) -> list[Event]:
+    """Take an evenly spaced, chronological sample across the WHOLE event stream.
+
+    Taking the first N events instead starves the pipeline: the world emits every
+    product's 08:00 stock update before its first sale of the day, so with a large
+    assortment the window fills with a single event type and the sales/expiry
+    cascades never see one event. Deterministic: same stream + limit, same sample.
+    """
+    if len(events) <= limit:
+        return events
+    step = len(events) / limit
+    return [events[int(index * step)] for index in range(limit)]
 
 
 def _pipeline_summary(outcome: dict[str, Any]) -> dict[str, object]:
@@ -1498,6 +1541,7 @@ def _pipeline_summary(outcome: dict[str, Any]) -> dict[str, object]:
 def _worldgen_cold_chain_alert(
     *,
     scenario_id: str,
+    seed: int,
     tenant_id: str,
     actor: str,
     area: str,
@@ -1509,13 +1553,13 @@ def _worldgen_cold_chain_alert(
     measured_outage_hours = max(Decimal(stage) / Decimal("2"), Decimal("2.5"))
     return Event.parse_wire(
         {
-            "id": f"evt_{scenario_id}_cold_chain_alert",
+            "id": f"evt_{scenario_id}_{seed}_cold_chain_alert",
             "type": EventType.COLD_CHAIN_ALERT.value,
             "ts": alert_ts,
             "actor": actor,
             "source": "api",
             "tenant_id": tenant_id,
-            "correlation_id": f"worldgen:{scenario_id}:cold_chain",
+            "correlation_id": f"worldgen:{scenario_id}:{seed}:cold_chain",
             "payload": {
                 "site_id": actor,
                 "area": area,
