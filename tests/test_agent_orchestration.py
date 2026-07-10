@@ -221,3 +221,84 @@ def test_architecture_modes_only_resolve_role_targets() -> None:
     assert replicated.target_for("inventory").endpoint == "https://replica.example/v1"
     with pytest.raises(AgentOrchestrationError, match="no model target"):
         per_agent.target_for("executive")
+
+
+def test_require_tool_call_first_forces_tool_choice_required_on_opening_call() -> None:
+    """Some providers' "auto" tool choice skips straight to a final answer instead of
+    gathering evidence first - discovered against a real live Gemma-4/vLLM endpoint,
+    where it produced a degenerate, schema-violating answer. require_tool_call_first
+    must force tool_choice="required" on the opening request only.
+    """
+    runtime = _FakeRuntime(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ]
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="critic",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-required",
+            require_tool_call_first=True,
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    assert runtime.requests[0]["tool_choice"] == "required"
+    assert runtime.requests[1]["tool_choice"] == "auto"
+
+
+def test_tool_choice_defaults_to_auto_without_require_tool_call_first() -> None:
+    runtime = _FakeRuntime([{"role": "assistant", "content": '{"risk":"low","action":"noop"}'}])
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    asyncio.run(
+        orchestrator.run(
+            role="inventory",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-auto",
+        )
+    )
+
+    assert runtime.requests[0]["tool_choice"] == "auto"
+
+
+def test_tool_choice_is_none_when_no_tools_registered() -> None:
+    runtime = _FakeRuntime([{"role": "assistant", "content": '{"risk":"low","action":"noop"}'}])
+    orchestrator = AgentOrchestrator(tools=[], model_runtime=runtime)
+
+    asyncio.run(
+        orchestrator.run(
+            role="inventory",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-none",
+            require_tool_call_first=True,
+        )
+    )
+
+    assert runtime.requests[0]["tool_choice"] is None

@@ -123,6 +123,8 @@ async def _run(
             final_schema_name="critic_verdict",
             correlation_id=correlation_id,
             tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            temperature=0.0,
+            require_tool_call_first=True,
         )
         critic_answer = critic_run.answer
         executive_run = await orchestrator.run(
@@ -140,6 +142,7 @@ async def _run(
             final_schema_name="executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            temperature=0.0,
         )
         executive_answer = executive_run.answer
     except AgentOrchestrationError as exc:

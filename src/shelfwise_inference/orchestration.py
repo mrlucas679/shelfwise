@@ -257,6 +257,7 @@ class AgentOrchestrator:
         temperature: float = 0.1,
         max_tokens: int = 800,
         tenant_id: str = "default",
+        require_tool_call_first: bool = False,
     ) -> AgentRunResult:
         """Run from a system/user prompt and return one validated agent answer."""
         guarded_system = (
@@ -277,6 +278,7 @@ class AgentOrchestrator:
             temperature=temperature,
             max_tokens=max_tokens,
             tenant_id=tenant_id,
+            require_tool_call_first=require_tool_call_first,
         )
 
     async def run_messages(
@@ -290,8 +292,15 @@ class AgentOrchestrator:
         temperature: float = 0.1,
         max_tokens: int = 800,
         tenant_id: str = "default",
+        require_tool_call_first: bool = False,
     ) -> AgentRunResult:
-        """Run a bounded tool loop from pre-built OpenAI-compatible messages."""
+        """Run a bounded tool loop from pre-built OpenAI-compatible messages.
+
+        require_tool_call_first forces tool_choice="required" on the opening request when
+        tools are registered. Some providers' "auto" tool choice will, under certain prompts,
+        skip straight to a (often degenerate, schema-violating) final answer instead of
+        gathering evidence first - forcing the first call closes that gap.
+        """
         normalized_role = _normalized_role(role)
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
@@ -306,12 +315,19 @@ class AgentOrchestrator:
         seen_call_ids: set[str] = set()
         started = perf_counter()
 
-        for _ in range(self._max_model_calls):
+        for call_index in range(self._max_model_calls):
+            tool_choice: str | dict[str, Any] | None
+            if not openai_tools:
+                tool_choice = None
+            elif require_tool_call_first and call_index == 0:
+                tool_choice = "required"
+            else:
+                tool_choice = "auto"
             result = self._runtime.complete(
                 role=normalized_role,
                 messages=[dict(message) for message in conversation],
                 tools=deepcopy_tools(openai_tools),
-                tool_choice="auto" if openai_tools else None,
+                tool_choice=tool_choice,
                 response_format=response_format,
                 correlation_id=effective_correlation_id,
                 temperature=temperature,
