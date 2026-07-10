@@ -22,6 +22,7 @@ from shelfwise_inference.orchestration import (
     AgentRunResult,
     ExecutionMode,
 )
+from shelfwise_inference.tool_calling import ToolCallingError
 
 from .cascade import _GOLDEN_SCENARIO_ID, _cause_id, _decision_id
 from .tools.mcp_surface import AuditLog, PlatformTool, build_platform_tools
@@ -145,7 +146,7 @@ async def _run(
             temperature=0.0,
         )
         executive_answer = executive_run.answer
-    except AgentOrchestrationError as exc:
+    except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic golden cascade failed: {exc}") from exc
 
     return _build_result(

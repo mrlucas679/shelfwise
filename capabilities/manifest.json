@@ -165,7 +165,7 @@
           "symbol": "STRONG_AGENT_NAMES"
         },
         {
-          "line": 227,
+          "line": 240,
           "path": "src/shelfwise_inference/orchestration.py",
           "symbol": "AgentOrchestrator"
         }
@@ -3202,6 +3202,26 @@
       ]
     },
     {
+      "id": "tool:platform:check_price_integrity",
+      "kind": "tool",
+      "name": "Check Price Integrity",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 374,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "check_price_integrity",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
       "id": "tool:platform:explain_decision",
       "kind": "tool",
       "name": "Explain Decision",
@@ -3209,7 +3229,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 147,
+          "line": 332,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3222,6 +3242,86 @@
       ]
     },
     {
+      "id": "tool:platform:get_cold_chain_status",
+      "kind": "tool",
+      "name": "Get Cold Chain Status",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 356,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_cold_chain_status",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:get_demand_forecast",
+      "kind": "tool",
+      "name": "Get Demand Forecast",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 344,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_demand_forecast",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:get_expiry_risk",
+      "kind": "tool",
+      "name": "Get Expiry Risk",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 350,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_expiry_risk",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
+      "id": "tool:platform:get_reorder_policy",
+      "kind": "tool",
+      "name": "Get Reorder Policy",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 362,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_reorder_policy",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
       "id": "tool:platform:get_stock",
       "kind": "tool",
       "name": "Get Stock",
@@ -3229,7 +3329,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 139,
+          "line": 324,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3242,6 +3342,26 @@
       ]
     },
     {
+      "id": "tool:platform:get_supplier_ranking",
+      "kind": "tool",
+      "name": "Get Supplier Ranking",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 368,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_supplier_ranking",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
       "id": "tool:platform:get_thresholds",
       "kind": "tool",
       "name": "Get Thresholds",
@@ -3249,7 +3369,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 140,
+          "line": 325,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3269,7 +3389,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 141,
+          "line": 326,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3289,7 +3409,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 153,
+          "line": 338,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3779,7 +3899,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:d29c39b23fa6a7e4a01fb8a7543a921961199b4ad64d8355f3234d754247aa78",
+  "fingerprint": "sha256:f2d4763649b00c526c9fc46a689f29af91105ddff46a9348773a311142e67751",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

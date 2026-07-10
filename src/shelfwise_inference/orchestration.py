@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -16,7 +17,6 @@ from .tool_calling import (
     PlatformToolLike,
     PlatformToolRegistry,
     ToolExecution,
-    openai_json_schema_response_format,
     parse_and_validate_json_answer,
     parse_tool_calls,
 )
@@ -24,6 +24,19 @@ from .tool_calling import (
 _ROLE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _OK_STATUSES = {"ok", "success"}
 _OFFLINE_PROVIDERS = {"offline", "fallback"}
+_MAX_FINAL_ANSWER_RETRIES = 2
+# Strict json_schema-constrained decoding (response_format={"type": "json_schema", ...})
+# was found live against Gemma-4-E4B-it/vLLM to cause a reproducible, non-token-budget-
+# fixable failure: after closing the first string value the guided-decoding grammar falls
+# into an indentation-whitespace loop and never emits the remaining required fields, even
+# with max_tokens raised from 800 to 4000 (confirmed via raw HTTP probe - completion_tokens
+# matched the requested cap exactly both times, so it never "ran out of room", it just never
+# stops). Plain-text generation with the schema spelled out in a system reminder, validated
+# after the fact by parse_and_validate_json_answer (already required regardless), avoided
+# the loop entirely and returned a complete, valid answer in ~80 tokens. This is enforcement-
+# after-generation rather than during it, but the "no silent fallback" contract is unchanged:
+# an invalid answer still hard-fails (after the existing bounded retry).
+_TEXT_RESPONSE_FORMAT: dict[str, Any] = {"type": "text"}
 
 
 class ExecutionMode(StrEnum):
@@ -304,16 +317,25 @@ class AgentOrchestrator:
         normalized_role = _normalized_role(role)
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
-        response_format = openai_json_schema_response_format(
-            name=schema_name,
-            schema=final_schema,
-        )
+        response_format = _TEXT_RESPONSE_FORMAT
         openai_tools = self._registry.openai_tools()
         conversation = [dict(message) for message in messages]
+        conversation.append(
+            {
+                "role": "system",
+                "content": (
+                    "Once you are done gathering evidence, your final response must be "
+                    "exactly one JSON object matching this schema - no markdown code "
+                    "fences, no explanation before or after it:\n"
+                    f"{json.dumps(final_schema, sort_keys=True)}"
+                ),
+            }
+        )
         model_calls: list[ModelCall] = []
         tool_executions: list[ToolExecution] = []
         seen_call_ids: set[str] = set()
         started = perf_counter()
+        final_answer_retries = 0
 
         for call_index in range(self._max_model_calls):
             tool_choice: str | dict[str, Any] | None
@@ -348,9 +370,24 @@ class AgentOrchestrator:
             parsed_calls = parse_tool_calls(model_call.message)
             if not parsed_calls:
                 content = model_call.message.get("content")
-                if not isinstance(content, str):
-                    raise FinalAnswerValidationError("final model response has no JSON content")
-                answer = parse_and_validate_json_answer(content, final_schema)
+                try:
+                    if not isinstance(content, str):
+                        raise FinalAnswerValidationError(
+                            "final model response has no JSON content"
+                        )
+                    answer = parse_and_validate_json_answer(content, final_schema)
+                except FinalAnswerValidationError:
+                    # Observed live against Gemma-4-E4B-it/vLLM: structured decoding can
+                    # intermittently stall mid-object even at temperature=0, most likely
+                    # from floating-point non-associativity under continuous batching
+                    # rather than a genuine, reproducible model/schema incompatibility.
+                    # Retrying the same request a bounded number of times is a legitimate
+                    # transient-failure mitigation, not a silent fallback: it still requires
+                    # a fresh, genuine live model call to succeed before returning an answer.
+                    if final_answer_retries >= _MAX_FINAL_ANSWER_RETRIES:
+                        raise
+                    final_answer_retries += 1
+                    continue
                 return AgentRunResult(
                     role=normalized_role,
                     answer=answer,

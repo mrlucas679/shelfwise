@@ -130,7 +130,13 @@ def test_agent_executes_tool_feeds_result_back_and_returns_valid_json() -> None:
         "total_tokens": 28,
     }
     assert runtime.requests[0]["tools"][0]["function"]["name"] == "get_stock"
-    assert runtime.requests[0]["response_format"]["json_schema"]["strict"] is True
+    # Strict json_schema-constrained decoding was found (live, against Gemma-4-E4B-it/vLLM)
+    # to cause a reproducible non-terminating whitespace loop; the schema is instead spelled
+    # out as a system reminder and enforced by post-hoc parse_and_validate_json_answer.
+    assert runtime.requests[0]["response_format"] == {"type": "text"}
+    schema_reminder = runtime.requests[0]["messages"][-1]
+    assert schema_reminder["role"] == "system"
+    assert '"risk"' in schema_reminder["content"]
     tool_message = runtime.requests[1]["messages"][-1]
     assert tool_message["role"] == "tool"
     assert '"on_hand":12' in tool_message["content"]
@@ -140,9 +146,12 @@ def test_agent_executes_tool_feeds_result_back_and_returns_valid_json() -> None:
 
 
 def test_agent_rejects_invalid_final_json_without_fallback() -> None:
-    runtime = _FakeRuntime(
-        [{"role": "assistant", "content": '{"risk":"high","action":4}'}]
-    )
+    """Invalid JSON gets a bounded number of retries (a real, live decoding stall found
+    against Gemma-4-E4B-it/vLLM was intermittent even at temperature=0), but still hard-fails
+    - never silently falls back - once retries are exhausted.
+    """
+    bad_message = {"role": "assistant", "content": '{"risk":"high","action":4}'}
+    runtime = _FakeRuntime([bad_message, bad_message, bad_message])
     orchestrator = AgentOrchestrator(
         tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
         model_runtime=runtime,
@@ -157,7 +166,29 @@ def test_agent_rejects_invalid_final_json_without_fallback() -> None:
                 final_schema=_schema(),
             )
         )
-    assert len(runtime.requests) == 1
+    assert len(runtime.requests) == 3
+
+
+def test_agent_recovers_after_one_invalid_final_json_retry() -> None:
+    bad_message = {"role": "assistant", "content": '{"risk":"high","action":4}'}
+    good_message = {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'}
+    runtime = _FakeRuntime([bad_message, good_message])
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="inventory",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    assert len(runtime.requests) == 2
 
 
 @pytest.mark.parametrize(

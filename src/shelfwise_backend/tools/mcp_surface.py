@@ -7,8 +7,21 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from shelfwise_contracts import Money
 from shelfwise_data import load_seeded_scenario
-from shelfwise_decision_science import simulate_markdown
+from shelfwise_decision_science import (
+    InventoryPolicyInput,
+    Relation,
+    RelationStore,
+    SupplierProfile,
+    compute_reorder_policy,
+    detect_robust_anomaly,
+    forecast_demand,
+    recommend_suppliers,
+    score_cold_chain_risk,
+    score_expiry_risk,
+    simulate_markdown,
+)
 
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
 
@@ -135,6 +148,178 @@ def build_platform_tools(
             "method": result.method,
         }
 
+    async def get_demand_forecast(
+        sku: str = "4011",
+        horizon_days: int = 3,
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(
+            tool="get_demand_forecast",
+            tenant_id=tenant_id,
+            args={"sku": sku, "horizon_days": horizon_days},
+        )
+        scenario = load_seeded_scenario(sku=sku)
+        result = forecast_demand(
+            sku=sku,
+            recent_daily_units=list(scenario.recent_daily_units),
+            horizon_days=horizon_days,
+        )
+        return {
+            "sku": sku,
+            "daily_units": str(result.daily_units),
+            "confidence": str(result.confidence),
+            "method": result.method,
+        }
+
+    async def get_expiry_risk(
+        sku: str = "4011",
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(tool="get_expiry_risk", tenant_id=tenant_id, args={"sku": sku})
+        scenario = load_seeded_scenario(sku=sku)
+        demand = forecast_demand(
+            sku=sku,
+            recent_daily_units=list(scenario.recent_daily_units),
+            horizon_days=3,
+        )
+        cold = score_cold_chain_risk(
+            area="fridge_a",
+            outage_hours=Decimal("0"),
+            average_temp_c=Decimal("5"),
+        )
+        result = score_expiry_risk(
+            sku=sku,
+            units_on_hand=Decimal(scenario.units_on_hand),
+            days_to_expiry=Decimal(scenario.days_to_expiry),
+            forecast_daily_units=demand.daily_units,
+            unit_cost=scenario.unit_cost,
+            cold_chain_risk=cold.risk,
+            cold_chain_penalty_days=cold.penalty_days,
+        )
+        return {
+            "sku": sku,
+            "risk": str(result.risk),
+            "waste_units": str(result.waste_units),
+            "zar_at_risk": result.zar_at_risk.to_dict(),
+            "method": result.method,
+        }
+
+    async def get_cold_chain_status(
+        area: str = "fridge_a",
+        outage_hours: float = 3.0,
+        average_temp_c: float = 7.0,
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(
+            tool="get_cold_chain_status",
+            tenant_id=tenant_id,
+            args={"area": area, "outage_hours": outage_hours, "average_temp_c": average_temp_c},
+        )
+        result = score_cold_chain_risk(
+            area=area,
+            outage_hours=Decimal(str(outage_hours)),
+            average_temp_c=Decimal(str(average_temp_c)),
+        )
+        return {
+            "area": area,
+            "risk": str(result.risk),
+            "penalty_days": str(result.penalty_days),
+            "confidence": str(result.confidence),
+            "method": result.method,
+        }
+
+    async def get_reorder_policy(
+        sku: str = "4011",
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(tool="get_reorder_policy", tenant_id=tenant_id, args={"sku": sku})
+        scenario = load_seeded_scenario(sku=sku)
+        policy = compute_reorder_policy(
+            InventoryPolicyInput(
+                sku=sku,
+                on_hand=Decimal("20"),
+                committed_units=Decimal("8"),
+                avg_daily_demand=Decimal("10"),
+                demand_std=Decimal("2"),
+                lead_time_days=Decimal("3"),
+                unit_cost=scenario.unit_cost,
+            )
+        )
+        return {
+            "sku": sku,
+            "should_reorder": policy.should_reorder,
+            "reorder_point_units": str(policy.reorder_point_units),
+            "suggested_order_units": str(policy.suggested_order_units),
+            "stockout_risk": str(policy.stockout_risk),
+            "method": policy.method,
+        }
+
+    async def get_supplier_ranking(
+        sku: str = "4011",
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(tool="get_supplier_ranking", tenant_id=tenant_id, args={"sku": sku})
+        scenario = load_seeded_scenario(sku=sku)
+        graph = RelationStore()
+        current_supplier = f"supplier:{scenario.supplier.lower()}"
+        backup_supplier = "supplier:gauteng_chilled_dairy"
+        graph.add(Relation(f"sku:{sku}", "supplied_by", current_supplier))
+        graph.add(Relation(f"sku:{sku}", "supplied_by", backup_supplier))
+        profiles = {
+            current_supplier: SupplierProfile(
+                supplier_id=current_supplier,
+                lead_time_days=Decimal("3"),
+                fill_rate=Decimal("0.76"),
+                unit_cost=scenario.unit_cost,
+            ),
+            backup_supplier: SupplierProfile(
+                supplier_id=backup_supplier,
+                lead_time_days=Decimal("1"),
+                fill_rate=Decimal("0.94"),
+                unit_cost=Money.zar("12.80"),
+            ),
+        }
+        ranking = recommend_suppliers(sku, graph, profiles)
+        top = ranking.ranked[0]
+        return {
+            "sku": sku,
+            "top_supplier": top.supplier_id,
+            "coverage": str(ranking.coverage),
+            "method": ranking.method,
+        }
+
+    async def check_price_integrity(
+        sku: str = "4011",
+        observed_unit_price: float | None = None,
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        audit_log.record(
+            tool="check_price_integrity",
+            tenant_id=tenant_id,
+            args={"sku": sku, "observed_unit_price": observed_unit_price},
+        )
+        scenario = load_seeded_scenario(sku=sku)
+        catalog_price = scenario.unit_price.amount
+        observed = (
+            Decimal(str(observed_unit_price))
+            if observed_unit_price is not None
+            else catalog_price
+        )
+        delta = observed - catalog_price
+        anomaly = detect_robust_anomaly(
+            metric_name="pos_sale_units",
+            current_value=Decimal(str(scenario.recent_daily_units[-1])),
+            history=list(scenario.recent_daily_units),
+        )
+        return {
+            "sku": sku,
+            "observed_unit_price": str(observed),
+            "catalog_unit_price": str(catalog_price),
+            "price_delta": str(delta),
+            "velocity_anomaly": anomaly.is_anomaly,
+            "method": "catalog_price_integrity",
+        }
+
     return [
         PlatformTool("get_stock", "Read current stock context for one SKU.", True, get_stock),
         PlatformTool("get_thresholds", "Read learned threshold memory.", True, get_thresholds),
@@ -155,6 +340,42 @@ def build_platform_tools(
             "Simulate a markdown without writing back.",
             True,
             simulate_markdown_tool,
+        ),
+        PlatformTool(
+            "get_demand_forecast",
+            "Read the measured demand forecast for one SKU.",
+            True,
+            get_demand_forecast,
+        ),
+        PlatformTool(
+            "get_expiry_risk",
+            "Read the measured expiry/waste risk for one SKU.",
+            True,
+            get_expiry_risk,
+        ),
+        PlatformTool(
+            "get_cold_chain_status",
+            "Read the measured cold-chain risk for one refrigeration area.",
+            True,
+            get_cold_chain_status,
+        ),
+        PlatformTool(
+            "get_reorder_policy",
+            "Read the measured reorder policy for one SKU.",
+            True,
+            get_reorder_policy,
+        ),
+        PlatformTool(
+            "get_supplier_ranking",
+            "Read the measured supplier ranking for one SKU.",
+            True,
+            get_supplier_ranking,
+        ),
+        PlatformTool(
+            "check_price_integrity",
+            "Check an observed till price against the catalogue price for one SKU.",
+            True,
+            check_price_integrity,
         ),
     ]
 
