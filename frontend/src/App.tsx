@@ -262,6 +262,7 @@ type WorkspaceOpenOptions = { query?: string }
 // decision rendered twice, in two different places, with two different ways to act on it).
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
 type ChatReply = { answer: string; conversationId: string; messageId: string }
+type AgenticRunStatus = { state: 'running' | 'ok' | 'error'; detail: string }
 type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
 declare global {
@@ -1853,6 +1854,8 @@ function WorkspaceScreen({
   queue,
   ops,
   recoveredToday,
+  agenticRuns,
+  onRunAgentic,
 }: {
   surface: WorkspaceSurface
   initialQuery?: string
@@ -1862,6 +1865,8 @@ function WorkspaceScreen({
   queue: Decision[]
   ops: OperationalSnapshot
   recoveredToday: string | null
+  agenticRuns: Record<string, AgenticRunStatus>
+  onRunAgentic: (path: string) => void
 }) {
   const [productQuery, setProductQuery] = useState(initialQuery ?? '')
   const [catalogResults, setCatalogResults] = useState<ProductCatalogItem[]>([])
@@ -2650,16 +2655,22 @@ function WorkspaceScreen({
       </WorkspaceSection>
       <WorkspaceSection title="Gated operational endpoints" count={pluralLabel(GATED_ENDPOINTS.filter((item) => item.group === 'operations').length, 'endpoint')}>
         <div className="workspace-list">
-          {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => (
-            <WorkspaceRow
-              key={item.path}
-              label={item.label}
-              meta={`${item.method} ${item.path}`}
-              detail={item.detail}
-              value={routeAvailable(item.path) ? 'gated' : 'missing'}
-              tone={routeAvailable(item.path) ? 'info' : 'warn'}
-            />
-          ))}
+          {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => {
+            const isAgentic = item.path.endsWith('/agentic')
+            const run = agenticRuns[item.path]
+            const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
+            return (
+              <WorkspaceRow
+                key={item.path}
+                label={isAgentic ? `${item.label} - click to run live` : item.label}
+                meta={`${item.method} ${item.path}`}
+                detail={isAgentic ? (run?.detail ?? item.detail) : item.detail}
+                value={isAgentic ? (run?.state ?? 'gated') : routeAvailable(item.path) ? 'gated' : 'missing'}
+                tone={isAgentic ? runTone : routeAvailable(item.path) ? 'info' : 'warn'}
+                onSelect={isAgentic ? () => onRunAgentic(item.path) : undefined}
+              />
+            )
+          })}
           <WorkspaceRow
             label="Root-cause SQL"
             meta="/detective/root-cause-sql"
@@ -2853,6 +2864,7 @@ function App() {
   const [ops, setOps] = useState<OperationalSnapshot>(() => emptyOps())
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [conversationId, setConversationId] = useState(() => newChatId('conv'))
+  const [agenticRuns, setAgenticRuns] = useState<Record<string, AgenticRunStatus>>({})
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -3074,6 +3086,34 @@ function App() {
       })
   }
 
+  const runAgenticDemo = (path: string) => {
+    if (agenticRuns[path]?.state === 'running') return
+    setAgenticRuns((prev) => ({
+      ...prev,
+      [path]: { state: 'running', detail: 'Calling the live Gemma tool-calling loop...' },
+    }))
+    const controller = new AbortController()
+    fetchJson<JsonObject>(path, { method: 'POST' }, controller.signal)
+      .then((payload) => {
+        const evidence = Array.isArray(payload.evidence) ? (payload.evidence as JsonObject[]) : []
+        const firstEvidence = evidence.length > 0 ? asObject(evidence[0]) : {}
+        const conclusion = typeof firstEvidence.conclusion === 'string' ? firstEvidence.conclusion : ''
+        const decision = asObject(payload.decision)
+        const action = asObject(decision.action)
+        const actionType = typeof action.type === 'string' ? action.type : 'unknown'
+        const modelCalls = Array.isArray(payload.model_calls) ? payload.model_calls.length : 0
+        const summary = conclusion
+          ? `${conclusion} -> ${actionType} (${modelCalls} real Gemma calls)`
+          : `Routed to ${actionType} (${modelCalls} real Gemma calls)`
+        setAgenticRuns((prev) => ({ ...prev, [path]: { state: 'ok', detail: summary } }))
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        const message = err instanceof Error ? err.message : String(err)
+        setAgenticRuns((prev) => ({ ...prev, [path]: { state: 'error', detail: message } }))
+      })
+  }
+
   const resolve = (id: string, kind: 'approve' | 'reject') => {
     if (busyId) return
     transitionCtrl.current?.abort()
@@ -3199,6 +3239,8 @@ function App() {
               queue={queue}
               ops={ops}
               recoveredToday={recoveredToday}
+              agenticRuns={agenticRuns}
+              onRunAgentic={runAgenticDemo}
             />
           ) : (
             <>

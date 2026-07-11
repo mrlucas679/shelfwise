@@ -1017,7 +1017,7 @@
       ],
       "sources": [
         {
-          "line": 979,
+          "line": 980,
           "path": "frontend/src/App.tsx",
           "symbol": "ApprovalPanel"
         }
@@ -1042,7 +1042,7 @@
       ],
       "sources": [
         {
-          "line": 2781,
+          "line": 2792,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -1067,7 +1067,7 @@
       ],
       "sources": [
         {
-          "line": 1065,
+          "line": 1066,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1092,7 +1092,7 @@
       ],
       "sources": [
         {
-          "line": 1066,
+          "line": 1067,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1117,7 +1117,7 @@
       ],
       "sources": [
         {
-          "line": 1064,
+          "line": 1065,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1146,7 +1146,7 @@
       ],
       "sources": [
         {
-          "line": 1067,
+          "line": 1068,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1175,7 +1175,7 @@
       ],
       "sources": [
         {
-          "line": 1061,
+          "line": 1062,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1204,7 +1204,7 @@
       ],
       "sources": [
         {
-          "line": 1068,
+          "line": 1069,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1229,7 +1229,7 @@
       ],
       "sources": [
         {
-          "line": 1063,
+          "line": 1064,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1254,7 +1254,7 @@
       ],
       "sources": [
         {
-          "line": 1059,
+          "line": 1060,
           "path": "frontend/src/App.tsx",
           "symbol": "SidebarPage"
         }
@@ -1279,7 +1279,7 @@
       ],
       "sources": [
         {
-          "line": 1062,
+          "line": 1063,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -4009,7 +4009,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:c5507272d8b008edc20091a7bbaacf0d5753f2525e9ed4058ad5ccf740f66a3c",
+  "fingerprint": "sha256:3d462975576f761d5a3e9acce8c9e7d1906c80d21c3fa04400651d509da8026a",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }
