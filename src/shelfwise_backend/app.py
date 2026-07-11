@@ -28,7 +28,7 @@ from shelfwise_connectors import (
     record_to_event,
 )
 from shelfwise_contracts import Event, EventType, Money
-from shelfwise_data import load_seeded_scenario
+from shelfwise_data import build_store_intelligence_demo, load_seeded_scenario
 from shelfwise_inference import (
     InferenceError,
     OpenAICompatibleInferenceClient,
@@ -784,6 +784,7 @@ def _new_chat_response(
             ),
         },
         "traces": [_compact_chat_trace(item) for item in trace_registry.list()[:_CHAT_TRACE_LIMIT]],
+        "store_intelligence": build_store_intelligence_demo(),
     }
     conversation = chat_store.get(
         tenant_id=ctx.tenant_id,
