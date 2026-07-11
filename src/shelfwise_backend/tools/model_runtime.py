@@ -128,8 +128,12 @@ def architecture_from_inference_config(
     """Translate existing routine/strong settings into role routing only."""
     resolved = config or load_inference_config()
     architecture_mode = ArchitectureMode(mode)
-    routine = RoleModelTarget(endpoint=resolved.base_url, model=resolved.routine_model)
-    strong = RoleModelTarget(endpoint=resolved.base_url, model=resolved.strong_model)
+    routine = RoleModelTarget(
+        endpoint=resolved.base_url_for_agent("inventory"), model=resolved.routine_model
+    )
+    strong = RoleModelTarget(
+        endpoint=resolved.base_url_for_agent("executive"), model=resolved.strong_model
+    )
     if architecture_mode is ArchitectureMode.SHARED:
         return AgentArchitecture(mode=architecture_mode, default_target=routine)
     role_targets = {
