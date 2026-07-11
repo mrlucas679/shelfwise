@@ -1,6 +1,27 @@
-# HANDOFF — session state as of 2026-07-11 ~05:15 (local)
+# HANDOFF — session state as of 2026-07-11 ~05:50 (local)
 
-## Latest update (this session) — frontend E2E verified, droplet is LIVE not off
+## Latest update — enforced calculator-grounded reasoning across every agent
+
+User's explicit requirement: agents must use tools as their calculator for any math, and
+must be able to genuinely explain the math (cite real figures), not just assert a verdict.
+This was previously only a prompt instruction ("never invent numbers") with no verification.
+
+Added `extract_salient_numbers`/`assert_conclusion_grounded_in_tool_results` in
+`tool_calling.py`: after any agent run, checks that the final conclusion text actually cites
+at least one real numeric value from each tool it called, raising `UngroundedAnswerError`
+(a `ToolCallingError`, so existing failure handling already covers it) if not. Wired into
+the golden cascade's Critic verdict and all 11 roles in `agent_role_coverage.py`. The shared
+`guarded_system` text in `AgentOrchestrator.run` now tells every caller "tools are your
+calculator... cite the specific figures," so this applies automatically to any future agent
+wiring too, not just these two call sites.
+
+**Verified live against the real MI300X endpoint: 11/11 agent roles pass with grounding
+enforcement active** — every conclusion now genuinely cites real computed figures (e.g.
+"incremental profit of 109.44 ZAR", "240 units on hand", "0.58 cold-chain risk", "41.04
+units demand forecast"). 399/399 tests pass (2 new tests added: positive + negative
+grounding cases). Commit: check `git log --oneline -1` on this branch.
+
+## Prior update — frontend E2E verified, droplet is LIVE not off
 
 Despite the prior note saying "user turned the droplet off," `/v1/models` and `/health` on
 `165.245.130.225:8000` both returned 200 with `google/gemma-4-E4B-it` loaded when checked
