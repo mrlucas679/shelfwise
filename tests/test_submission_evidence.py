@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SUMMARY = ROOT / "reports" / "soak_15min_20260711T042648Z" / "summary.json"
 
