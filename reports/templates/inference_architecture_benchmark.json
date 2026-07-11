@@ -1,0 +1,274 @@
+{
+  "workflow": {
+    "name": "shelfwise_eleven_role_cascade",
+    "agents": [
+      {
+        "name": "orchestrator",
+        "order": 1,
+        "parallel_group": "coordination",
+        "tier": "strong",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Plan the ShelfWise decision cascade and return an execution_order key.",
+        "expected_terms": ["execution_order"],
+        "max_tokens": 128
+      },
+      {
+        "name": "inventory",
+        "order": 2,
+        "parallel_group": "inventory",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess a retail stock position and return a stock_position key.",
+        "expected_terms": ["stock_position"],
+        "max_tokens": 128
+      },
+      {
+        "name": "sales",
+        "order": 3,
+        "parallel_group": "sales",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess sales velocity and price integrity and return a sales_signal key.",
+        "expected_terms": ["sales_signal"],
+        "max_tokens": 128
+      },
+      {
+        "name": "cold_chain",
+        "order": 4,
+        "parallel_group": "cold_chain",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess refrigeration exposure and return a cold_chain_risk key.",
+        "expected_terms": ["cold_chain_risk"],
+        "max_tokens": 128
+      },
+      {
+        "name": "expiry",
+        "order": 5,
+        "parallel_group": "expiry",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess short-dated inventory and return an expiry_risk key.",
+        "expected_terms": ["expiry_risk"],
+        "max_tokens": 128
+      },
+      {
+        "name": "demand",
+        "order": 6,
+        "parallel_group": "demand",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess retail demand and return a demand_signal key.",
+        "expected_terms": ["demand_signal"],
+        "max_tokens": 128
+      },
+      {
+        "name": "procurement",
+        "order": 7,
+        "parallel_group": "procurement",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Assess supplier cover and return a procurement_plan key.",
+        "expected_terms": ["procurement_plan"],
+        "max_tokens": 128
+      },
+      {
+        "name": "opportunity",
+        "order": 8,
+        "parallel_group": "opportunity",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Identify one evidence-backed intervention and return an opportunity key.",
+        "expected_terms": ["opportunity"],
+        "max_tokens": 128
+      },
+      {
+        "name": "simulation",
+        "order": 9,
+        "parallel_group": "simulation",
+        "tier": "routine",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Simulate the intervention outcome and return a scenario_result key.",
+        "expected_terms": ["scenario_result"],
+        "max_tokens": 160
+      },
+      {
+        "name": "critic",
+        "order": 10,
+        "parallel_group": "critic",
+        "tier": "strong",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Challenge the evidence and return a verdict key.",
+        "expected_terms": ["verdict"],
+        "max_tokens": 192
+      },
+      {
+        "name": "executive",
+        "order": 11,
+        "parallel_group": "executive",
+        "tier": "strong",
+        "system_prompt": "Return compact JSON and include the requested key exactly.",
+        "prompt": "Summarize the decision and return a recommendation key.",
+        "expected_terms": ["recommendation"],
+        "max_tokens": 192
+      }
+    ]
+  },
+  "workload": {
+    "peak_concurrency": 64,
+    "synchronized_workflows": 1,
+    "warmup_seconds": 10,
+    "steady_seconds": 60,
+    "repeats": 3,
+    "telemetry_interval_seconds": 1,
+    "max_workflows_per_window": null
+  },
+  "endpoints": {
+    "shared_primary": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_SHARED_BASE_URL",
+      "model_env": "BENCH_SHARED_MODEL",
+      "metrics_url_env": "BENCH_SHARED_METRICS_URL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "replicated_a": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_REPLICA_A_BASE_URL",
+      "model_env": "BENCH_REPLICATED_MODEL",
+      "metrics_url_env": "BENCH_REPLICA_A_METRICS_URL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "replicated_b": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_REPLICA_B_BASE_URL",
+      "model_env": "BENCH_REPLICATED_MODEL",
+      "metrics_url_env": "BENCH_REPLICA_B_METRICS_URL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_orchestrator": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_ORCHESTRATOR_BASE_URL",
+      "model_env": "BENCH_AGENT_ORCHESTRATOR_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_inventory": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_INVENTORY_BASE_URL",
+      "model_env": "BENCH_AGENT_INVENTORY_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_expiry": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_EXPIRY_BASE_URL",
+      "model_env": "BENCH_AGENT_EXPIRY_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_sales": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_SALES_BASE_URL",
+      "model_env": "BENCH_AGENT_SALES_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_cold_chain": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_COLD_CHAIN_BASE_URL",
+      "model_env": "BENCH_AGENT_COLD_CHAIN_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_demand": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_DEMAND_BASE_URL",
+      "model_env": "BENCH_AGENT_DEMAND_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_opportunity": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_OPPORTUNITY_BASE_URL",
+      "model_env": "BENCH_AGENT_OPPORTUNITY_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_procurement": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_PROCUREMENT_BASE_URL",
+      "model_env": "BENCH_AGENT_PROCUREMENT_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_simulation": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_SIMULATION_BASE_URL",
+      "model_env": "BENCH_AGENT_SIMULATION_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_critic": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_CRITIC_BASE_URL",
+      "model_env": "BENCH_AGENT_CRITIC_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "agent_executive": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_AGENT_EXECUTIVE_BASE_URL",
+      "model_env": "BENCH_AGENT_EXECUTIVE_MODEL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "hybrid_routine": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_HYBRID_ROUTINE_BASE_URL",
+      "model_env": "BENCH_HYBRID_ROUTINE_MODEL",
+      "metrics_url_env": "BENCH_HYBRID_ROUTINE_METRICS_URL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    },
+    "hybrid_strong": {
+      "provider": "vllm",
+      "base_url_env": "BENCH_HYBRID_STRONG_BASE_URL",
+      "model_env": "BENCH_HYBRID_STRONG_MODEL",
+      "metrics_url_env": "BENCH_HYBRID_STRONG_METRICS_URL",
+      "api_key_env": "BENCHMARK_API_KEY"
+    }
+  },
+  "strategies": [
+    {
+      "name": "shared",
+      "kind": "shared",
+      "description": "All agents share one model-serving endpoint.",
+      "routes": {
+        "default": ["shared_primary"]
+      }
+    },
+    {
+      "name": "replicated",
+      "kind": "replicated",
+      "description": "All agents use a round-robin pool of equivalent replicas.",
+      "routes": {
+        "default": ["replicated_a", "replicated_b"]
+      }
+    },
+    {
+      "name": "per_agent",
+      "kind": "per_agent",
+      "description": "Each agent has an independently routed endpoint.",
+      "routes": {
+        "orchestrator": ["agent_orchestrator"],
+        "inventory": ["agent_inventory"],
+        "sales": ["agent_sales"],
+        "cold_chain": ["agent_cold_chain"],
+        "expiry": ["agent_expiry"],
+        "demand": ["agent_demand"],
+        "procurement": ["agent_procurement"],
+        "opportunity": ["agent_opportunity"],
+        "simulation": ["agent_simulation"],
+        "critic": ["agent_critic"],
+        "executive": ["agent_executive"]
+      }
+    },
+    {
+      "name": "hybrid",
+      "kind": "hybrid",
+      "description": "Routine and strong-tier agents use separate model-serving endpoints.",
+      "routes": {
+        "routine": ["hybrid_routine"],
+        "strong": ["hybrid_strong"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+# Cloud Inference Architecture Benchmark
+
+> Run `$run_id` | `$created_at` | Evidence scope: `$evidence_scope`
+
+$evidence_notice
+
+## Workload
+
+$workload_table
+
+Warmup: $warmup_seconds seconds. Steady window: $steady_seconds seconds. Repeats: $repeats.
+
+The fixed stages are single (1 workflow), moderate (8), heavy (32), a configurable peak,
+and a synchronized worst case where every agent in each workflow starts together.
+
+## Measured Strategies
+
+$strategy_table
+
+## Tradeoffs Relative To Shared
+
+No winner is selected. The rows expose measured quality, latency, throughput, and resource
+tradeoffs; unavailable telemetry is not converted to zero.
+
+$tradeoff_table
+
+## Telemetry Availability
+
+$telemetry_table
+
+## Evidence Warnings
+
+$warnings
+
+## Output Files
+
+$output_files

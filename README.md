@@ -125,6 +125,11 @@ Connected API endpoints:
 
 Use [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) for the local demo flow, judge story, and cloud proof checks.
 
+Evidence and honest scope:
+
+- [Submission evidence report](reports/SUBMISSION_EVIDENCE_REPORT.md)
+- [Original retailer-problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md)
+
 ## Container
 
 ```bash
@@ -178,7 +183,8 @@ Built now:
 
 Next:
 
-- Live provider credential test against Fireworks and AMD Developer Cloud MI300X/vLLM.
+- Live dual-model proof for Gemma 4 E4B routine and Gemma 4 31B strong.
+- Concurrent 1/8/32-user MI300X inference benchmark with ROCm/vLLM resource telemetry.
 - Docker build/run verification after Docker Desktop starts.
 - Demo recording and public URL.
 
@@ -195,14 +201,16 @@ model tier because they review evidence, catch contradictions, and make the fina
 ### AMD Developer Cloud / vLLM preflight
 
 Before creating the MI300X droplet, the app is ready to accept an OpenAI-compatible vLLM endpoint.
-When the droplet exists, configure the backend with:
+Configure routine and strong tiers independently. `LLM_BASE_URL`/`LLM_API_KEY` remain supported as
+single-endpoint fallbacks, but submission readiness requires distinct routine and strong model IDs.
 
 ```powershell
-$env:LLM_BASE_URL="http://<mi300x-public-ip>:8000"
-$env:LLM_API_KEY="demo-key"
-$env:LLM_MODEL="shelfwise-demo"
-$env:LLM_ROUTINE_MODEL="shelfwise-demo"
-$env:LLM_STRONG_MODEL="shelfwise-demo"
+$env:LLM_ROUTINE_BASE_URL="http://<routine-endpoint>:8000"
+$env:LLM_STRONG_BASE_URL="http://<strong-endpoint>:8000"
+$env:LLM_ROUTINE_API_KEY="<routine-key>"
+$env:LLM_STRONG_API_KEY="<strong-key>"
+$env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-31B-it"
 $env:LLM_TIMEOUT_SECONDS="25"
 $env:LLM_COMPUTE_RESOURCE="AMD Developer Cloud"
 $env:LLM_ACCELERATOR="AMD Instinct MI300X"
@@ -216,8 +224,9 @@ Invoke-RestMethod http://127.0.0.1:8000/inference/smoke
 Invoke-RestMethod http://127.0.0.1:8000/submission/readiness
 ```
 
-For a hosted frontend, set `frontend/public/shelfwise-config.js` or build with `VITE_API_BASE`
-so the browser calls the public backend URL instead of localhost.
+The production Nginx image proxies frontend and API traffic through one origin. With the supplied
+Compose mapping, open `http://<host>:5173`; judge browsers never call their own localhost. A custom
+backend can still be selected at build time with `VITE_API_BASE`.
 
 ## Gemma 4 Multimodal Training Harness
 
