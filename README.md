@@ -1,28 +1,68 @@
 # ShelfWise
 
+[![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
+[![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![Built on AMD](https://img.shields.io/badge/AMD-Instinct%20MI300X-ED1C24.svg)](#built-on-amd-compute-usage-proof)
+
 **Agentic AI store operations, grounded in real math — built on AMD Instinct MI300X.**
 
 AMD Developer Hackathon ACT II · Track 3: Unicorn (Open Innovation).
 
+![ShelfWise — agentic AI store operations on AMD](submission/ShelfWise-Cover.png)
+
 ShelfWise runs a supermarket's interlocking daily decisions — expiry markdowns, procurement
-and multi-source stock sourcing, till-price integrity, cold-chain response — through real
-Critic/Executive agent pairs powered by **google/gemma-4-E4B-it served on an AMD Instinct
-MI300X GPU via vLLM 0.23 (ROCm)**. Agents reason through a bounded tool-calling loop over
-11 read-only platform tools (stock, demand forecast, expiry risk, reorder policy, supplier
-ranking, stock sourcing, cold-chain risk, price integrity, markdown simulation, decisions,
-learned thresholds), and every recommendation lands as a pending decision that a human must
-approve before any write-back happens.
+and multi-source stock sourcing, till-price integrity, cold-chain response, recall quarantine,
+and inventory exceptions — through real Critic/Executive agent pairs powered by
+**google/gemma-4-E4B-it served on an AMD Instinct MI300X GPU via vLLM 0.23 (ROCm)**. Agents
+reason through a bounded tool-calling loop over read-only platform tools, and every
+recommendation lands as a pending decision that a human must approve before any write-back
+happens.
 
 `event -> agents (Gemma on MI300X) -> tools -> evidence -> critic -> executive -> HITL -> learning`
 
-**The grounding guarantee:** a final agent answer must cite the numbers its tools actually
-computed. An answer citing a figure no tool produced is rejected and re-run
-(`assert_conclusion_grounded_in_tool_results`), never shipped. The model uses tools as its
-calculator; it cannot invent figures.
+## Table of Contents
 
-Chat is the front door: a genuinely agentic assistant sharing the same tool registry and
-grounding guarantees as the automated cascades, with multi-user/multi-conversation identity,
-tenant isolation enforced server-side, and structured markdown answers.
+- [Highlights](#highlights)
+- [Built on AMD (compute-usage proof)](#built-on-amd-compute-usage-proof)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [Testing](#testing)
+- [API Reference](#api-reference)
+- [Demo & Evidence](#demo--evidence)
+- [Deployment](#deployment)
+- [Project Structure](#project-structure)
+- [Current Scope](#current-scope)
+- [Inference Strategy](#inference-strategy)
+- [Model Training](#gemma-4-multimodal-training-harness)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Highlights
+
+- **Grounded reasoning, enforced in code.** A final agent answer must cite the numbers its
+  tools actually computed. An answer citing a figure no tool produced is rejected and re-run
+  (`assert_conclusion_grounded_in_tool_results`), never shipped — the model uses tools as its
+  calculator and cannot invent figures.
+- **Agentic chat over the whole store.** One question can trigger multiple live tool calls in
+  a single turn (stock, forecasts, deliveries, sourcing, approvals), with structured markdown
+  answers, multi-user conversation identity, and server-side tenant isolation.
+- **Real multi-source sourcing decisions.** A shortage is never answered with a bare
+  "transfer stock": candidate branches, distribution centres, and suppliers are ranked by
+  availability, distance, and lead time, the winner is explained, and a purchase order is
+  recommended for anything the winner cannot cover.
+- **Human-in-the-loop by construction.** Every recommendation is a pending decision with
+  evidence attached; nothing writes back without explicit approval, and approvals feed a
+  learning loop that adjusts thresholds from real outcomes.
+- **Governed exception workflows.** Recall quarantine, returns, damage, shrink investigation,
+  and misplaced-stock relocation each carry required evidence, distinct actions, Critic
+  review, and HITL — runnable as seeded drills from the Operations workspace.
+- **Receipts, not promises.** A 15-minute live soak harness, committed run artifacts, a
+  machine-verified capability manifest that fails CI on drift, and honest evidence reports
+  that separate measured behavior from configured behavior.
 
 ## Built on AMD (compute-usage proof)
 
@@ -46,12 +86,62 @@ Submission assets (slide deck PDF and cover image) are in [`submission/`](submis
 The [original problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md) distinguishes proven,
 partial, and missing retailer workflows.
 
-## Quick Start
+## Architecture
+
+| Layer | What it does |
+|---|---|
+| **Event intake** | POS sales, stock updates, scans, sensor alerts, and connector webhooks (Square/Shopify-style) land on one event bus with provenance and quarantine. |
+| **Agent cascades** | Critic/Executive Gemma agent pairs run a bounded tool-calling loop per scenario (golden expiry, procurement, sales price integrity, cold chain) — `live_required` by default. |
+| **Platform tools** | Read-only, audited tools: stock, demand forecast, expiry risk, reorder policy, supplier ranking, stock sourcing, cold-chain risk, price integrity, markdown simulation, open decisions, decision explanation, learned thresholds. |
+| **Decision & HITL** | Every recommendation becomes a pending decision with evidence objects; approve/reject transitions are audited and tenant-scoped. |
+| **Learning loop** | Approved outcomes move thresholds; movements are visible and receipt-backed. |
+| **Write-back** | Approved actions queue as task-style write-back receipts (read-only/pending-write posture toward source systems). |
+| **Console** | Chat-first React UI: agentic chat, bounded attention sidebar, approval queue, workspaces for products, deliveries, operations, and exception drills. |
+
+All arithmetic lives in tested Python decision-science tools — never hidden inside prompts.
+
+## Tech Stack
+
+- **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it with native tool calling
+- **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
+- **Frontend:** React 19 · TypeScript · Vite · react-markdown
+- **Quality:** pytest (400+ tests) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+ (frontend)
+- Optional for live inference: an OpenAI-compatible vLLM endpoint serving
+  `google/gemma-4-E4B-it` with `--enable-auto-tool-choice --tool-call-parser gemma4`
+
+### Installation
 
 ```powershell
+git clone https://github.com/mrlucas679/shelfwise.git
+cd shelfwise
 python -m pip install -e ".[dev]"
+```
+
+### Configuration (live inference)
+
+Everything runs offline-deterministic with no configuration. To exercise the real model path,
+set the endpoint before starting the backend (PowerShell shown; a gitignored `.env` works too):
+
+```powershell
+$env:LLM_BASE_URL="http://<your-vllm-endpoint>:8000"
+$env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
+```
+
+See [Inference Strategy](#inference-strategy) for independent routine/strong tier variables.
+
+### Run
+
+```powershell
 $env:PYTHONPATH="src"
-python -m pytest -q
+python -m pytest -q                                   # verify the checkout
 python -m uvicorn shelfwise_backend.app:app --host 127.0.0.1 --port 8000
 ```
 
@@ -63,10 +153,51 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Then open the app:
+Open `http://127.0.0.1:5173` — the health probe is `GET http://localhost:8000/health` and
+submission readiness is `GET http://localhost:8000/submission/readiness`.
 
-- `GET http://localhost:8000/submission/readiness`
-- `http://127.0.0.1:5173`
+## Usage
+
+Ask the chat anything about the store — it picks its own tools per question:
+
+> *"Give me a full report: approvals, stock, deliveries, cold chain, and where replacement
+> stock should come from."*
+> → 4+ live tool calls in one turn; structured report with headings, bullets, and bolded figures.
+
+> *"We are short on SKU 4011. Where should the replacement stock come from?"*
+> → ranks branches/DC/suppliers, names the winner and why, flags a purchase order for the rest.
+
+Fire a full agentic cascade directly (`live_required` — 503s rather than faking success):
+
+```bash
+curl -X POST http://localhost:8000/demo/procurement/agentic
+```
+
+Verify any chat answer is genuinely live from the response headers:
+`x-shelfwise-provider: vllm_mi300x` · `x-shelfwise-model: google/gemma-4-E4B-it` ·
+`x-shelfwise-answer-source: model`.
+
+In the UI: the approval queue drives HITL approve/reject; the Operations workspace exposes the
+four "(agentic) — click to run live" rows and the seeded recall/exception drills.
+
+## Testing
+
+```powershell
+$env:PYTHONPATH="src"
+python -m ruff check src tests scripts
+python -m pytest -q
+```
+
+The committed capability manifest ([`capabilities/manifest.json`](capabilities/manifest.json))
+is a machine-enforced inventory of routes, tools, and tests — CI fails when reality drifts from
+it. Regenerate after any route/tool change with
+`python scripts/compare_capability_manifests.py --write`.
+
+A 15-minute full-system soak against the live endpoint:
+
+```powershell
+python -m shelfwise_eval.full_system --duration-seconds 900 --live-required --output-dir reports/soak
+```
 
 ## Test everything in one notebook (GPU / remote Jupyter)
 
@@ -79,6 +210,10 @@ actual port — and ends with one summary table so a failure anywhere is impossi
 optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
 endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
 fully offline/deterministic.
+
+## API Reference
+
+Interactive OpenAPI docs are served at `http://localhost:8000/docs` when the backend is running.
 
 Connected API endpoints:
 
@@ -159,14 +294,42 @@ Connected API endpoints:
 ./scripts/smoke.ps1
 ```
 
-## Demo
+## Demo & Evidence
 
-Use [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) for the local demo flow, judge story, and cloud proof checks.
+- [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) — demo flow, judge story, droplet restart runbook, and cloud proof checks.
+- [Submission evidence report](reports/SUBMISSION_EVIDENCE_REPORT.md) — measured behavior vs. configured behavior, honestly separated.
+- [Original retailer-problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md) — per-problem status; partial is never presented as solved.
+- [Soak receipts](reports/soak_15min_20260711T042648Z/summary.json) — the 15-minute live run's verdict, totals, and artifact hashes.
+- [Slide deck & cover image](submission/) — the hackathon submission assets.
 
-## Container
+## Deployment
 
 ```bash
 docker compose up --build
+```
+
+The production Nginx image proxies frontend and API traffic through one origin. With the supplied
+Compose mapping, open `http://<host>:5173`; judge browsers never call their own localhost. A custom
+backend can still be selected at build time with `VITE_API_BASE`.
+
+## Project Structure
+
+```
+src/
+  shelfwise_backend/           FastAPI app: cascades, HITL, chat, connectors, workers, security
+  shelfwise_inference/         OpenAI-compatible client, agent orchestrator, grounding checks
+  shelfwise_decision_science/  Reorder policy, forecasting, risk scoring, sourcing, simulation
+  shelfwise_contracts/         Money/evidence/decision/event contracts
+  shelfwise_data/              Seeded SA retail datasets + store intelligence
+  shelfwise_eval/              Eval gates, agent-role coverage, full-system world soak
+  shelfwise_benchmark/         Inference architecture benchmark harness
+  shelfwise_worldgen/          World simulation and scenario generation
+  shelfwise/training/          Gemma 4 multimodal LoRA training harness
+frontend/                      React/Vite chat-first operations console
+tests/                         400+ tests: contracts, cascades, security, agentic paths
+capabilities/                  Machine-verified capability manifest (CI-enforced)
+reports/                       Committed evidence: soak receipts, audits, evidence report
+data/datasets/                 CSV seed data (products, stock, sales, suppliers)
 ```
 
 ## Current Scope
@@ -401,6 +564,12 @@ Outputs land under `runs/gemma4-multimodal/` with timestamped checkpoints and re
 check validates dependencies and fixture generation, but only a generated live-model evaluation
 and serving probe can mark a deployment ready.
 
+## Contributing
+
+Issues and pull requests are welcome. Before submitting: run `python -m ruff check src tests
+scripts` and `python -m pytest -q`, regenerate the capability manifest if you changed routes or
+tools, and keep the README's Connected API endpoints list in sync (a test enforces it).
+
 ## License
 
-MIT
+[MIT](LICENSE)
