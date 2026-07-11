@@ -803,6 +803,8 @@ def _new_chat_response(
             tenant_id=ctx.tenant_id,
             correlation_id=correlation_id,
             live_required=body.live_required,
+            decisions=decision_store,
+            memory=learning_store,
         )
     except InferenceError as exc:
         raise HTTPException(status_code=503, detail="Live chat inference failed") from exc

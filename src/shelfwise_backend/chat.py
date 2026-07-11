@@ -1,15 +1,59 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterator
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from shelfwise_inference import InferenceError, OpenAICompatibleInferenceClient
+from shelfwise_inference.orchestration import (
+    AgentOrchestrationError,
+    AgentOrchestrator,
+    ExecutionMode,
+)
+from shelfwise_inference.tool_calling import (
+    ToolCallingError,
+    assert_conclusion_grounded_in_tool_results,
+)
 
 from .product_catalog import search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
+from .tools.mcp_surface import AuditLog, build_platform_tools
+from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
+
+_CHAT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string", "minLength": 1, "maxLength": 3_000},
+    },
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+
+_CHAT_SYSTEM_PROMPT = (
+    "You are ShelfWise, an AI operations assistant for a real supermarket. Speak like a "
+    "knowledgeable colleague, not a database readout.\n\n"
+    "Format for readability: use short headings for multi-part answers, bullet or "
+    "numbered lists when there is more than one item, and **bold** for the one or two "
+    "figures that matter most. Keep single-fact answers to a short paragraph - only add "
+    "structure when there is genuinely more than one point to make. Never describe the "
+    "shape of tool_results/state_json to the user (no \"the tool result is `null`\", no "
+    "field names, no backticks around raw internal values, no mention of JSON) - speak in "
+    "plain retail-operations language.\n\n"
+    "You have real, live tools covering every part of the store - call the one that "
+    "matches the question before answering, never guess a number a tool could have given "
+    "you: get_stock (on-hand/on-order for a SKU), get_demand_forecast, get_expiry_risk, "
+    "get_reorder_policy and get_supplier_ranking (procurement/ordering), "
+    "get_cold_chain_status (refrigeration risk), check_price_integrity (till price vs "
+    "catalogue), simulate_markdown (what-if discount math), list_open_decisions and "
+    "explain_decision (approvals/HITL), and get_thresholds (learned policy memory). If "
+    "neither state_json nor your tools cover the question's specific subject, say plainly "
+    "that you don't have data on that exact subject, then offer what you do know (open "
+    "decisions, learned thresholds, recent state) instead of describing an empty result."
+)
 
 
 class ChatBody(BaseModel):
@@ -29,6 +73,9 @@ def stream_chat_reply(
     tenant_id: str = "default",
     correlation_id: str | None = None,
     live_required: bool = False,
+    decisions: Any = None,
+    memory: Any = None,
+    orchestrator_factory: Any = None,
 ) -> Iterator[str]:
     """Yield a short chat answer while keeping raw user text fenced as data."""
     answer, _meta = build_chat_reply_with_meta(
@@ -38,6 +85,9 @@ def stream_chat_reply(
         tenant_id=tenant_id,
         correlation_id=correlation_id,
         live_required=live_required,
+        decisions=decisions,
+        memory=memory,
+        orchestrator_factory=orchestrator_factory,
     )
     yield from _chunk_words(answer)
 
@@ -50,6 +100,9 @@ def build_chat_reply(
     tenant_id: str = "default",
     correlation_id: str | None = None,
     live_required: bool = False,
+    decisions: Any = None,
+    memory: Any = None,
+    orchestrator_factory: Any = None,
 ) -> str:
     """Build a chat answer from current backend state."""
     answer, _meta = build_chat_reply_with_meta(
@@ -59,6 +112,9 @@ def build_chat_reply(
         tenant_id=tenant_id,
         correlation_id=correlation_id,
         live_required=live_required,
+        decisions=decisions,
+        memory=memory,
+        orchestrator_factory=orchestrator_factory,
     )
     return answer
 
@@ -71,13 +127,21 @@ def build_chat_reply_with_meta(
     tenant_id: str = "default",
     correlation_id: str | None = None,
     live_required: bool = False,
+    decisions: Any = None,
+    memory: Any = None,
+    orchestrator_factory: Any = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Answer via the real product tools first, then the model (or offline fallback).
+    """Answer using a real agentic tool-calling loop when a decision/memory store is
+    available, falling back to a single grounded completion (or the offline reply)
+    otherwise.
 
-    Every answer is grounded in the product the question actually asks about - the
-    catalogue search tool runs on both the model and offline paths, and the metadata
-    reports which source answered and which tools ran, so an unattended harness can
-    prove what was exercised instead of guessing from answer text.
+    Passing `decisions`/`memory` (the live decision and learning stores) gives the model
+    the same read-only platform tools the production cascades use - stock, demand,
+    expiry, cold-chain, procurement/supplier, pricing, HITL, and learned thresholds - so
+    chat can genuinely answer questions about any part of the store, not just the product
+    the question happens to name. Every answer is grounded: any computed number a tool
+    call returns must actually be cited in the reply, or the run is rejected the same way
+    the agentic cascades are.
     """
     inference = client or OpenAICompatibleInferenceClient()
     subject, product, tool_calls = _tool_context(question)
@@ -104,6 +168,29 @@ def build_chat_reply_with_meta(
         f"</state_json>\n"
         f"<user_question>{spotlight(question, max_len=2_000)}</user_question>"
     )
+    if decisions is not None and memory is not None:
+        try:
+            answer, run_tool_calls = asyncio.run(
+                _run_agentic_chat(
+                    prompt=prompt,
+                    inference=inference,
+                    decisions=decisions,
+                    memory=memory,
+                    tenant_id=tenant_id,
+                    correlation_id=correlation_id,
+                    orchestrator_factory=orchestrator_factory,
+                )
+            )
+        except (AgentOrchestrationError, ToolCallingError) as exc:
+            if live_required:
+                raise InferenceError(f"live agentic chat failed: {exc}") from exc
+            return (
+                _offline_reply(question=question, state=state, subject=subject, product=product),
+                meta,
+            )
+        meta["answer_source"] = "model"
+        meta["tools_used"] = [call.name for call in run_tool_calls]
+        return answer, meta
     try:
         result = inference.complete(
             agent="executive",
@@ -143,6 +230,53 @@ def build_chat_reply_with_meta(
         )
     meta["answer_source"] = "model"
     return answer, meta
+
+
+async def _run_agentic_chat(
+    *,
+    prompt: str,
+    inference: OpenAICompatibleInferenceClient,
+    decisions: Any,
+    memory: Any,
+    tenant_id: str,
+    correlation_id: str | None,
+    orchestrator_factory: Any,
+) -> tuple[str, tuple[Any, ...]]:
+    """Run chat through the real platform-tool registry and return a grounded answer."""
+    tools = build_platform_tools(decisions=decisions, memory=memory, audit=AuditLog())
+    orchestrator: AgentOrchestrator = (
+        orchestrator_factory()
+        if orchestrator_factory is not None
+        else _default_chat_orchestrator(tools=tools, inference=inference)
+    )
+    run = await orchestrator.run(
+        role="chat",
+        system=_CHAT_SYSTEM_PROMPT,
+        user=prompt,
+        final_schema=_CHAT_SCHEMA,
+        final_schema_name="chat_answer",
+        correlation_id=correlation_id or f"chat_{uuid4().hex[:12]}",
+        tenant_id=tenant_id,
+        temperature=0.2,
+        max_tokens=900,
+    )
+    answer = str(run.answer["answer"]).strip()
+    assert_conclusion_grounded_in_tool_results(answer, run.tool_calls)
+    if not answer:
+        raise AgentOrchestrationError("agentic chat produced an empty answer")
+    return answer[:3_000], run.tool_calls
+
+
+def _default_chat_orchestrator(
+    *, tools: list[Any], inference: OpenAICompatibleInferenceClient
+) -> AgentOrchestrator:
+    architecture = architecture_from_inference_config(inference.config)
+    runtime = OpenAIModelRuntime(
+        architecture=architecture,
+        execution_mode=ExecutionMode.LIVE_REQUIRED,
+        client=inference,
+    )
+    return AgentOrchestrator(tools=tools, model_runtime=runtime)
 
 
 def _extract_product_query(question: str) -> str:

@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
 } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { applyTheme, currentTheme, type Theme } from './theme'
 
 // ---------------------------------------------------------------------------
@@ -1037,7 +1039,9 @@ function AssistantBubble({ text }: { text: string }) {
         <span className="avatar-mark" />
       </div>
       <div className="bubble assistant">
-        <p>{text}</p>
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        </div>
       </div>
     </div>
   )
