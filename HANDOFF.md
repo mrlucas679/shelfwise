@@ -1,6 +1,41 @@
-# HANDOFF — session state as of 2026-07-11 ~06:50 (local)
+# HANDOFF — session state as of 2026-07-11 ~06:53 (local)
 
-## Latest update — agentic cascades are now clickable in the UI (not just curl-testable)
+## Latest update — 15-min live soak test PASSED + a real chat bug found and fixed by screen-testing
+
+Ran the actual `shelfwise_eval.full_system` harness for 15 real minutes against the live
+droplet with `--live-required` (any offline chat fallback would hard-fail the whole run,
+unlike the old v2 marker this file already flagged as invalid). Result: **PASSED, zero
+failures.** 333 world cycles, 333/333 chat calls model-backed (0 offline, 0 errors), 4,618
+decisions all unique, 2,934 approvals / 56 rejections with 0 HITL mismatches, 34/34 expected
+learning movements landed. Artifact: `reports/soak_15min_20260711T042648Z/manifest.json`
+(also `.log` next to it). This is the strongest evidence yet that the chat-scaling and
+offline-fallback bugs fixed earlier this session hold up under sustained real load, not just
+in isolated tests.
+
+While screen-testing chat right after, found a real, user-visible bug: asking "deliveries
+issue" returned the literal string `The tool result for the subject "deliveries issue" is
+`null`.` - the live model dumping a raw null tool result instead of answering. Root cause:
+`_new_chat_response` in `app.py` only ever gave chat the product-catalog search result plus
+decisions/learning/traces - it had **zero visibility into delivery reconciliation, supplier
+cover, or FEFO batch data**, even though that exact data (`build_store_intelligence_demo()`
+from `shelfwise_data`) already powers the "Deliveries / To order / Sell first" sidebar tiles
+the user was looking at when they asked the question. Fixed two ways: (1) added
+`"store_intelligence": build_store_intelligence_demo()` to the chat state dict so real
+answers are possible, (2) hardened the chat system prompt in `chat.py` to explicitly forbid
+describing raw tool_results/state_json shape and require a natural-language answer, falling
+back to whatever real state exists rather than describing an empty result. Verified live -
+same question now returns "the order was for 50 units, but we only received 38... short 12
+units, and the supplier fill rate was 76%..." - both via curl and an actual browser
+round-trip, zero console errors. 408/408 tests pass, capability manifest regenerated. Commit
+`909f42e`.
+
+**This was found by actually using the product as a user would, not by reading code or
+running the harness** - a reminder that live click-testing catches gaps that pass every
+automated check (the harness above passed 100% right before this bug was found, because the
+harness's own chat questions are template-generated product questions that happen to always
+have a catalogue match).
+
+## Prior update — agentic cascades are now clickable in the UI (not just curl-testable)
 
 Found and closed a real gap: the 4 agentic routes below existed and worked, but were only
 listed in a read-only catalog in the Operations workspace - no way to see one run without a
