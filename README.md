@@ -1,14 +1,45 @@
 # ShelfWise
 
-AMD Developer Hackathon: ACT II project.
+**Agentic AI store operations, grounded in real math — built on AMD Instinct MI300X.**
 
-ShelfWise is an evidence-first operations brain for FMCG retail. The first demo slice
-runs a seeded South African supply-chain scenario:
+AMD Developer Hackathon ACT II · Track 3: Unicorn (Open Innovation).
 
-`scan -> inventory -> expiry risk -> demand -> opportunity -> simulation -> critic -> executive -> HITL`
+ShelfWise runs a supermarket's interlocking daily decisions — expiry markdowns, procurement
+and multi-source stock sourcing, till-price integrity, cold-chain response — through real
+Critic/Executive agent pairs powered by **google/gemma-4-E4B-it served on an AMD Instinct
+MI300X GPU via vLLM 0.23 (ROCm)**. Agents reason through a bounded tool-calling loop over
+11 read-only platform tools (stock, demand forecast, expiry risk, reorder policy, supplier
+ranking, stock sourcing, cold-chain risk, price integrity, markdown simulation, decisions,
+learned thresholds), and every recommendation lands as a pending decision that a human must
+approve before any write-back happens.
 
-The current implementation is a runnable MVP slice: a chat-first operations console backed by
-deterministic store-intelligence tools and human approval.
+`event -> agents (Gemma on MI300X) -> tools -> evidence -> critic -> executive -> HITL -> learning`
+
+**The grounding guarantee:** a final agent answer must cite the numbers its tools actually
+computed. An answer citing a figure no tool produced is rejected and re-run
+(`assert_conclusion_grounded_in_tool_results`), never shipped. The model uses tools as its
+calculator; it cannot invent figures.
+
+Chat is the front door: a genuinely agentic assistant sharing the same tool registry and
+grounding guarantees as the automated cascades, with multi-user/multi-conversation identity,
+tenant isolation enforced server-side, and structured markdown answers.
+
+## Built on AMD (compute-usage proof)
+
+- All agent reasoning — the four agentic cascades (`POST /demo/{golden,procurement,sales,cold-chain}/agentic`)
+  and the agentic `/chat` — executes on an **AMD Instinct MI300X** droplet (AMD Developer
+  Cloud) running **vLLM 0.23 on ROCm** with native Gemma tool calling
+  (`--enable-auto-tool-choice --tool-call-parser gemma4`).
+- Live responses carry verifiable headers: `x-shelfwise-provider: vllm_mi300x`,
+  `x-shelfwise-model: google/gemma-4-E4B-it`, `x-shelfwise-answer-source: model`.
+- A 15-minute continuous soak against the live MI300X endpoint (artifacts under `reports/`)
+  finished with **333/333 chat calls genuinely model-backed (zero offline fallbacks, zero
+  errors), 4,618 decisions with zero ID collisions, 2,990 HITL approve/reject cycles with
+  zero mismatches** — the harness hard-fails a `live_required` run on any offline answer.
+- Agentic endpoints default to `live_required`: if the MI300X endpoint is unreachable they
+  return 503 instead of silently faking success.
+
+Submission assets (slide deck PDF and cover image) are in [`submission/`](submission/).
 
 ## Quick Start
 
@@ -35,11 +66,11 @@ Then open the app:
 ## Test everything in one notebook (GPU / remote Jupyter)
 
 [`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
-is a self-contained test harness â€” clone the repo, open the notebook, **Run All**, done. No
+is a self-contained test harness — clone the repo, open the notebook, **Run All**, done. No
 extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
 already in this repo. It installs the project, runs lint, the full test suite, the golden-
 scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
-actual port â€” and ends with one summary table so a failure anywhere is impossible to miss. An
+actual port — and ends with one summary table so a failure anywhere is impossible to miss. An
 optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
 endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
 fully offline/deterministic.
@@ -165,7 +196,19 @@ Built now:
 - Voice and scan backend routes with review-required candidates and upload sniffing.
 - Security gateway for prompt fencing, rate limiting, API-key/JWT role gates, and app-level request
   body limits.
-- Offline-safe OpenAI-compatible inference gateway for Fireworks/vLLM.
+- Offline-safe OpenAI-compatible inference gateway for vLLM (any OpenAI-compatible endpoint works).
+- Four genuinely agentic cascades (golden, procurement, sales, cold-chain) running Critic/Executive
+  verdicts through a real Gemma tool-calling loop on MI300X, `live_required` by default, clickable
+  from the Operations workspace.
+- Enforced calculator grounding: `assert_conclusion_grounded_in_tool_results` rejects any agent
+  conclusion that does not cite the real numbers its own tool calls returned.
+- Agentic chat over the full platform-tool registry with multi-user conversation identity,
+  idempotent replay, server-side tenant isolation, and structured markdown rendering.
+- Multi-source stock sourcing decision (`plan_stock_sourcing` + `get_stock_sourcing_options` tool):
+  ranks branches/DC/suppliers by availability, distance, and lead time, explains the winner, and
+  recommends a purchase order when nothing can cover the shortage.
+- Receipt-driven full-system world simulation harness (`python -m shelfwise_eval.full_system`) with
+  committed 15-minute live soak artifacts under `reports/`.
 - React/Vite chat-first ops console with bounded attention sidebar, product/workflow workspaces,
   selectable product cards with FEFO lot drill-down, one executive answer, numeric proof rail,
   compact agent chain, drill-down evidence, decision log, inference routing, learning note, and
@@ -176,21 +219,27 @@ Built now:
 - GitHub Actions CI for backend lint/tests, ShelfWise eval, backend smoke, frontend build, and Compose
   validation.
 
-Next:
+Next (honest roadmap, not yet built):
 
-- Live provider credential test against Fireworks and AMD Developer Cloud MI300X/vLLM.
-- Docker build/run verification after Docker Desktop starts.
-- Demo recording and public URL.
+- Deploy a genuine second model endpoint so `dual_model_configured` flips true in production,
+  not just in tested routing code.
+- Concurrent 1/8/32-user MI300X inference benchmark with ROCm/vLLM resource telemetry.
+- Live multi-branch inventory feeds behind the sourcing decision (the decision logic is general
+  and unit-tested; today's demo network is seeded fixture data).
+- Batch/lot-level expiry tracking and fleet-scale (500k+ SKU) scoring.
 
 ## Inference Strategy
 
-ShelfWise keeps one OpenAI-compatible inference contract and uses both AMD program benefits:
-
-- **Fireworks AI:** fastest managed endpoint for development and public-demo reliability.
-- **AMD Developer Cloud:** direct MI300X/ROCm/vLLM endpoint for the "built on AMD" proof and benchmark.
+ShelfWise keeps one OpenAI-compatible inference contract. **The submission runs exclusively on
+the AMD Developer Cloud: a direct MI300X/ROCm/vLLM endpoint serving google/gemma-4-E4B-it.**
+The contract also accepts any other OpenAI-compatible endpoint (e.g. Fireworks) unchanged, but
+no other provider was used for this submission.
 
 Routine agents can use a smaller model. Critic, Executive, and Orchestrator are routed to the stronger
 model tier because they review evidence, catch contradictions, and make the final recommendation.
+Both tiers currently point at the same MI300X endpoint; the routing layer (`base_url_for_agent`/
+`api_key_for_agent`, `dual_model_configured`) is built and tested, so a second endpoint is a
+config change, not a code change.
 
 ### AMD Developer Cloud / vLLM preflight
 
