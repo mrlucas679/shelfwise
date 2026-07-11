@@ -1,6 +1,48 @@
-# HANDOFF — session state as of 2026-07-11 ~07:20 (local)
+# HANDOFF — session state as of 2026-07-11 ~07:42 (local)
 
-## Latest update — chat is now genuinely agentic across the whole store + markdown formatting
+## Latest update — real multi-source stock sourcing decision (not a bare transfer number)
+
+User's specific complaint, verbatim: chat was recommending "transfer 18 units now" with
+no logic behind *where* that stock comes from. Correct - `plan_supplier_cover` (the old
+function backing this) took a single caller-supplied `transfer_available_units` number
+and just did `min(gap, that_number)`; there was never any real sourcing comparison.
+
+Added `plan_stock_sourcing` (`src/shelfwise_decision_science/sourcing.py`, new, tested):
+given a shortage and a set of candidate sources (nearby branches, the regional
+distribution centre, approved suppliers), it filters to sources with any stock, ranks by
+lead time then distance then cost, selects the best, and explains *why* in the
+conclusion text (e.g. "chosen over branch store_09_midrand (4.00h away) for a faster
+delivery"). If nothing has stock, it recommends a purchase order with a stated reason
+instead of a transfer. If the best source only partially covers the shortage, it says so
+and recommends a PO for the remainder rather than silently under-covering it. 7 new unit
+tests cover the ranking, tie-break, partial-cover, and no-source-available paths.
+
+Wired in two places: (1) a new read-only platform tool `get_stock_sourcing_options` so
+live chat can call it for any SKU/shortage - chat's system prompt now explicitly forbids
+recommending a stock transfer without calling this first; (2) an additive
+`"stock_sourcing"` field in `build_store_intelligence_demo()` so the same reasoning
+grounds answers even without a live tool call (existing `supplier_cover` field is
+untouched, so nothing in the frontend UI card broke).
+
+**Verified live against the real model** - asked "we are short on SKU 4011, where should
+the replacement come from?": it named the specific branch (store_02_sandton), cited real
+distance/lead-time figures (5.00 km, 2.00 hours), explained why that branch beat the
+alternative, and correctly flagged a purchase order for the 12-unit uncovered remainder.
+Confirmed both via curl and an actual browser round-trip, zero console errors.
+
+415/415 tests pass, capability manifest regenerated, ruff clean. Commit `938c9e1`.
+Backend restarted (no `--reload`, same gotcha as always) to pick this up before
+verifying live.
+
+**Known scope limit, honest for the deck**: the branch/DC/supplier network (distances,
+lead times, stock levels) is deterministic seeded demo data for SKU 4011, same pattern as
+every other demo fixture in this codebase (delivery reconciliation, supplier ranking,
+etc.) - it is not a live multi-branch inventory feed. The *decision logic* is real and
+general (works for any candidate set you hand it, has its own unit tests independent of
+the demo data); the *data* behind today's demo is fixture data, same honesty bar as
+everything else already flagged in "Known honest gaps" below.
+
+## Prior update — chat is now genuinely agentic across the whole store + markdown formatting
 
 User's ask: chat needs to read cleanly (not dense paragraphs) AND be able to talk about
 "every little thing in our application" (stock, procurement, cold-chain, pricing,
