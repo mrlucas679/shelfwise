@@ -1,5 +1,27 @@
 # HANDOFF — session state as of 2026-07-11 ~07:42 (local)
 
+## Coordination note (2026-07-11 ~12:00) — judge-readiness pass on main, doc-only
+
+While the public-demo/dual-model branch (`codex/public-demo-dual-model-readiness`, PR #2)
+was in progress, a docs-only judge-readiness pass landed directly on main. **No code files
+were touched** — nothing in `src/`, `frontend/src/`, `tests/`, or `capabilities/` changed,
+so PR #2 should merge without conflicts. What landed on main:
+
+- `README.md`: rewrote the stale top section (now leads with the agentic MI300X system and
+  an explicit "Built on AMD" proof section), fixed em-dash mojibake that rendered as garbage
+  on GitHub, corrected Inference Strategy to state only MI300X/vLLM was used, refreshed
+  Current Scope/Next lists. The `Connected API endpoints:` list and `## Smoke` heading are
+  untouched (test contract).
+- `DEMO_RUNBOOK.md`: Three-Minute Story now matches the recorded demo; Cloud Proof section
+  now documents the real MI300X-only deployment and droplet restart runbook.
+- `reports/soak_15min_20260711T042648Z/`: committed the compact soak receipts (summary,
+  feature receipts, chat samples, cycles) that the README cites.
+- `reports/SUBMISSION_EVIDENCE_REPORT.md` + `reports/ORIGINAL_PROBLEM_COVERAGE.md`:
+  committed (README linked them but they were untracked = dead links).
+- `submission/`: slide deck PDF + 16:9 cover image used in the hackathon form.
+- GitHub repo description + topics set (amd, mi300x, vllm, rocm, gemma, agentic-ai, ...).
+
+
 ## Latest update — real multi-source stock sourcing decision (not a bare transfer number)
 
 User's specific complaint, verbatim: chat was recommending "transfer 18 units now" with
