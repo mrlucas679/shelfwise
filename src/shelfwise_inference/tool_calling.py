@@ -93,6 +93,69 @@ class FinalAnswerValidationError(ToolCallingError):
     """Raised when the final model content is not schema-valid JSON."""
 
 
+class UngroundedAnswerError(ToolCallingError):
+    """Raised when a conclusion cites none of the real numbers its own tools returned.
+
+    "Never invent numbers" in a system prompt is a request, not a guarantee - a model can
+    call the calculator tool and then still write a conclusion that doesn't actually cite
+    what it computed (either ignoring the result or restating it vaguely). This is the
+    enforced check: if a tool returned a salient number, that number - not a paraphrase -
+    must appear in the final conclusion text, or the answer is rejected.
+    """
+
+
+def extract_salient_numbers(value: Any) -> list[str]:
+    """Collect numeric-looking leaf values worth requiring a citation for.
+
+    Skips small integers (counts, flags, short IDs) that are too generic to prove a
+    conclusion is actually grounded in this specific tool result rather than a lucky guess.
+    """
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+        elif isinstance(node, bool):
+            return
+        elif isinstance(node, (int, float)):
+            if abs(node) >= 10 or (isinstance(node, float) and node != int(node)):
+                found.append(str(node))
+        elif isinstance(node, str):
+            try:
+                parsed = float(node)
+            except ValueError:
+                return
+            if abs(parsed) >= 10 or parsed != int(parsed):
+                found.append(node)
+
+    walk(value)
+    return found
+
+
+def assert_conclusion_grounded_in_tool_results(
+    conclusion: str,
+    tool_executions: Sequence[Any],
+) -> None:
+    """Require the conclusion to cite at least one real number from every tool call.
+
+    Raises UngroundedAnswerError naming the first tool whose result went uncited.
+    """
+    for execution in tool_executions:
+        numbers = extract_salient_numbers(execution.result)
+        if not numbers:
+            continue
+        if not any(number in conclusion for number in numbers):
+            raise UngroundedAnswerError(
+                f"conclusion never cites any value from {execution.name}'s result "
+                f"(expected one of {numbers[:5]}) - answer may be ungrounded, not "
+                "calculator-backed"
+            )
+
+
 class PlatformToolLike(Protocol):
     """Structural view of the existing backend PlatformTool registry entry."""
 

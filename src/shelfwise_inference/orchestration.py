@@ -275,8 +275,11 @@ class AgentOrchestrator:
         """Run from a system/user prompt and return one validated agent answer."""
         guarded_system = (
             f"{system.rstrip()}\n\n"
-            "Use only the supplied tools. Never invent tool results. When evidence gathering "
-            "is complete, return only JSON matching the required response schema."
+            "Use only the supplied tools. Never invent tool results. The tools are your "
+            "calculator: any number in your conclusion must be one the tools actually "
+            "returned, not a guess or a paraphrase. Explain your reasoning by citing the "
+            "specific figures you computed, not just a bare verdict. When evidence "
+            "gathering is complete, return only JSON matching the required response schema."
         )
         messages = [
             {"role": "system", "content": guarded_system},

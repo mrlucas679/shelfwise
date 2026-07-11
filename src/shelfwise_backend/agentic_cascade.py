@@ -22,7 +22,10 @@ from shelfwise_inference.orchestration import (
     AgentRunResult,
     ExecutionMode,
 )
-from shelfwise_inference.tool_calling import ToolCallingError
+from shelfwise_inference.tool_calling import (
+    ToolCallingError,
+    assert_conclusion_grounded_in_tool_results,
+)
 
 from .cascade import _GOLDEN_SCENARIO_ID, _cause_id, _decision_id
 from .tools.mcp_surface import AuditLog, PlatformTool, build_platform_tools
@@ -111,14 +114,17 @@ async def _run(
             system=(
                 "You are the ShelfWise Critic agent. You must call the get_stock and "
                 "simulate_markdown tools to gather the real facts for this SKU before "
-                "deciding. Never invent numbers. A 20% markdown is only sound if the "
-                "simulated incremental profit is positive and the stock/expiry facts "
-                "support it."
+                "deciding. Never invent numbers - the tools are your calculator; use the "
+                "exact figures they return. A 20% markdown is only sound if the simulated "
+                "incremental profit is positive and the stock/expiry facts support it. Your "
+                "conclusion must explain the math: state the specific numbers you computed "
+                "(e.g. units on hand, incremental profit) and how they lead to your verdict, "
+                "not just the verdict itself."
             ),
             user=(
                 f"Evaluate whether a 20% markdown is justified for SKU {sku} ({product}). "
                 "Call get_stock, then call simulate_markdown with discount_pct=0.2, then "
-                "return your verdict."
+                "return your verdict, citing the exact numbers from those tool results."
             ),
             final_schema=_CRITIC_SCHEMA,
             final_schema_name="critic_verdict",
@@ -128,12 +134,17 @@ async def _run(
             require_tool_call_first=True,
         )
         critic_answer = critic_run.answer
+        assert_conclusion_grounded_in_tool_results(
+            str(critic_answer["conclusion"]), critic_run.tool_calls
+        )
         executive_run = await orchestrator.run(
             role="executive",
             system=(
                 "You are the ShelfWise Executive agent. The Critic has already evaluated "
-                "the markdown recommendation for this SKU. Decide whether to route the "
-                "action forward for manager approval (apply_markdown) or hold (monitor)."
+                "the markdown recommendation for this SKU, citing real computed figures. "
+                "Decide whether to route the action forward for manager approval "
+                "(apply_markdown) or hold (monitor). Reference the Critic's specific "
+                "numbers in your own conclusion rather than restating a generic summary."
             ),
             user=(
                 f"SKU {sku} ({product}). Critic verdict: passed={critic_answer['critic_passed']}, "

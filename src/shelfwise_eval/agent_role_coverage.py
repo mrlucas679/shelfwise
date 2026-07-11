@@ -17,7 +17,10 @@ from shelfwise_inference.orchestration import (
     AgentRunResult,
     ExecutionMode,
 )
-from shelfwise_inference.tool_calling import ToolCallingError
+from shelfwise_inference.tool_calling import (
+    ToolCallingError,
+    assert_conclusion_grounded_in_tool_results,
+)
 from shelfwise_memory import create_learning_store
 
 # The provider can, intermittently, stall producing the final JSON object even after a
@@ -218,6 +221,10 @@ async def _run_one(orchestrator: AgentOrchestrator, prompt: RolePrompt) -> RoleC
             tenant_id="sa_retail_demo",
             require_tool_call_first=prompt.expected_tool is not None,
         )
+        if isinstance(run_result.answer, dict):
+            assert_conclusion_grounded_in_tool_results(
+                str(run_result.answer.get("conclusion", "")), run_result.tool_calls
+            )
     except _ROLE_FAILURE_EXCEPTIONS as exc:
         return RoleCoverageResult(
             role=prompt.role,

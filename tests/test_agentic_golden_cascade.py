@@ -94,7 +94,10 @@ def _scripted_messages() -> list[dict[str, Any]]:
         _tool_call_message("call_2", "simulate_markdown", {"sku": "4011", "discount_pct": 0.2}),
         _final_message(
             {
-                "conclusion": "Simulated profit is positive and stock facts support a markdown.",
+                "conclusion": (
+                    "240 units on hand and a simulated incremental profit of R109.44 "
+                    "support a markdown."
+                ),
                 "confidence": 0.87,
                 "critic_passed": True,
                 "requires_human_review": True,
@@ -137,7 +140,7 @@ def test_agentic_golden_cascade_drives_real_tool_calls_and_produces_decision() -
     assert len(result["model_calls"]) == 4
     critic_evidence = next(e for e in result["evidence"] if e["agent"] == "critic")
     executive_evidence = next(e for e in result["evidence"] if e["agent"] == "executive")
-    assert "positive" in critic_evidence["conclusion"]
+    assert "109.44" in critic_evidence["conclusion"]
     assert executive_evidence["recommended_action"]["type"] == "apply_markdown"
 
     decision = result["decision"]
@@ -161,6 +164,38 @@ def test_agentic_golden_cascade_hard_fails_when_live_required_sees_offline_provi
         run_golden_cascade_via_agents(
             event=None,
             execution_mode=ExecutionMode.LIVE_REQUIRED,
+            decisions=decisions,
+            memory=memory,
+            orchestrator_factory=factory,
+        )
+
+
+def test_agentic_golden_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
+    """A model can call the real calculator tools and then still write a vague, ungrounded
+    conclusion instead of citing what it computed - that must be caught, not passed through.
+    """
+    tools, decisions, memory = _build_tools()
+    ungrounded_messages = [
+        _tool_call_message("call_1", "get_stock", {"sku": "4011"}),
+        _tool_call_message("call_2", "simulate_markdown", {"sku": "4011", "discount_pct": 0.2}),
+        _final_message(
+            {
+                "conclusion": "The numbers look good so a markdown makes sense here.",
+                "confidence": 0.87,
+                "critic_passed": True,
+                "requires_human_review": True,
+            }
+        ),
+    ]
+    runtime = _FakeRuntime(ungrounded_messages)
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    with pytest.raises(AgenticCascadeError, match="get_stock"):
+        run_golden_cascade_via_agents(
+            event=None,
+            execution_mode=ExecutionMode.OFFLINE_TEST,
             decisions=decisions,
             memory=memory,
             orchestrator_factory=factory,

@@ -14,8 +14,12 @@ from shelfwise_inference.tool_calling import (
     PlatformToolRegistry,
     ToolCall,
     ToolCallParseError,
+    ToolExecution,
     ToolPolicyError,
     ToolSchemaError,
+    UngroundedAnswerError,
+    assert_conclusion_grounded_in_tool_results,
+    extract_salient_numbers,
     parse_and_validate_json_answer,
     parse_tool_calls,
 )
@@ -293,3 +297,56 @@ def test_generic_client_submits_messages_tools_and_preserves_recorder(monkeypatc
     assert result.finish_reason == "tool_calls"
     assert result.input_tokens == 17
     assert recorded[0]["correlation_id"] == "corr-client"
+
+
+def _execution(name: str, result: Any) -> ToolExecution:
+    return ToolExecution(
+        call_id="call_1",
+        name=name,
+        arguments={},
+        result=result,
+        latency_ms=1,
+        correlation_id="corr-1",
+    )
+
+
+def test_extract_salient_numbers_skips_small_generic_integers() -> None:
+    payload = {
+        "sku": "4011",
+        "units": 3,
+        "incremental_profit": {"amount": "109.44", "minor_units": 10944},
+        "flag": True,
+        "risk": "0.37",
+    }
+
+    numbers = extract_salient_numbers(payload)
+
+    assert "4011" in numbers
+    assert "109.44" in numbers
+    assert "10944" in numbers
+    assert "0.37" in numbers
+    assert "3" not in numbers
+    assert not any(n == "True" or n == "1" for n in numbers)
+
+
+def test_assert_conclusion_grounded_passes_when_real_numbers_are_cited() -> None:
+    execution = _execution("simulate_markdown", {"incremental_profit": {"amount": "109.44"}})
+
+    assert_conclusion_grounded_in_tool_results(
+        "Incremental profit is R109.44, so the markdown is justified.", [execution]
+    )
+
+
+def test_assert_conclusion_grounded_rejects_vague_conclusion() -> None:
+    execution = _execution("simulate_markdown", {"incremental_profit": {"amount": "109.44"}})
+
+    with pytest.raises(UngroundedAnswerError, match="simulate_markdown"):
+        assert_conclusion_grounded_in_tool_results(
+            "The numbers look good so the markdown makes sense.", [execution]
+        )
+
+
+def test_assert_conclusion_grounded_ignores_tools_with_no_salient_numbers() -> None:
+    execution = _execution("list_open_decisions", {"decisions": []})
+
+    assert_conclusion_grounded_in_tool_results("There are no open decisions.", [execution])
