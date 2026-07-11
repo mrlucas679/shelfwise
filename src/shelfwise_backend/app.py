@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
@@ -70,7 +71,9 @@ from .cascade import (
     run_expiry_risk_check,
     run_golden_cascade,
     run_procurement_cascade,
+    run_recall_cascade,
     run_sales_cascade,
+    validate_recall_notice,
 )
 from .chat import ChatBody, build_chat_reply_with_meta
 from .chat_store import ChatConversationStore
@@ -623,6 +626,11 @@ def ingest_event(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if _auth_mode() == "jwt" and event.tenant_id != ctx.tenant_id:
         raise HTTPException(status_code=403, detail="Event tenant does not match token")
+    if event.type is EventType.RECALL_NOTICE:
+        try:
+            validate_recall_notice(event)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return _record_pipeline_event(event)
 
@@ -1250,6 +1258,35 @@ def demo_golden() -> dict[str, object]:
     return _record_cascade(run_golden_cascade())
 
 
+@app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
+def demo_recall() -> dict[str, object]:
+    """Drive a seeded supplier recall through the real event and HITL pipeline."""
+    suffix = uuid4().hex[:12]
+    event = Event(
+        id=f"evt_demo_recall_{suffix}",
+        type=EventType.RECALL_NOTICE,
+        ts=datetime.now(UTC),
+        actor="supplier_dairyco_quality",
+        tenant_id="sa_retail_demo",
+        correlation_id=f"demo_recall_{suffix}",
+        payload={
+            "recall_id": f"REC-DEMO-{suffix}",
+            "sku": "4011",
+            "lot_id": "AMASI-OLD-0707",
+            "units": 10,
+            "location": "store_12_soweto",
+            "reason": "possible cold-chain contamination",
+            "issued_by": "DairyCo Quality",
+            "issuer_verified": True,
+        },
+    )
+    outcome = _record_pipeline_event(event)
+    cascade = outcome.get("cascade")
+    if not isinstance(cascade, dict):
+        raise HTTPException(status_code=500, detail="Recall demo did not produce a decision")
+    return cascade
+
+
 @app.get("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
 def demo_golden_get() -> dict[str, object]:
     return _preview_demo_cascade(run_golden_cascade())
@@ -1781,6 +1818,10 @@ def _memory_evidence_refs(decision_id: str, decision: dict[str, Any]) -> tuple[s
 
 def _cascade_for_event(event: Event) -> dict[str, Any] | None:
     sku = str(event.payload.get("sku", ""))
+    if event.type is EventType.RECALL_NOTICE:
+        result = run_recall_cascade(event)
+        _attach_event_causality(result, event)
+        return _record_cascade(result)
     if event.type is EventType.SCAN and sku == "4011":
         result = run_golden_cascade(event)
         _attach_event_causality(result, event)
