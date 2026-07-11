@@ -1,14 +1,26 @@
 # ShelfWise
 
-AMD Developer Hackathon: ACT II project.
+**Agentic AI store operations, grounded in tested decision science and governed by a human.**
 
-ShelfWise is an evidence-first operations brain for FMCG retail. The first demo slice
-runs a seeded South African supply-chain scenario:
+AMD Developer Hackathon ACT II, Track 3: Unicorn (Open Innovation).
 
-`scan -> inventory -> expiry risk -> demand -> opportunity -> simulation -> critic -> executive -> HITL`
+ShelfWise turns retail events into evidence-backed expiry, procurement, price-integrity,
+cold-chain, and stock-sourcing decisions:
 
-The current implementation is a runnable MVP slice: a chat-first operations console backed by
-deterministic store-intelligence tools and human approval.
+`event -> agents -> tools -> evidence -> critic -> executive -> HITL -> learning`
+
+Gemma 4 agents call read-only platform tools for calculations and evidence. Conclusions that cite
+unsupported calculated values are rejected. Every operational action remains pending until a human
+approves it.
+
+The valid 15-minute cloud soak used `google/gemma-4-E4B-it` through vLLM on an AMD Instinct MI300X:
+333/333 chats were model-backed, with zero offline fallbacks and zero errors; 4,618 decisions had
+unique IDs and 2,990 HITL transitions had zero consistency mismatches. This was a sequential soak,
+not a concurrent inference-capacity result. See the
+[submission evidence report](reports/SUBMISSION_EVIDENCE_REPORT.md) for proof boundaries.
+
+Submission assets: [slide deck](submission/ShelfWise-Deck.pdf) and
+[cover image](submission/ShelfWise-Cover.png).
 
 ## Quick Start
 
@@ -35,11 +47,11 @@ Then open the app:
 ## Test everything in one notebook (GPU / remote Jupyter)
 
 [`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
-is a self-contained test harness â€” clone the repo, open the notebook, **Run All**, done. No
+is a self-contained test harness - clone the repo, open the notebook, **Run All**, done. No
 extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
 already in this repo. It installs the project, runs lint, the full test suite, the golden-
 scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
-actual port â€” and ends with one summary table so a failure anywhere is impossible to miss. An
+actual port - and ends with one summary table so a failure anywhere is impossible to miss. An
 optional last section exercises a real inference call through an AMD MI300X/vLLM (or Fireworks)
 endpoint if `LLM_BASE_URL`/`LLM_API_KEY` are set in the environment first; everything else runs
 fully offline/deterministic.
@@ -190,17 +202,15 @@ Next:
 
 ## Inference Strategy
 
-ShelfWise keeps one OpenAI-compatible inference contract and uses both AMD program benefits:
-
-- **Fireworks AI:** fastest managed endpoint for development and public-demo reliability.
-- **AMD Developer Cloud:** direct MI300X/ROCm/vLLM endpoint for the "built on AMD" proof and benchmark.
+ShelfWise keeps one OpenAI-compatible inference contract. The submission's live proof used an AMD
+Developer Cloud MI300X/ROCm/vLLM endpoint. Other OpenAI-compatible providers remain transport
+options, but they are not cited as AMD execution evidence.
 
 Routine agents can use a smaller model. Critic, Executive, and Orchestrator are routed to the stronger
 model tier because they review evidence, catch contradictions, and make the final recommendation.
 
 ### AMD Developer Cloud / vLLM preflight
 
-Before creating the MI300X droplet, the app is ready to accept an OpenAI-compatible vLLM endpoint.
 Configure routine and strong tiers independently. `LLM_BASE_URL`/`LLM_API_KEY` remain supported as
 single-endpoint fallbacks, but submission readiness requires distinct routine and strong model IDs.
 
