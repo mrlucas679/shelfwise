@@ -31,38 +31,58 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Open `http://127.0.0.1:5173`.
 
-## Three-Minute Story
+## Three-Minute Story (as recorded)
 
-1. Start on **Approval case**.
-2. Show the single executive recommendation: `Apply Markdown 20%`.
-3. Open **Show reasoning** to reveal the compact agent chain and one step detail.
-4. Approve the action. Point to the HITL-gated write-back task, threshold-learning message, and
-   decision log.
-5. Switch to **Critic rejection**.
-6. Show that the action is downgraded to `Monitor`, approval buttons are disabled, and the
-   decision log records `Rejected`.
-7. Open reasoning, select the Critic step, and show `critic_passed=False` plus the missing
-   backup-supplier source requirement.
-8. Point to inference routing: routine agents use the small tier; Critic, Executive, and
-   Orchestrator use the strong tier.
-9. Open the Products workspace and search `amasi`; show that product-scale lookup stays out of the
-   sidebar and returns the attention-ranked Amasi 2L record.
+1. Open the app; point at the top-right badge: `AMD vLLM  AMD Instinct MI300X · Live` -
+   every answer comes from a live model call to the MI300X endpoint.
+2. Ask chat one comprehensive question:
+   `Give me a full report: approvals, stock, deliveries, cold chain, and where replacement stock should come from.`
+   Narrate: behind the scenes it calls 4+ real tools in one turn (approvals, stock, delivery
+   reconciliation, sourcing) and can only cite numbers a tool actually returned - the grounding
+   check rejects anything else. The answer renders as structured markdown: headings, bullets,
+   bolded figures.
+3. Ask the sourcing question:
+   `We are short on SKU 4011. Where should the replacement stock come from?`
+   Narrate: it does not just say "transfer stock" - it ranks nearby branches, the regional DC,
+   and suppliers by availability, distance, and lead time, names the winner and why, and
+   recommends a purchase order for whatever the winner cannot cover.
+4. Open the approval queue and approve one pending decision. Narrate: nothing writes back
+   automatically - every recommendation waits for a human; full audit trail.
+5. (Optional) Operations workspace -> "Gated operational endpoints" -> click any row ending
+   "(agentic) - click to run live" to fire a real Critic/Executive Gemma cascade and watch the
+   live result replace the row detail.
+6. Close on the proof: a 15-minute live_required soak (receipts in `reports/`) finished
+   333/333 chat calls model-backed with zero offline fallbacks and zero HITL mismatches.
 
-## Cloud Proof
+## Cloud Proof (what the submission actually uses)
 
-Use the same OpenAI-compatible contract for Fireworks or AMD Developer Cloud/vLLM:
+The submission runs exclusively on an AMD Developer Cloud MI300X droplet serving
+`google/gemma-4-E4B-it` via vLLM 0.23 (ROCm) with native Gemma tool calling. The contract is
+OpenAI-compatible, so any such endpoint works, but no other provider was used.
+
+Droplet restart runbook (container and model weights persist across power cycles):
+
+```bash
+ssh root@<droplet-ip>
+docker start rocm
+docker exec rocm bash -c 'nohup vllm serve google/gemma-4-E4B-it --host 0.0.0.0 --port 8000   --enable-auto-tool-choice --tool-call-parser gemma4 > /tmp/vllm_serve.log 2>&1 &'
+# wait for warmup, then: curl http://<droplet-ip>:8000/v1/models
+```
+
+Local backend against the live endpoint (`.env` holds the real values, gitignored):
 
 ```powershell
-$env:LLM_BASE_URL="https://your-openai-compatible-base-url"
-$env:LLM_API_KEY="your-key"
-$env:LLM_ROUTINE_MODEL="your-routine-model"
-$env:LLM_STRONG_MODEL="your-strong-model"
+$env:LLM_BASE_URL="http://<droplet-ip>:8000"
+$env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
 Invoke-RestMethod http://127.0.0.1:8000/inference/config
 Invoke-RestMethod http://127.0.0.1:8000/inference/smoke
 ```
 
-For the hackathon recording, use Fireworks for reliability and AMD Developer Cloud/vLLM for the
-MI300X proof when credits are active.
+Verify any chat answer is genuinely live: response headers carry
+`x-shelfwise-provider: vllm_mi300x`, `x-shelfwise-model: google/gemma-4-E4B-it`, and
+`x-shelfwise-answer-source: model`. Agentic demo endpoints default to `live_required` and
+return 503 rather than fake an offline success.
 
 ## GPU Pod Access (notebooks.amd.com/hackathon)
 
