@@ -36,6 +36,7 @@ EVENT_TYPE_ROUTES: dict[EventType, EventTypeRoute] = {
         stored_only=True,
         reason="fulfilment fact retained until shipment reconciliation consumes it",
     ),
+    EventType.RECALL_NOTICE: EventTypeRoute(consumer="recall_quarantine_cascade"),
 }
 
 
@@ -200,6 +201,22 @@ class World:
                             "sku": "4011",
                             "ordered_units": 80,
                             "eta": (current + timedelta(days=2)).isoformat(),
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.RECALL_NOTICE,
+                        ts_base + timedelta(hours=7, minutes=15),
+                        EventSource.API,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "location": self.cfg.store_id,
+                            "recall_id": f"REC-PROBE-{current:%Y%m%d}",
+                            "sku": "4011",
+                            "lot_id": f"B-PROBE-{current:%Y%m%d}",
+                            "units": 10,
+                            "reason": "synthetic supplier recall drill",
+                            "issued_by": "DairyCo Quality",
                             "synthetic_probe": True,
                         },
                     ),
@@ -376,9 +393,7 @@ def span_event_stream(events: Sequence[Event], limit: int) -> list[Event]:
     for index, event in enumerate(rows):
         first_by_type.setdefault(event.type, index)
     if len(first_by_type) > limit:
-        raise ValueError(
-            f"limit {limit} cannot cover {len(first_by_type)} event types"
-        )
+        raise ValueError(f"limit {limit} cannot cover {len(first_by_type)} event types")
 
     selected = set(first_by_type.values())
     for slot in range(limit):

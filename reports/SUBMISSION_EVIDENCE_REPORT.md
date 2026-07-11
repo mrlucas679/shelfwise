@@ -109,6 +109,9 @@ the decision. This avoids one model call per SKU.
    supports independent endpoints/keys and submission readiness requires distinct model IDs.
 7. The capability CI job did not install FastAPI although its test collection imported the app. The
    workflow now installs the project with `.[dev]`.
+8. The original product had no recall event or quarantine workflow. Recall notices now fail closed
+   on missing safety facts, create lot-specific stop-sale/quarantine decisions, require HITL, and
+   participate in the world simulator and full-system receipt gate.
 
 ## Deployment Alternatives
 

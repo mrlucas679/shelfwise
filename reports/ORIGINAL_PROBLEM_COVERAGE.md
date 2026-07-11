@@ -12,7 +12,7 @@ status of partial is not presented as solved.
 | Supplier delays | Supplier cover, ranking, delivery reconciliation, procurement HITL | Partial | Partial deliveries, SLA history, substitution eligibility |
 | Cold-chain and outages | Temperature/outage risk, ZAR-at-risk, facilities review | Partial | Sensor coverage and produce-quality state |
 | Price and promotion pressure | Price-integrity checks, sales cascade, manager review | Partial | Promotion calendar, margin floor, promo-baseline split |
-| Shrink, returns, recalls, misplaced stock | Generic stock states and anomaly plumbing only | Missing | Dedicated events, quarantine/recall/transfer candidates, shelf/backroom/bin state |
+| Shrink, returns, recalls, misplaced stock | Recall notice event, lot-specific stop-sale/quarantine candidate, Critic evidence gate, HITL, write-back task, world-sim and UI drill; generic anomaly plumbing | Partial | Return/void/shrink events, transfer execution, and shelf/backroom/bin state |
 | Manager overload and accountability | Bounded attention UI, Critic, HITL, writeback tasks, learning, audit | Partial | Candidate deduplication, SLA aging, suppression receipts |
 | Affordability, regulatory, omnichannel | Connector and location foundations | Partial | Staple/regulatory tags and channel reservations/allocation |
 | Core cascade spine | Scan -> inventory -> expiry -> demand -> opportunity -> simulation -> critic -> executive -> HITL | Proven | Preserve this spine while adding candidate types |
@@ -22,4 +22,3 @@ status of partial is not presented as solved.
 The recorded demo should lead with the proven cascade, agentic tool use, Critic/HITL controls,
 learning, tenant isolation, and live sequential soak. It should not claim that recall/shrink,
 omnichannel allocation, or dual-model capacity are complete.
-

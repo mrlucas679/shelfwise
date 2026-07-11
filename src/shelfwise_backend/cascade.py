@@ -9,6 +9,7 @@ from shelfwise_contracts import (
     Decision,
     DecisionStatus,
     Event,
+    EventType,
     EvidenceObject,
     Money,
     RecommendedAction,
@@ -39,6 +40,7 @@ _GOLDEN_SCENARIO_ID = "stage4_loadshedding_x_payday_yoghurt"
 _PROCUREMENT_SCENARIO_ID = "procurement_reorder_supplier_cover"
 _SALES_SCENARIO_ID = "pos_sale_price_integrity"
 _COLD_CHAIN_SCENARIO_ID = "cold_chain_generator_failure_facilities_review"
+_RECALL_SCENARIO_ID = "supplier_lot_recall_quarantine"
 _CRITIC_REJECTION_SCENARIO_ID = "critic_rejects_unsupported_supplier_switch"
 
 
@@ -132,8 +134,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         EvidenceObject(
             agent=AgentName.INVENTORY,
             conclusion=(
-                f"{product} has {scenario.units_on_hand} units on hand "
-                f"at {scenario.location}."
+                f"{product} has {scenario.units_on_hand} units on hand at {scenario.location}."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -188,8 +189,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         EvidenceObject(
             agent=AgentName.OPPORTUNITY,
             conclusion=(
-                "A 20% markdown recovers more value than holding stock "
-                "through the outage window."
+                "A 20% markdown recovers more value than holding stock through the outage window."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -241,8 +241,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         EvidenceObject(
             agent=AgentName.CRITIC,
             conclusion=(
-                "Recommendation passes: it is sourced, math-backed, "
-                "and requires HITL approval."
+                "Recommendation passes: it is sourced, math-backed, and requires HITL approval."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -262,8 +261,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         EvidenceObject(
             agent=AgentName.EXECUTIVE,
             conclusion=(
-                f"Approve a 20% markdown for SKU {sku} now, then review "
-                "outcome after 24 hours."
+                f"Approve a 20% markdown for SKU {sku} now, then review outcome after 24 hours."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -1148,8 +1146,7 @@ def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
         action=routed_action,
         caused_by=(_cause_id(event, correlation_id),),
         summary=(
-            f"Pending facilities review for {asset_id}: {diagnosis} with "
-            f"{stock_at_risk} at risk."
+            f"Pending facilities review for {asset_id}: {diagnosis} with {stock_at_risk} at risk."
             if alert_is_actionable
             else f"Monitor {asset_id}; no measured cold-chain intervention required."
         ),
@@ -1196,6 +1193,153 @@ def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
     }
 
 
+def validate_recall_notice(event: Event) -> None:
+    """Reject incomplete safety notices before they enter the durable event log."""
+    if event.type is not EventType.RECALL_NOTICE:
+        raise ValueError("event must be a recall_notice")
+    required = ("recall_id", "sku", "lot_id", "reason", "issued_by")
+    missing = [key for key in required if not str(event.payload.get(key) or "").strip()]
+    if missing:
+        raise ValueError(f"recall_notice missing fields: {missing}")
+    for key in required:
+        if len(str(event.payload[key])) > 200:
+            raise ValueError(f"recall_notice {key} exceeds 200 characters")
+    units = _int_payload(event.payload, "units", 0)
+    if units <= 0:
+        raise ValueError("recall_notice units must be greater than zero")
+
+
+def run_recall_cascade(event: Event) -> dict[str, Any]:
+    """Create a sourced, high-risk lot quarantine candidate from a recall notice."""
+    validate_recall_notice(event)
+    payload = event.payload
+    recall_id = str(payload["recall_id"]).strip()
+    sku = str(payload["sku"]).strip()
+    lot_id = str(payload["lot_id"]).strip()
+    reason = str(payload["reason"]).strip()
+    issued_by = str(payload["issued_by"]).strip()
+    issuer_verified = payload.get("issuer_verified") is True
+    units = _int_payload(payload, "units", 0)
+    location = str(payload.get("location") or "all_locations").strip()
+    source = SourceRef.dataset("recall_notice", recall_id)
+    action = RecommendedAction(
+        "quarantine_lot",
+        {
+            "recall_id": recall_id,
+            "sku": sku,
+            "lot_id": lot_id,
+            "units": units,
+            "location": location,
+            "reason": reason,
+            "stop_sale": True,
+            "issuer_verified": issuer_verified,
+        },
+        RiskTier.HIGH,
+    )
+    evidence = [
+        EvidenceObject(
+            agent=AgentName.INVENTORY,
+            conclusion=(
+                f"Recall {recall_id} identifies {units} units of SKU {sku}, lot {lot_id}, "
+                f"for quarantine at {location}."
+            ),
+            supporting_data=[
+                _supporting_fact("recall_id", recall_id, str(source), "supplier_recall_notice"),
+                _supporting_fact("lot_id", lot_id, str(source), "supplier_recall_notice"),
+                _supporting_fact("units", units, str(source), "inventory_lot_match"),
+                _supporting_fact(
+                    "issued_by",
+                    issued_by,
+                    str(source),
+                    "verified_issuer" if issuer_verified else "unverified_notice_field",
+                ),
+            ],
+            confidence=Decimal("0.99"),
+            recommended_action=action,
+            sources=(source,),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.CRITIC,
+            conclusion=(
+                "Recall passes the quarantine gate: recall ID, SKU, lot, reason, and affected "
+                "quantity are present. Issuer identity is verified."
+                if issuer_verified
+                else "Recall passes the fail-safe quarantine gate, but the named issuer is not "
+                "verified; manager confirmation remains required."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "safety_gate_passed", True, "recall_gate", "required_fact_validation"
+                )
+            ],
+            confidence=Decimal("0.99"),
+            recommended_action=action,
+            sources=(source, SourceRef.tool("recall_gate")),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.EXECUTIVE,
+            conclusion=(
+                f"Stop sale and quarantine lot {lot_id}; manager approval is required before "
+                "the inventory write-back task is released."
+            ),
+            supporting_data=[
+                _supporting_fact("stop_sale", True, "recall_policy", "safety_first_policy")
+            ],
+            confidence=Decimal("0.99"),
+            recommended_action=action,
+            sources=(source, SourceRef.tool("recall_policy")),
+            requires_human_review=True,
+        ),
+    ]
+    decision = Decision(
+        id=_decision_id(event),
+        status=DecisionStatus.PENDING,
+        action=action,
+        caused_by=(event.id,),
+        summary=(
+            f"Pending safety approval: quarantine {units} units of SKU {sku}, lot {lot_id}, "
+            f"for recall {recall_id}."
+        ),
+    ).to_dict()
+    decision.update(
+        {
+            "tenant_id": event.tenant_id,
+            "scenario_id": _RECALL_SCENARIO_ID,
+            "role": "store_manager",
+            "critic_verdict": "approved",
+            "expected_outcome": {
+                "recall_id": recall_id,
+                "lot_id": lot_id,
+                "units_quarantined": units,
+                "stop_sale": True,
+                "issuer_verified": issuer_verified,
+                "incremental_profit_minor_units": 0,
+            },
+        }
+    )
+    return {
+        "correlation_id": event.correlation_id,
+        "scenario": _RECALL_SCENARIO_ID,
+        "evidence": [item.to_dict() for item in evidence],
+        "decision": decision,
+        "trace": [
+            TraceSpan(
+                name="policy.validate_recall_notice",
+                status="ok",
+                ms=0,
+                detail={"recall_id": recall_id, "lot_id": lot_id, "units": units},
+            ).to_dict()
+        ],
+        "inference": load_inference_config().to_public_dict(),
+        "learning": {
+            "status": "armed",
+            "message": "After approval, record quarantined units and recall completion time.",
+        },
+    }
+
+
 def run_critic_rejection_cascade() -> dict[str, Any]:
     """Run the planted thin-evidence case the Critic must reject."""
 
@@ -1220,9 +1364,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
     evidence.append(
         EvidenceObject(
             agent=AgentName.OPPORTUNITY,
-            conclusion=(
-                "Switch dairy supplier immediately because future delivery risk may rise."
-            ),
+            conclusion=("Switch dairy supplier immediately because future delivery risk may rise."),
             supporting_data=[
                 _supporting_fact(
                     "recent_delay",

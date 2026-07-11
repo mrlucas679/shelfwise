@@ -138,6 +138,7 @@ Connected API endpoints:
 - `POST http://localhost:8000/connectors/{system}/intake`
 - `POST http://localhost:8000/decisions/{decision_id}/approve`
 - `POST http://localhost:8000/decisions/{decision_id}/reject`
+- `POST http://localhost:8000/demo/recall`
 - `POST http://localhost:8000/ingest`
 - `POST http://localhost:8000/intelligence/deliveries/reconcile`
 - `POST http://localhost:8000/intelligence/outcomes/summarize`
@@ -183,6 +184,8 @@ Built now:
 - Golden cascade runner.
 - Visible Critic rejection cascade that downgrades an unsupported supplier-switch claim to monitor.
 - Procurement, sales, and cold-chain cascades with math-backed evidence and HITL policy.
+- Supplier recall notices routed through lot-specific stop-sale/quarantine evidence, Critic review,
+  HITL approval, and task-only write-back; the seeded drill is runnable from Operations.
 - FastAPI health and demo endpoints.
 - Event ingest, event log, trace log, detective root-cause, and worker processing endpoints.
 - Product attention and search-first catalogue endpoints that keep the sidebar bounded, use a

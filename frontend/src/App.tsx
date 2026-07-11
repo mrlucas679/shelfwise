@@ -572,6 +572,7 @@ function describeAction(action?: RecommendedAction): string {
   if (action.type === 'apply_markdown') return pct ? `Apply ${pct} markdown` : 'Apply markdown'
   if (action.type === 'monitor') return 'Monitor only'
   if (action.type === 'supplier_switch') return 'Switch supplier'
+  if (action.type === 'quarantine_lot') return 'Quarantine recalled lot'
   return formatLabel(action.type)
 }
 function firstActionEvidence(evidence?: EvidenceObject[], actionType?: string): EvidenceObject | undefined {
@@ -1149,6 +1150,7 @@ const GATED_ENDPOINTS = [
   { label: 'Trace detail', method: 'GET', path: '/trace/{correlation_id}', group: 'operations', detail: 'Parameterized trace detail from the trace registry.' },
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
   { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
+  { label: 'Recall quarantine drill', method: 'POST', path: '/demo/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
   { label: 'Golden demo (agentic)', method: 'POST', path: '/demo/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Procurement demo', method: 'GET/POST', path: '/demo/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
   { label: 'Procurement demo (agentic)', method: 'POST', path: '/demo/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
@@ -2658,17 +2660,18 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => {
             const isAgentic = item.path.endsWith('/agentic')
+            const isRunnable = isAgentic || item.path === '/demo/recall'
             const run = agenticRuns[item.path]
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
               <WorkspaceRow
                 key={item.path}
-                label={isAgentic ? `${item.label} - click to run live` : item.label}
+                label={isRunnable ? `${item.label} - click to run` : item.label}
                 meta={`${item.method} ${item.path}`}
-                detail={isAgentic ? (run?.detail ?? item.detail) : item.detail}
-                value={isAgentic ? (run?.state ?? 'gated') : routeAvailable(item.path) ? 'gated' : 'missing'}
-                tone={isAgentic ? runTone : routeAvailable(item.path) ? 'info' : 'warn'}
-                onSelect={isAgentic ? () => onRunAgentic(item.path) : undefined}
+                detail={isRunnable ? (run?.detail ?? item.detail) : item.detail}
+                value={isRunnable ? (run?.state ?? 'ready') : routeAvailable(item.path) ? 'gated' : 'missing'}
+                tone={isRunnable ? runTone : routeAvailable(item.path) ? 'info' : 'warn'}
+                onSelect={isRunnable ? () => onRunAgentic(item.path) : undefined}
               />
             )
           })}
@@ -3091,7 +3094,12 @@ function App() {
     if (agenticRuns[path]?.state === 'running') return
     setAgenticRuns((prev) => ({
       ...prev,
-      [path]: { state: 'running', detail: 'Calling the live Gemma tool-calling loop...' },
+      [path]: {
+        state: 'running',
+        detail: path.endsWith('/agentic')
+          ? 'Calling the live Gemma tool-calling loop...'
+          : 'Running the recall through event ingest, safety policy, and HITL...',
+      },
     }))
     const controller = new AbortController()
     fetchJson<JsonObject>(path, { method: 'POST' }, controller.signal)
@@ -3103,9 +3111,12 @@ function App() {
         const action = asObject(decision.action)
         const actionType = typeof action.type === 'string' ? action.type : 'unknown'
         const modelCalls = Array.isArray(payload.model_calls) ? payload.model_calls.length : 0
+        const callDetail = path.endsWith('/agentic')
+          ? ` (${modelCalls} real Gemma calls)`
+          : ' (deterministic safety gate)'
         const summary = conclusion
-          ? `${conclusion} -> ${actionType} (${modelCalls} real Gemma calls)`
-          : `Routed to ${actionType} (${modelCalls} real Gemma calls)`
+          ? `${conclusion} -> ${actionType}${callDetail}`
+          : `Routed to ${actionType}${callDetail}`
         setAgenticRuns((prev) => ({ ...prev, [path]: { state: 'ok', detail: summary } }))
       })
       .catch((err) => {

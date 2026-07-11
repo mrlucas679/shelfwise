@@ -41,6 +41,7 @@ SCENARIO_ROTATION = (
     "sales",
     "misprice",
     "cold_chain",
+    "recall_quarantine",
     "connector_duplicate_invalid",
     "multimodal_review",
     "auth_tenant_isolation",
@@ -69,6 +70,7 @@ REQUIRED_ROUTE_RECEIPTS = frozenset(
         "POST /demo/procurement",
         "POST /demo/sales",
         "POST /demo/cold-chain",
+        "POST /demo/recall",
         "POST /connectors/square/intake",
         "POST /connectors/shopify/intake",
         "POST /scan/barcode",
@@ -592,6 +594,20 @@ class _FullSystemDriver:
             bool(cold_chain),
             _cascade_detail(cold_chain),
             route="POST /demo/cold-chain",
+        )
+
+        recall = self._demo(
+            feature="recall_quarantine",
+            path="/demo/recall",
+            scenario="supplier_lot_recall_quarantine",
+            action="quarantine_lot",
+            statuses={"pending"},
+        )
+        self._feature(
+            "recall_quarantine",
+            bool(recall),
+            _cascade_detail(recall),
+            route="POST /demo/recall",
         )
 
     def _demo(
