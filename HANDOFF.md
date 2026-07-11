@@ -1,6 +1,35 @@
-# HANDOFF — session state as of 2026-07-11 ~05:50 (local)
+# HANDOFF — session state as of 2026-07-11 ~06:30 (local)
 
-## Latest update — enforced calculator-grounded reasoning across every agent
+## Latest update — 4 of 5 production cascades are now genuinely agentic
+
+User goal: "fix all if you can." Extended the proven golden-cascade pattern to procurement,
+sales, and cold-chain. All four now have a real Gemma tool-calling path, verified live:
+
+- `POST /demo/procurement/agentic` — Critic calls `get_reorder_policy` +
+  `get_supplier_ranking`, cites real reorder quantity (23.70 units) and measured supplier
+  choice; Executive routes reorder/monitor.
+- `POST /demo/sales/agentic` — Critic calls `check_price_integrity` against a deliberately
+  mismatched till price (20% over catalogue, outside the deterministic cascade's own 15%
+  tolerance); genuinely caught the exception (36.0 vs 30.00, delta 6.00) and routed to
+  manager review.
+- `POST /demo/cold-chain/agentic` — Critic calls `get_cold_chain_status` for a measured
+  refrigeration alert; routes dispatch/monitor based on the real measured risk figure.
+
+Each is additive - the original deterministic routes (`/demo/procurement`, `/demo/sales`,
+`/demo/cold-chain`) are unchanged and still work. Each new route defaults `live_required`
+so a broken endpoint 503s instead of silently faking success. 408/408 tests pass (12 new
+tests: 3 cascades x offline-success/live_required-hardfail/ungrounded-rejection).
+
+**Remaining deterministic-only**: the two smaller conditional checks
+(`run_catalog_price_check`, `run_expiry_risk_check` in `cascade.py` - narrower guardrails,
+not primary demo scenarios) were not converted. Diminishing returns given remaining time;
+flag if there's time left after recording.
+
+While building this, fixed a real precision bug in the calculator-grounding check below
+(it required citing bare echoed identifiers, e.g. a SKU digit, not just genuinely computed
+values) - see that section for detail.
+
+## Prior update — enforced calculator-grounded reasoning across every agent
 
 User's explicit requirement: agents must use tools as their calculator for any math, and
 must be able to genuinely explain the math (cite real figures), not just assert a verdict.
@@ -179,10 +208,11 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
 
 ## Known honest gaps (do not overclaim in the deck/video)
 
-- 4 of 5 production cascades (procurement/sales/cold-chain/price+expiry checks) remain
-  deterministic math + hand-authored evidence; only the golden cascade's Critic/Executive
-  run through real Gemma tool calling (`POST /demo/golden/agentic`, `live_required` default).
-  The 11-role coverage harness proves the mechanism for every role in eval mode.
+- UPDATE: golden, procurement, sales, and cold-chain cascades are now ALL genuinely
+  agentic (`/demo/{golden,procurement,sales,cold-chain}/agentic`, `live_required` default).
+  Only the two smaller conditional guardrail checks (`run_catalog_price_check`,
+  `run_expiry_risk_check` in `cascade.py`) remain deterministic-only. The original
+  deterministic routes are all still present and unchanged alongside the new agentic ones.
 - Training matrix: E2B/12B W7900 shakedown blocked (Jupyter portal down). Only E4B is live.
 - Benchmark architecture comparison (shared/replicated/per-agent/hybrid) is built + tested
   offline but has no real cloud measurements yet.
