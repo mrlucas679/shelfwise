@@ -64,8 +64,10 @@ class BenchmarkRunner:
         self.strict_preflight = strict_preflight
         self.environ = os.environ if environ is None else environ
         self.adapter = adapter or (ControlPlaneAdapter() if plan_only else VllmAdapter())
-        self.metrics_client = metrics_client if metrics_client is not None else (
-            None if plan_only else VllmMetricsClient()
+        self.metrics_client = (
+            metrics_client
+            if metrics_client is not None
+            else (None if plan_only else VllmMetricsClient())
         )
         self.host_sampler = host_sampler or HostResourceSampler()
         self.amd_smi_sampler = amd_smi_sampler or AmdSmiSampler()
@@ -210,8 +212,7 @@ class BenchmarkRunner:
                     workflow_index = counter
                     counter += 1
                 workflow_id = (
-                    f"{strategy.name}-{stage.name}-r{repeat}-"
-                    f"w{worker_index}-{workflow_index:06d}"
+                    f"{strategy.name}-{stage.name}-r{repeat}-w{worker_index}-{workflow_index:06d}"
                 )
                 execution = await self._execute_workflow(
                     run_id,
@@ -224,7 +225,9 @@ class BenchmarkRunner:
                 if collect:
                     completed.append(execution)
 
-        workers = [asyncio.create_task(worker(index)) for index in range(stage.workflow_concurrency)]
+        workers = [
+            asyncio.create_task(worker(index)) for index in range(stage.workflow_concurrency)
+        ]
         await asyncio.gather(*workers)
         if not self.plan_only:
             remaining = deadline - time.perf_counter()

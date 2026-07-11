@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 from collections import Counter, defaultdict
@@ -61,7 +62,9 @@ def summarize_workflow(
     resources = _resource_summary(telemetry, scope)
     expected_agents = {agent.name for agent in workflow.agents}
     completed_agents = {item.agent for item in requests if item.success}
-    completed = expected_agents == completed_agents and not any(not item.success for item in requests)
+    completed = expected_agents == completed_agents and not any(
+        not item.success for item in requests
+    )
     model_calls = len(model_requests)
     return WorkflowResult(
         run_id=run_id,
@@ -71,7 +74,9 @@ def summarize_workflow(
         repeat=repeat,
         workflow_id=workflow_id,
         agents=tuple(agent.name for agent in workflow.agents),
-        agent_order=tuple(agent.name for agent in sorted(workflow.agents, key=lambda item: item.order)),
+        agent_order=tuple(
+            agent.name for agent in sorted(workflow.agents, key=lambda item: item.order)
+        ),
         parallelism=parallelism_layout(workflow, stage.synchronize_all_agents),
         synchronized_all_agents=stage.synchronize_all_agents,
         concurrency=stage.workflow_concurrency,
@@ -191,7 +196,9 @@ def _comparison_from_measurements(
     resources = _resource_summary(telemetry, scope)
     quality_values = _values(model_requests, "quality_score")
     has_failures = any(not item.success for item in requests)
-    status = "control_plane_only" if not model_requests else "partial" if has_failures else "measured"
+    status = (
+        "control_plane_only" if not model_requests else "partial" if has_failures else "measured"
+    )
     return StrategyComparison(
         strategy=strategy,
         strategy_kind=strategy_kind,
@@ -210,7 +217,9 @@ def _comparison_from_measurements(
         p50_latency_ms=percentile(latencies, 0.50),
         p95_latency_ms=percentile(latencies, 0.95),
         p99_latency_ms=percentile(latencies, 0.99),
-        request_rps=None if not model_requests else len(model_requests) / max(elapsed_seconds, 0.000001),
+        request_rps=None
+        if not model_requests
+        else len(model_requests) / max(elapsed_seconds, 0.000001),
         workflow_rps=completed / max(elapsed_seconds, 0.000001),
         quality_score=_mean(quality_values),
         gpu_util_avg_pct=resources["gpu_avg"],
@@ -277,7 +286,8 @@ def _attach_shared_deltas(
     shared = {
         item.stage: item
         for item in comparisons
-        if item.strategy_kind == StrategyKind.SHARED.value and item.measurement_status != "unavailable"
+        if item.strategy_kind == StrategyKind.SHARED.value
+        and item.measurement_status != "unavailable"
     }
     for item in comparisons:
         baseline = shared.get(item.stage)
@@ -345,14 +355,15 @@ def _idle_time_ms(telemetry: list[TelemetrySample]) -> float | None:
     interval_count = 0
     for timestamps in by_repeat.values():
         ordered = sorted(timestamps)
-        for current, following in zip(ordered, ordered[1:], strict=False):
+        for current, following in itertools.pairwise(ordered):
             group = timestamps[current]
             if any(item.queue_length is None or item.running_requests is None for item in group):
                 continue
             interval_count += 1
-            if sum(item.queue_length or 0 for item in group) == 0 and sum(
-                item.running_requests or 0 for item in group
-            ) == 0:
+            if (
+                sum(item.queue_length or 0 for item in group) == 0
+                and sum(item.running_requests or 0 for item in group) == 0
+            ):
                 delta = datetime.fromisoformat(following) - datetime.fromisoformat(current)
                 total_ms += delta.total_seconds() * 1000
     return total_ms if interval_count else None

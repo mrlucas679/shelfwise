@@ -1,0 +1,16 @@
+{
+  "artifact_dir": "data\\harness_runs\\full_capacity_15min_v2",
+  "chat": {
+    "calls": 51,
+    "errors": 0,
+    "model_answers": 2,
+    "offline_answers": 49
+  },
+  "failures": [
+    "live_model_answer_mismatch:model=2:calls=51",
+    "live_offline_answers:49"
+  ],
+  "original_exit_code": 0,
+  "passed": false,
+  "validated_exit_code": 1
+}

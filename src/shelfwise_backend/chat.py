@@ -16,6 +16,9 @@ class ChatBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=2_000)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    live_required: bool = False
 
 
 def stream_chat_reply(
@@ -25,6 +28,7 @@ def stream_chat_reply(
     client: OpenAICompatibleInferenceClient | None = None,
     tenant_id: str = "default",
     correlation_id: str | None = None,
+    live_required: bool = False,
 ) -> Iterator[str]:
     """Yield a short chat answer while keeping raw user text fenced as data."""
     answer, _meta = build_chat_reply_with_meta(
@@ -33,6 +37,7 @@ def stream_chat_reply(
         client=client,
         tenant_id=tenant_id,
         correlation_id=correlation_id,
+        live_required=live_required,
     )
     yield from _chunk_words(answer)
 
@@ -44,6 +49,7 @@ def build_chat_reply(
     client: OpenAICompatibleInferenceClient | None = None,
     tenant_id: str = "default",
     correlation_id: str | None = None,
+    live_required: bool = False,
 ) -> str:
     """Build a chat answer from current backend state."""
     answer, _meta = build_chat_reply_with_meta(
@@ -52,6 +58,7 @@ def build_chat_reply(
         client=client,
         tenant_id=tenant_id,
         correlation_id=correlation_id,
+        live_required=live_required,
     )
     return answer
 
@@ -63,6 +70,7 @@ def build_chat_reply_with_meta(
     client: OpenAICompatibleInferenceClient | None = None,
     tenant_id: str = "default",
     correlation_id: str | None = None,
+    live_required: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Answer via the real product tools first, then the model (or offline fallback).
 
@@ -83,6 +91,8 @@ def build_chat_reply_with_meta(
     state = dict(state)
     state["tool_results"] = {"catalog_search": product, "subject": subject}
     if not inference.config.api_key_present:
+        if live_required:
+            raise InferenceError("live chat requires configured inference credentials")
         return (
             _offline_reply(question=question, state=state, subject=subject, product=product),
             meta,
@@ -104,12 +114,18 @@ def build_chat_reply_with_meta(
             correlation_id=correlation_id,
         )
     except InferenceError:
+        if live_required:
+            raise
         return (
             _offline_reply(question=question, state=state, subject=subject, product=product),
             meta,
         )
+    if live_required and not result.used_network:
+        raise InferenceError("live chat rejected a non-network inference result")
     answer = result.content.strip()[:2_000]
     if not answer:
+        if live_required:
+            raise InferenceError("live chat received an empty inference result")
         return (
             _offline_reply(question=question, state=state, subject=subject, product=product),
             meta,
@@ -170,9 +186,7 @@ def _offline_reply(
         )
     decisions = state.get("decisions") if isinstance(state.get("decisions"), list) else []
     open_decisions = [
-        item
-        for item in decisions
-        if isinstance(item, dict) and item.get("status") == "pending"
+        item for item in decisions if isinstance(item, dict) and item.get("status") == "pending"
     ]
     latest = open_decisions[0] if open_decisions else (decisions[0] if decisions else {})
     action = latest.get("action") if isinstance(latest.get("action"), dict) else {}

@@ -223,7 +223,11 @@ def _endpoint_pool(raw: Any, strategy: str, route: str) -> tuple[str, ...]:
     """Normalize a route value to a non-empty endpoint-name tuple."""
 
     values = [raw] if isinstance(raw, str) else raw
-    if not isinstance(values, list) or not values or not all(isinstance(item, str) for item in values):
+    if (
+        not isinstance(values, list)
+        or not values
+        or not all(isinstance(item, str) for item in values)
+    ):
         raise ValueError(f"strategy {strategy} route {route} must name one or more endpoints")
     return tuple(values)
 

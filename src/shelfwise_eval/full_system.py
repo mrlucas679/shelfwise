@@ -235,7 +235,10 @@ def audit_full_system_integrity(
     feature_receipts: Sequence[FeatureReceipt],
     route_receipts: Sequence[RouteReceipt],
     live_required: bool,
+    chat_calls: int,
     chat_model_answers: int,
+    chat_offline_answers: int = 0,
+    chat_errors: int = 0,
 ) -> list[str]:
     """Return stable failure codes for every non-negotiable harness invariant."""
     failures: list[str] = []
@@ -286,8 +289,17 @@ def audit_full_system_integrity(
                 f"failed_route_receipt:{route}:status={rows[-1].status_code}"
             )
 
-    if live_required and chat_model_answers <= 0:
-        failures.append("live_model_answers_zero")
+    if live_required:
+        if chat_calls <= 0:
+            failures.append("live_chat_calls_zero")
+        if chat_model_answers != chat_calls:
+            failures.append(
+                f"live_model_answer_mismatch:model={chat_model_answers}:calls={chat_calls}"
+            )
+        if chat_offline_answers:
+            failures.append(f"live_offline_answers:{chat_offline_answers}")
+        if chat_errors:
+            failures.append(f"live_chat_errors:{chat_errors}")
     return sorted(set(failures))
 
 
@@ -1097,7 +1109,10 @@ class _FullSystemDriver:
         before = {run.id for run in self.runtime.model_run_registry.list()}
         started = time.monotonic()
         response = self._request(
-            "chat_inference", "POST", "/chat", json={"question": question}
+            "chat_inference",
+            "POST",
+            "/chat",
+            json={"question": question, "live_required": self.config.live_required},
         )
         latency_ms = round((time.monotonic() - started) * 1_000, 1)
         after = [run for run in self.runtime.model_run_registry.list() if run.id not in before]
@@ -1129,6 +1144,13 @@ class _FullSystemDriver:
             self.totals["chat_calls"] > 0
             and self.totals["chat_errors"] == 0
             and runs.status_code == 200
+            and (
+                not self.config.live_required
+                or (
+                    self.totals["chat_model_answers"] == self.totals["chat_calls"]
+                    and self.totals["chat_offline_answers"] == 0
+                )
+            )
         )
         self._feature(
             "chat_inference",
@@ -1258,7 +1280,10 @@ class _FullSystemDriver:
             feature_receipts=self.features,
             route_receipts=self.routes,
             live_required=self.config.live_required,
+            chat_calls=self.totals["chat_calls"],
             chat_model_answers=self.totals["chat_model_answers"],
+            chat_offline_answers=self.totals["chat_offline_answers"],
+            chat_errors=self.totals["chat_errors"],
         )
         failures = tuple(sorted(set((*self.internal_failures, *audited))))
         return FullSystemReport(

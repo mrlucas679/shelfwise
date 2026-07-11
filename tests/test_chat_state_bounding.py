@@ -2,17 +2,21 @@
 145-cycle live full-system run: decisions and learning events grew without bound as the
 store accumulated history, eventually pushing prompt latency past LLM_TIMEOUT_SECONDS and
 silently falling back to the offline reply for the rest of the run (only 2 of 49 chat
-calls got a real model answer). Pending decisions must never be dropped - only resolved
-history and learning events get windowed.
+calls got a real model answer). The decision store remains complete, while prompt context
+uses a bounded recent window plus aggregate counts.
 """
 
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 from shelfwise_backend.app import (
     _CHAT_LEARNING_EVENT_LIMIT,
+    _CHAT_PENDING_DECISION_LIMIT,
     _CHAT_RESOLVED_DECISION_LIMIT,
     _bounded_chat_decisions,
     _bounded_recent,
+    app,
 )
 
 
@@ -25,14 +29,17 @@ def _decision(idx: int, *, status: str) -> dict[str, object]:
     }
 
 
-def test_bounded_chat_decisions_keeps_every_pending_decision() -> None:
+def test_bounded_chat_decisions_windows_pending_queue_by_recency() -> None:
     decisions = [_decision(i, status="pending") for i in range(50)]
     decisions += [_decision(i, status="approved") for i in range(50, 60)]
 
     bounded = _bounded_chat_decisions(decisions)
 
     pending_ids = {item["id"] for item in bounded if item["status"] == "pending"}
-    assert pending_ids == {f"dec_{i}" for i in range(50)}
+    assert len(pending_ids) == _CHAT_PENDING_DECISION_LIMIT
+    assert pending_ids == {
+        f"dec_{i}" for i in range(50 - _CHAT_PENDING_DECISION_LIMIT, 50)
+    }
 
 
 def test_bounded_chat_decisions_windows_resolved_history_by_recency() -> None:
@@ -62,3 +69,16 @@ def test_bounded_recent_caps_and_sorts_learning_events() -> None:
 
     assert len(bounded) == _CHAT_LEARNING_EVENT_LIMIT
     assert bounded[0]["id"] == f"evt_{_CHAT_LEARNING_EVENT_LIMIT + 9}"
+
+
+def test_live_required_chat_rejects_offline_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    response = TestClient(app).post(
+        "/chat",
+        json={"question": "What needs attention?", "live_required": True},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Live chat inference failed"

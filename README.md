@@ -52,6 +52,8 @@ Connected API endpoints:
 - `GET http://localhost:8000/connectors/inbound-records`
 - `GET http://localhost:8000/connectors/me`
 - `GET http://localhost:8000/connectors/systems`
+- `GET http://localhost:8000/chat/conversations/{conversation_id}`
+- `GET http://localhost:8000/chat/conversations`
 - `GET http://localhost:8000/data/seed/summary`
 - `GET http://localhost:8000/decisions/{decision_id}`
 - `GET http://localhost:8000/decisions`

@@ -415,9 +415,10 @@ def _device_name(values: Mapping[str, Any], path: str, index: int) -> str:
     """Return an AMD-SMI device identifier without inventing hardware claims."""
 
     for key, value in values.items():
-        if any(key == candidate or key.endswith(f"_{candidate}") for candidate in _DEVICE_KEYS):
-            if isinstance(value, str | int):
-                return f"gpu_{value}"
+        if any(
+            key == candidate or key.endswith(f"_{candidate}") for candidate in _DEVICE_KEYS
+        ) and isinstance(value, str | int):
+            return f"gpu_{value}"
     path_name = path.strip("/").replace("/", "_")
     return path_name or f"gpu_{index}"
 

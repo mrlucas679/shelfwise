@@ -261,6 +261,7 @@ type WorkspaceOpenOptions = { query?: string }
 // embedded as an interactive card inside a message (that was duplicate UI: the same pending
 // decision rendered twice, in two different places, with two different ways to act on it).
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
+type ChatReply = { answer: string; conversationId: string; messageId: string }
 type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
 declare global {
@@ -348,7 +349,12 @@ async function postTransition(id: string, transition: 'approve' | 'reject', sign
   if (!payload.decision) throw new Error('Transition response did not include a decision.')
   return { decision: payload.decision, learning_event: payload.learning_event ?? null }
 }
-async function postChat(question: string, signal: AbortSignal): Promise<string> {
+async function postChat(
+  question: string,
+  conversationId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<ChatReply> {
   let lastError = 'Unknown error'
   for (const url of requestUrls('/chat')) {
     try {
@@ -359,11 +365,15 @@ async function postChat(question: string, signal: AbortSignal): Promise<string> 
           'Content-Type': 'application/json',
           ...authHeaders(),
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, conversation_id: conversationId, message_id: messageId }),
         signal,
       })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'HTTP error'}`.trim())
-      return (await res.text()).trim()
+      return {
+        answer: (await res.text()).trim(),
+        conversationId: res.headers.get('X-ShelfWise-Conversation-ID') || conversationId,
+        messageId: res.headers.get('X-ShelfWise-Message-ID') || messageId,
+      }
     } catch (error) {
       if (signal.aborted) throw error
       lastError = error instanceof Error ? error.message : String(error)
@@ -638,6 +648,8 @@ function receiptDetail(decision: Decision): string {
 
 let msgSeq = 0
 const newMsgId = () => `m${++msgSeq}`
+const newChatId = (prefix: 'conv' | 'msg') =>
+  `${prefix}_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${newMsgId()}`}`
 
 // ---------------------------------------------------------------------------
 // Voice input (browser SpeechRecognition; degrades silently)
@@ -1130,6 +1142,8 @@ const GATED_ENDPOINTS = [
   { label: 'Worker process one', method: 'POST', path: '/worker/process-one', group: 'operations', detail: 'Manual worker execution; role and API-key gated.' },
   { label: 'Memory consolidation', method: 'POST', path: '/mlops/consolidate-memory', group: 'operations', detail: 'Governed learning fact consolidation.' },
   { label: 'Inference smoke', method: 'GET', path: '/inference/smoke', group: 'operations', detail: 'Manual inference smoke test; records a model run.' },
+  { label: 'Chat conversations', method: 'GET', path: '/chat/conversations', group: 'operations', detail: 'List the caller tenant/user chat conversations.' },
+  { label: 'Chat conversation detail', method: 'GET', path: '/chat/conversations/{conversation_id}', group: 'operations', detail: 'Full transcript for one conversation.' },
   { label: 'Trace detail', method: 'GET', path: '/trace/{correlation_id}', group: 'operations', detail: 'Parameterized trace detail from the trace registry.' },
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
   { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
@@ -2835,6 +2849,7 @@ function App() {
   const [seed, setSeed] = useState<SeedSummary | null>(null)
   const [ops, setOps] = useState<OperationalSnapshot>(() => emptyOps())
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [conversationId, setConversationId] = useState(() => newChatId('conv'))
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -3025,6 +3040,7 @@ function App() {
     chatCtrl.current?.abort()
     setApprovalOpen(false)
     setActiveWorkspace(null)
+    setConversationId(newChatId('conv'))
     setMessages([{ id: newMsgId(), role: 'assistant', text: greetingFor(pendingQueue(decisions, data?.decision)) }])
     if (isOverlayViewport()) setSidebarOpen(false)
   }
@@ -3032,6 +3048,7 @@ function App() {
   const send = (text: string) => {
     const fallback = replyFor(text, data, pendingQueue(decisions, data?.decision))
     const assistantId = newMsgId()
+    const messageId = newChatId('msg')
     const controller = new AbortController()
     chatCtrl.current = controller
     setMessages((prev) => [
@@ -3039,9 +3056,10 @@ function App() {
       { id: newMsgId(), role: 'user', text },
       { id: assistantId, role: 'assistant', text: 'Checking current ShelfWise state...' },
     ])
-    postChat(text, controller.signal)
-      .then((answer) => {
-        const clean = answer.trim() || fallback
+    postChat(text, conversationId, messageId, controller.signal)
+      .then((reply) => {
+        setConversationId(reply.conversationId)
+        const clean = reply.answer.trim() || fallback
         setMessages((prev) => prev.map((message) => (
           message.id === assistantId ? { ...message, text: clean } : message
         )))

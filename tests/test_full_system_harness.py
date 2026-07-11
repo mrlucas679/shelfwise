@@ -76,13 +76,16 @@ def test_integrity_audit_rejects_decision_reuse_mismatch_noop_and_zero_live_answ
         feature_receipts=_passing_feature_receipts(),
         route_receipts=_passing_route_receipts(),
         live_required=True,
+        chat_calls=1,
         chat_model_answers=0,
+        chat_offline_answers=1,
     )
 
     assert any(item.startswith("decision_reuse:dec_reused") for item in failures)
     assert any(item.startswith("hitl_request_result_mismatch:dec_reused") for item in failures)
     assert any(item.startswith("learning_noop:dec_reused") for item in failures)
-    assert "live_model_answers_zero" in failures
+    assert "live_model_answer_mismatch:model=0:calls=1" in failures
+    assert "live_offline_answers:1" in failures
 
 
 def test_integrity_audit_requires_feature_and_route_receipts() -> None:
@@ -91,6 +94,7 @@ def test_integrity_audit_requires_feature_and_route_receipts() -> None:
         feature_receipts=[],
         route_receipts=[],
         live_required=False,
+        chat_calls=0,
         chat_model_answers=0,
     )
 

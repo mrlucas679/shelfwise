@@ -80,8 +80,14 @@ def test_config_rejects_stale_local_provider_rows(tmp_path: Path) -> None:
           "workflow": {"name": "w", "agents": [
             {"name": "a", "order": 1, "parallel_group": "a", "tier": "routine", "prompt": "x"}
           ]},
-          "endpoints": {"legacy_ollama": {"provider": "ollama", "base_url": "http://x", "model": "x"}},
-          "strategies": [{"name": "shared", "kind": "shared", "routes": {"default": ["legacy_ollama"]}}]
+          "endpoints": {
+            "legacy_ollama": {
+              "provider": "ollama", "base_url": "http://x", "model": "x"
+            }
+          },
+          "strategies": [
+            {"name": "shared", "kind": "shared", "routes": {"default": ["legacy_ollama"]}}
+          ]
         }
         """,
         encoding="utf-8",

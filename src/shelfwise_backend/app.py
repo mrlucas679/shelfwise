@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from shelfwise_action import create_decision_store
@@ -66,7 +66,8 @@ from .cascade import (
     run_procurement_cascade,
     run_sales_cascade,
 )
-from .chat import ChatBody, stream_chat_reply
+from .chat import ChatBody, build_chat_reply_with_meta
+from .chat_store import ChatConversationStore
 from .cold_chain_demo import ColdChainDemoService
 from .detective import analyze_root_cause, root_cause_cte_sql
 from .event_bus import create_event_bus
@@ -126,6 +127,8 @@ app.add_middleware(
 )
 app.include_router(intelligence_router)
 
+chat_store = ChatConversationStore()
+
 try:
     from shelfwise_multimodal.router import build_scan_router, build_voice_router
 except ImportError:
@@ -159,6 +162,8 @@ app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
 app.router.add_event_handler("startup", cold_chain_demo.start)
 app.router.add_event_handler("shutdown", cold_chain_demo.stop)
+
+
 def _env_positive_int(name: str, default: int) -> int:
     try:
         value = int(os.getenv(name, str(default)))
@@ -418,9 +423,7 @@ def health() -> dict[str, object]:
 def readiness() -> dict[str, object]:
     inference_ready = inference_readiness_payload()
     inference = inference_ready["inference"]
-    gateway_status = (
-        "offline-safe" if inference["provider"] == "offline" else "configured"
-    )
+    gateway_status = "offline-safe" if inference["provider"] == "offline" else "configured"
     seed_status = "ok"
     try:
         load_seeded_scenario()
@@ -684,29 +687,158 @@ def detective_root_cause_sql() -> dict[str, object]:
     return {"sql": root_cause_cte_sql()}
 
 
+@app.get("/chat/conversations")
+def list_chat_conversations(
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    conversations = chat_store.list(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
+    return {
+        "conversations": [
+            {key: value for key, value in item.items() if key != "messages"}
+            | {"message_count": len(item["messages"])}
+            for item in conversations
+        ]
+    }
+
+
+@app.get("/chat/conversations/{conversation_id}")
+def get_chat_conversation(
+    conversation_id: str,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    conversation = chat_store.get(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        conversation_id=conversation_id,
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"conversation": conversation}
+
+
 @app.post("/chat", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
-def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> StreamingResponse:
+def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> PlainTextResponse:
+    conversation_id = body.conversation_id or f"conv_{uuid4().hex}"
+    message_id = body.message_id or f"msg_{uuid4().hex}"
+    with chat_store.locked(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        conversation_id=conversation_id,
+    ):
+        prior_answer = chat_store.answer_for_message(
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+        if prior_answer is not None:
+            return _chat_response(
+                answer=str(prior_answer["text"]),
+                conversation_id=conversation_id,
+                message_id=message_id,
+                correlation_id=str(prior_answer.get("metadata", {}).get("correlation_id", "")),
+                metadata=prior_answer.get("metadata", {}),
+                replayed=True,
+            )
+        return _new_chat_response(
+            body=body,
+            ctx=ctx,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+
+
+def _new_chat_response(
+    *,
+    body: ChatBody,
+    ctx: TenantContext,
+    conversation_id: str,
+    message_id: str,
+) -> PlainTextResponse:
+    decisions = _tenant_scoped_decisions(ctx)
+    pending_count = sum(1 for item in decisions if item.get("status") == "pending")
+    resolved_count = len(decisions) - pending_count
+    thresholds = learning_store.thresholds()
     state = {
-        "decisions": _bounded_chat_decisions(_tenant_scoped_decisions(ctx)),
+        "decision_summary": {
+            "total": len(decisions),
+            "pending": pending_count,
+            "resolved": resolved_count,
+        },
+        "decisions": _bounded_chat_decisions(decisions),
         "learning": {
-            "thresholds": learning_store.thresholds(),
+            "threshold_count": len(thresholds),
+            "thresholds": _bounded_chat_thresholds(
+                thresholds,
+                question=body.question,
+                limit=_CHAT_THRESHOLD_LIMIT,
+            ),
             "events": _bounded_recent(
                 learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
             ),
         },
-        "traces": trace_registry.list()[:10],
+        "traces": [_compact_chat_trace(item) for item in trace_registry.list()[:_CHAT_TRACE_LIMIT]],
     }
+    conversation = chat_store.get(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        conversation_id=conversation_id,
+    )
+    if conversation:
+        state["conversation_history"] = conversation["messages"][-12:]
     client = OpenAICompatibleInferenceClient(recorder=_record_model_run)
-    correlation_id = f"chat:{uuid4().hex[:12]}"
-    return StreamingResponse(
-        stream_chat_reply(
+    correlation_id = f"chat:{conversation_id}:{message_id}"
+    try:
+        answer, _meta = build_chat_reply_with_meta(
             question=body.question,
             state=state,
             client=client,
             tenant_id=ctx.tenant_id,
             correlation_id=correlation_id,
-        ),
-        media_type="text/plain",
+            live_required=body.live_required,
+        )
+    except InferenceError as exc:
+        raise HTTPException(status_code=503, detail="Live chat inference failed") from exc
+    _meta["correlation_id"] = correlation_id
+    chat_store.append_exchange(
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        question=body.question,
+        answer=answer,
+        metadata=_meta,
+    )
+    return _chat_response(
+        answer=answer,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        correlation_id=correlation_id,
+        metadata=_meta,
+        replayed=False,
+    )
+
+
+def _chat_response(
+    *,
+    answer: str,
+    conversation_id: str,
+    message_id: str,
+    correlation_id: str,
+    metadata: dict[str, Any],
+    replayed: bool,
+) -> PlainTextResponse:
+    return PlainTextResponse(
+        answer,
+        headers={
+            "X-ShelfWise-Conversation-ID": conversation_id,
+            "X-ShelfWise-Message-ID": message_id,
+            "X-ShelfWise-Correlation-ID": correlation_id,
+            "X-ShelfWise-Answer-Source": str(metadata.get("answer_source", "unknown")),
+            "X-ShelfWise-Model": str(metadata.get("model", "")),
+            "X-ShelfWise-Provider": str(metadata.get("provider", "unknown")),
+            "X-ShelfWise-Replayed": str(replayed).lower(),
+        },
     )
 
 
@@ -795,9 +927,7 @@ def list_connector_systems() -> dict[str, object]:
 def list_tenant_connectors(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     profile = tenant_profile_store.get(ctx.tenant_id) or default_tenant_profile(ctx.tenant_id)
     policy = (
-        profile.get("connector_policy")
-        if isinstance(profile.get("connector_policy"), dict)
-        else {}
+        profile.get("connector_policy") if isinstance(profile.get("connector_policy"), dict) else {}
     )
     return {
         "tenant_id": ctx.tenant_id,
@@ -1180,9 +1310,7 @@ def demo_worldgen_drill(
     if limit <= 0 or limit > 500:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
     if assortment_size is not None and not (0 < assortment_size <= 20_000):
-        raise HTTPException(
-            status_code=422, detail="assortment_size must be between 1 and 20000"
-        )
+        raise HTTPException(status_code=422, detail="assortment_size must be between 1 and 20000")
     try:
         world, schedule = build_worldgen_scenario(
             scenario_id,
@@ -1221,9 +1349,7 @@ def demo_worldgen_drill(
         cascades.append(alert_cascade)
 
     decisions = [
-        cascade["decision"]
-        for cascade in cascades
-        if isinstance(cascade.get("decision"), dict)
+        cascade["decision"] for cascade in cascades if isinstance(cascade.get("decision"), dict)
     ]
     run = worldgen_run_store.record(
         {
@@ -1301,18 +1427,62 @@ def get_decision(
 # past LLM_TIMEOUT_SECONDS and every later call silently fell back to the offline reply.
 # Pending decisions still need to stay in full (the assistant must see everything still
 # awaiting a human), but resolved history and learning events only need a recent window.
-_CHAT_RESOLVED_DECISION_LIMIT = 30
-_CHAT_LEARNING_EVENT_LIMIT = 30
+_CHAT_PENDING_DECISION_LIMIT = 12
+_CHAT_RESOLVED_DECISION_LIMIT = 8
+_CHAT_LEARNING_EVENT_LIMIT = 12
+_CHAT_THRESHOLD_LIMIT = 20
+_CHAT_TRACE_LIMIT = 5
 
 
 def _bounded_chat_decisions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep every pending decision plus a recency-bounded window of resolved ones."""
-    pending = [item for item in decisions if item.get("status") == "pending"]
+    """Bound prompt context while the decision store retains the complete queue."""
+    pending = _bounded_recent(
+        [item for item in decisions if item.get("status") == "pending"],
+        limit=_CHAT_PENDING_DECISION_LIMIT,
+    )
     resolved = _bounded_recent(
         [item for item in decisions if item.get("status") != "pending"],
         limit=_CHAT_RESOLVED_DECISION_LIMIT,
     )
-    return pending + resolved
+    return [_compact_chat_decision(item) for item in pending + resolved]
+
+
+def _compact_chat_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    fields = (
+        "id",
+        "status",
+        "summary",
+        "role",
+        "critic_verdict",
+        "action",
+        "expected_outcome",
+    )
+    return {key: decision[key] for key in fields if key in decision}
+
+
+def _bounded_chat_thresholds(
+    thresholds: dict[str, Any],
+    *,
+    question: str,
+    limit: int,
+) -> dict[str, Any]:
+    terms = {part.lower() for part in question.split() if len(part) >= 3}
+    items = list(thresholds.items())
+    matched = [item for item in items if any(term in item[0].lower() for term in terms)]
+    remaining = [item for item in reversed(items) if item not in matched]
+    return dict((matched + remaining)[:limit])
+
+
+def _compact_chat_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    spans = trace.get("spans") if isinstance(trace.get("spans"), list) else []
+    return {
+        "correlation_id": trace.get("correlation_id"),
+        "decision_id": trace.get("decision_id"),
+        "evidence_agents": trace.get("evidence_agents", []),
+        "spans": [
+            item.get("name") for item in spans if isinstance(item, dict) and item.get("name")
+        ],
+    }
 
 
 def _bounded_recent(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
@@ -1425,9 +1595,9 @@ def _contains_inline_secret(value: object) -> bool:
     if isinstance(value, dict):
         for raw_key, raw_value in value.items():
             key = str(raw_key).lower()
-            if any(
-                token in key for token in ("secret", "password", "api_key", "token")
-            ) and not (key.endswith("_ref") or key.endswith("_id")):
+            if any(token in key for token in ("secret", "password", "api_key", "token")) and not (
+                key.endswith("_ref") or key.endswith("_id")
+            ):
                 return True
             if _contains_inline_secret(raw_value):
                 return True

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from shelfwise_backend.app import (
+    chat_store,
     cold_chain_demo,
     decision_store,
     event_bus,
@@ -48,4 +49,5 @@ def _reset_demo_stores() -> None:
     writeback_sink.clear()
     worldgen_run_store.clear()
     cold_chain_demo.clear()
+    chat_store.clear()
     write_limiter.configure(capacity=240, refill_per_s=8.0, max_keys=1024)

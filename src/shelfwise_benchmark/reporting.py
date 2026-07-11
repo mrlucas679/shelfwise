@@ -210,9 +210,7 @@ def _flatten_row(row: dict[str, Any]) -> dict[str, Any]:
     """Flatten sequence values for readable CSV cells."""
 
     return {
-        key: " > ".join(str(item) for item in value)
-        if isinstance(value, tuple | list)
-        else value
+        key: " > ".join(str(item) for item in value) if isinstance(value, tuple | list) else value
         for key, value in row.items()
     }
 
