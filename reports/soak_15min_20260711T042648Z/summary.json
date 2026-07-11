@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "run_id": "20260711T042648Z",
+  "environment": {
+    "inference": "AMD MI300X cloud vLLM endpoint",
+    "model": "google/gemma-4-E4B-it",
+    "execution": "live_required",
+    "concurrency": "sequential product soak"
+  },
+  "duration_seconds": 900,
+  "passed": true,
+  "failures": [],
+  "totals": {
+    "world_cycles": 333,
+    "world_events_generated": 34077,
+    "world_events_submitted": 26640,
+    "world_events_accepted": 26640,
+    "decisions_total": 4618,
+    "unique_decision_ids": 4618,
+    "approved": 2934,
+    "rejected": 56,
+    "hitl_mismatches": 0,
+    "learning_movements": 34,
+    "learning_movements_expected": 34,
+    "chat_calls": 333,
+    "chat_model_answers": 333,
+    "chat_offline_answers": 0,
+    "chat_errors": 0
+  },
+  "retained_chat_latency_sample": {
+    "count": 20,
+    "average_ms": 2025,
+    "p95_ms": 2266,
+    "peak_ms": 3531,
+    "minimum_ms": 1609
+  },
+  "source_artifacts": [
+    {
+      "path": "manifest.json",
+      "sha256": "8dac7085e8bd0a1fdbf7c87f272a0da487a72616226e9a5aace3422656add04c",
+      "tracked": false,
+      "reason": "4.9 MB raw manifest embeds 29,986 route receipts"
+    },
+    {
+      "path": "chat_samples.json",
+      "sha256": "d54eb80cb108b968e31b5b576c4f89b5a8582e41fade0ebb5ff9cd8cf61b6815",
+      "tracked": false
+    },
+    {
+      "path": "feature_receipts.json",
+      "sha256": "738910a235ed1041d0d58fff36872f65acb20c86d112e8d99197b1b512b23e00",
+      "tracked": false
+    }
+  ],
+  "limitations": [
+    "No concurrent live-inference saturation test",
+    "No exported token totals for this run",
+    "No ROCm GPU, VRAM, CPU, host-memory, or vLLM queue telemetry",
+    "Latency statistics cover the retained 20-call sample, not all 333 calls"
+  ]
+}
