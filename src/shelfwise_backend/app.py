@@ -687,10 +687,12 @@ def detective_root_cause_sql() -> dict[str, object]:
 @app.post("/chat", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
 def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> StreamingResponse:
     state = {
-        "decisions": _tenant_scoped_decisions(ctx),
+        "decisions": _bounded_chat_decisions(_tenant_scoped_decisions(ctx)),
         "learning": {
             "thresholds": learning_store.thresholds(),
-            "events": learning_store.list_events(),
+            "events": _bounded_recent(
+                learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
+            ),
         },
         "traces": trace_registry.list()[:10],
     }
@@ -1291,6 +1293,38 @@ def get_decision(
     if decision is None or _decision_belongs_to_other_tenant(decision, ctx):
         raise HTTPException(status_code=404, detail="Decision not found")
     return {"decision": decision}
+
+
+# /chat sends its whole state as one JSON block in the model prompt. Unbounded decision/
+# learning history grows with store size, not with what the question actually needs - in a
+# 145-cycle stress run this made later prompts large enough that response latency climbed
+# past LLM_TIMEOUT_SECONDS and every later call silently fell back to the offline reply.
+# Pending decisions still need to stay in full (the assistant must see everything still
+# awaiting a human), but resolved history and learning events only need a recent window.
+_CHAT_RESOLVED_DECISION_LIMIT = 30
+_CHAT_LEARNING_EVENT_LIMIT = 30
+
+
+def _bounded_chat_decisions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep every pending decision plus a recency-bounded window of resolved ones."""
+    pending = [item for item in decisions if item.get("status") == "pending"]
+    resolved = _bounded_recent(
+        [item for item in decisions if item.get("status") != "pending"],
+        limit=_CHAT_RESOLVED_DECISION_LIMIT,
+    )
+    return pending + resolved
+
+
+def _bounded_recent(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    """Return the most recent items by created_at/updated_at, most recent first."""
+    if len(items) <= limit:
+        return items
+    ordered = sorted(
+        items,
+        key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+        reverse=True,
+    )
+    return ordered[:limit]
 
 
 def _tenant_scoped_decisions(ctx: TenantContext) -> list[dict[str, Any]]:
