@@ -60,6 +60,8 @@ Connected API endpoints:
 - `GET/POST http://localhost:8000/demo/critic-rejection`
 - `POST http://localhost:8000/demo/golden/agentic`
 - `POST http://localhost:8000/demo/procurement/agentic`
+- `POST http://localhost:8000/demo/sales/agentic`
+- `POST http://localhost:8000/demo/cold-chain/agentic`
 - `GET http://localhost:8000/demo/worldgen-runs/{run_id}`
 - `GET http://localhost:8000/demo/worldgen-runs`
 - `GET http://localhost:8000/demo/worldgen/{scenario_id}`

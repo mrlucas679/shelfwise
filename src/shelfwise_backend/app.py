@@ -58,8 +58,10 @@ from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
 from .agentic_cascade import (
     AgenticCascadeError,
+    run_cold_chain_cascade_via_agents,
     run_golden_cascade_via_agents,
     run_procurement_cascade_via_agents,
+    run_sales_cascade_via_agents,
 )
 from .cascade import (
     run_catalog_price_check,
@@ -1275,6 +1277,48 @@ def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_procurement_cascade_via_agents(
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _record_cascade(result)
+
+
+@app.post("/demo/sales/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
+    """Run the POS price-integrity verdict through a real Gemma tool loop.
+
+    Unlike /demo/sales (deterministic math + hand-authored evidence), this route requires
+    an actual model call and tool-calling round trip over check_price_integrity. With
+    live_required=true (default) it hard-fails with 503 instead of silently falling back
+    to an offline/deterministic answer.
+    """
+    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    try:
+        result = run_sales_cascade_via_agents(
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _record_cascade(result)
+
+
+@app.post("/demo/cold-chain/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
+    """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
+
+    Unlike /demo/cold-chain (deterministic math + hand-authored evidence), this route
+    requires an actual model call and tool-calling round trip over get_cold_chain_status.
+    With live_required=true (default) it hard-fails with 503 instead of silently falling
+    back to an offline/deterministic answer.
+    """
+    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    try:
+        result = run_cold_chain_cascade_via_agents(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
