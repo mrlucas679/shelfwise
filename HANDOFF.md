@@ -1,6 +1,29 @@
-# HANDOFF — session state as of 2026-07-11 ~06:30 (local)
+# HANDOFF — session state as of 2026-07-11 ~06:50 (local)
 
-## Latest update — 4 of 5 production cascades are now genuinely agentic
+## Latest update — agentic cascades are now clickable in the UI (not just curl-testable)
+
+Found and closed a real gap: the 4 agentic routes below existed and worked, but were only
+listed in a read-only catalog in the Operations workspace - no way to see one run without a
+terminal, which would have forced the demo video to cut to curl output for the single most
+impressive capability in the app. The "Gated operational endpoints" list's 4 `/agentic` rows
+are now real buttons: click one, it shows a live "calling the live Gemma tool-calling
+loop..." state, then the row's detail replaces with the actual result (conclusion, routed
+action, real model-call count). Verified live in-browser for all four, zero console errors:
+golden, procurement, sales, cold-chain all produced genuine results from the real MI300X
+endpoint through an actual click, not a fixture.
+
+While verifying this, found the running local backend (started earlier this session) was
+serving stale code from before the sales/cold-chain routes existed (started without
+`--reload`) - restarted it, confirmed all four resolve now. **If you restart the backend
+again, remember it does NOT auto-reload** - `set -a && source .env && set +a && python -m
+uvicorn shelfwise_backend.app:app --host 0.0.0.0 --port 8000 --app-dir src` from repo root.
+Frontend: `npm run dev` in `frontend/`. Both currently running and healthy alongside the
+live droplet as of this handoff.
+
+Where to see it: Operations workspace (sidebar → "Operations") → scroll to "Gated
+operational endpoints" → the four rows ending "(agentic) - click to run live".
+
+## Prior update — 4 of 5 production cascades are now genuinely agentic
 
 User goal: "fix all if you can." Extended the proven golden-cascade pattern to procurement,
 sales, and cold-chain. All four now have a real Gemma tool-calling path, verified live:
@@ -198,13 +221,16 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
 3. **Record the demo video now, while the droplet is hot and the app is verified working.**
    This is the top remaining priority - everything else is secondary to actually capturing it.
 4. **Merge this branch to `main`** (required for submission).
-5. Only if time remains: deploy a second model on a second endpoint and set
-   `LLM_STRONG_BASE_URL`/`LLM_STRONG_API_KEY` (routing code is ready,
-   `dual_model_configured` will flip true once real credentials point at a second serving
-   endpoint) to genuinely satisfy "at least two models" rather than just the routing layer;
-   wire procurement cascade through the agentic path (pattern is in
-   `src/shelfwise_backend/agentic_cascade.py`); run `shelfwise_benchmark` at 1/8/32
-   concurrency against the live endpoint for the report.
+5. Only if time remains, in priority order:
+   a. Deploy a second model on a second endpoint and set `LLM_STRONG_BASE_URL`/
+      `LLM_STRONG_API_KEY` (routing code is ready, `dual_model_configured` flips true
+      automatically once real credentials point at a second serving endpoint) - the one
+      remaining gap between "routing is built" and "two models are actually running."
+   b. Wire the two smaller conditional checks (`run_catalog_price_check`,
+      `run_expiry_risk_check`) through the agentic pattern too - same recipe as
+      golden/procurement/sales/cold-chain in `src/shelfwise_backend/agentic_cascade.py`.
+   c. Run `shelfwise_benchmark` at 1/8/32 concurrency against the live endpoint for the
+      architecture-comparison report.
 
 ## Known honest gaps (do not overclaim in the deck/video)
 
