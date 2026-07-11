@@ -1,6 +1,52 @@
-# HANDOFF — session state as of 2026-07-11 ~06:53 (local)
+# HANDOFF — session state as of 2026-07-11 ~07:20 (local)
 
-## Latest update — 15-min live soak test PASSED + a real chat bug found and fixed by screen-testing
+## Latest update — chat is now genuinely agentic across the whole store + markdown formatting
+
+User's ask: chat needs to read cleanly (not dense paragraphs) AND be able to talk about
+"every little thing in our application" (stock, procurement, cold-chain, pricing,
+approvals, learning), not just the one product/delivery slice it happened to be told
+about. Two real changes, both live-verified, not cosmetic:
+
+1. **Chat is now a real tool-calling agent**, not a single static-state completion.
+   `build_chat_reply_with_meta` in `chat.py` now runs through the same
+   `AgentOrchestrator` + read-only `PlatformToolRegistry` the production cascades use -
+   11 tools: `get_stock`, `get_demand_forecast`, `get_expiry_risk`, `get_reorder_policy`,
+   `get_supplier_ranking`, `get_cold_chain_status`, `check_price_integrity`,
+   `simulate_markdown`, `list_open_decisions`, `explain_decision`, `get_thresholds`. The
+   model decides which to call per question - verified live calling 2-4 tools in a single
+   turn for a "give me a report" question (approvals, stock, delivery reconciliation,
+   supplier cover all correctly cited with real numbers in one answer). Every answer is
+   grounded the same way cascades are (`assert_conclusion_grounded_in_tool_results`) - a
+   computed number a tool returns must be cited or the run is rejected. Tenant isolation
+   carries through automatically (`trusted_overrides={"tenant_id": ...}` is already
+   applied per tool call inside `AgentOrchestrator.run_messages`, using whatever
+   `tenant_id` chat passes in - no new code needed there). Falls back to the original
+   single-completion path when no decision/memory store is supplied (keeps
+   `test_gateway_security.py`'s prompt-injection test working completely unchanged - it
+   doesn't pass a store, so it exercises the old path on purpose) and to the offline
+   reply when live inference is unavailable or fails.
+2. **Chat renders real markdown now.** Added `react-markdown` + `remark-gfm` (both MIT,
+   free) and switched `AssistantBubble` in `App.tsx` to render through them, with a new
+   `.bubble .md` CSS block in `index.css` styling headings/bullets/bold/code/tables for
+   the existing dark/light themes. System prompt in `chat.py` explicitly asks for
+   headings + bullets + bold-the-key-numbers on multi-part answers, short paragraphs for
+   single facts. Verified live in-browser: a "give me today's report" question rendered
+   as real `<h3>`/`<ul>`/`<strong>` elements, not one text blob - screenshot confirms
+   clean structured output, zero console errors.
+
+408/408 tests pass, capability manifest regenerated, frontend `tsc --noEmit` clean.
+Commit `e3a84f4`. Backend was restarted (no `--reload`, same gotcha as always) to pick
+this up before verifying live.
+
+**Known limitation, honest gap for the deck**: the model sometimes declines to call a
+tool it lacks a required argument for (e.g. asked "how's the cold chain?" with no area
+named, it said plainly it didn't have that data rather than guessing an `asset_id`) -
+this is correct grounded behavior, not a bug, but means very vague questions get an
+honest "I don't have that specific data" instead of a guess. Not fixed further given
+remaining time - a real fix would mean giving tools sensible default-area resolution,
+which is a bigger, separate task.
+
+## Prior update — 15-min live soak test PASSED + a real chat bug found and fixed by screen-testing
 
 Ran the actual `shelfwise_eval.full_system` harness for 15 real minutes against the live
 droplet with `--live-required` (any offline chat fallback would hard-fail the whole run,
