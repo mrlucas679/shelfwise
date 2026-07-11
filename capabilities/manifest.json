@@ -896,6 +896,24 @@
     },
     {
       "consumers": [],
+      "event_type": "inventory_exception",
+      "id": "event_type:inventory_exception",
+      "kind": "event_type",
+      "name": "Inventory Exception",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 41,
+          "path": "src/shelfwise_contracts/__init__.py",
+          "symbol": "EventType.inventory_exception"
+        }
+      ],
+      "status": "partial",
+      "verification_nodeids": []
+    },
+    {
+      "consumers": [],
       "event_type": "recall_notice",
       "id": "event_type:recall_notice",
       "kind": "event_type",
@@ -1035,7 +1053,7 @@
       ],
       "sources": [
         {
-          "line": 980,
+          "line": 984,
           "path": "frontend/src/App.tsx",
           "symbol": "ApprovalPanel"
         }
@@ -1060,7 +1078,7 @@
       ],
       "sources": [
         {
-          "line": 2796,
+          "line": 2801,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -1085,7 +1103,7 @@
       ],
       "sources": [
         {
-          "line": 1068,
+          "line": 1072,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1110,7 +1128,7 @@
       ],
       "sources": [
         {
-          "line": 1069,
+          "line": 1073,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1135,7 +1153,7 @@
       ],
       "sources": [
         {
-          "line": 1067,
+          "line": 1071,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1164,7 +1182,7 @@
       ],
       "sources": [
         {
-          "line": 1070,
+          "line": 1074,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1193,7 +1211,7 @@
       ],
       "sources": [
         {
-          "line": 1064,
+          "line": 1068,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1222,7 +1240,7 @@
       ],
       "sources": [
         {
-          "line": 1071,
+          "line": 1075,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1247,7 +1265,7 @@
       ],
       "sources": [
         {
-          "line": 1066,
+          "line": 1070,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1272,7 +1290,7 @@
       ],
       "sources": [
         {
-          "line": 1062,
+          "line": 1066,
           "path": "frontend/src/App.tsx",
           "symbol": "SidebarPage"
         }
@@ -1297,7 +1315,7 @@
       ],
       "sources": [
         {
-          "line": 1065,
+          "line": 1069,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1400,7 +1418,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 990,
+          "line": 997,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_products"
         }
@@ -1422,7 +1440,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 995,
+          "line": 1002,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_product"
         }
@@ -1444,7 +1462,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1026,
+          "line": 1033,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_product_variants"
         }
@@ -1466,7 +1484,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1059,
+          "line": 1066,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "resolve_product_identifier"
         }
@@ -1488,7 +1506,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 711,
+          "line": 718,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_chat_conversations"
         }
@@ -1510,7 +1528,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 725,
+          "line": 732,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_chat_conversation"
         }
@@ -1532,7 +1550,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 880,
+          "line": 887,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_cold_chain_feed"
         }
@@ -1554,7 +1572,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 963,
+          "line": 970,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_inbound_records"
         }
@@ -1576,7 +1594,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 950,
+          "line": 957,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_tenant_connectors"
         }
@@ -1598,7 +1616,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 945,
+          "line": 952,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_connector_systems"
         }
@@ -1620,7 +1638,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 597,
+          "line": 599,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "seed_summary"
         }
@@ -1642,7 +1660,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1510,
+          "line": 1546,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_decisions"
         }
@@ -1664,7 +1682,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1529,
+          "line": 1565,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_decision"
         }
@@ -1686,7 +1704,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1413,
+          "line": 1449,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_cold_chain_get"
         }
@@ -1708,7 +1726,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1383,
+          "line": 1419,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_critic_rejection_get"
         }
@@ -1730,7 +1748,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1290,
+          "line": 1326,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_golden_get"
         }
@@ -1752,7 +1770,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1393,
+          "line": 1429,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_procurement_get"
         }
@@ -1774,7 +1792,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1403,
+          "line": 1439,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_sales_get"
         }
@@ -1796,7 +1814,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 885,
+          "line": 892,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_worldgen_runs"
         }
@@ -1818,7 +1836,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 897,
+          "line": 904,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_worldgen_run"
         }
@@ -1840,7 +1858,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1418,
+          "line": 1454,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_worldgen_drill"
         }
@@ -1862,7 +1880,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 706,
+          "line": 713,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "detective_root_cause_sql"
         }
@@ -1884,7 +1902,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 685,
+          "line": 692,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "detective_root_cause"
         }
@@ -1906,7 +1924,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 638,
+          "line": 645,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_events"
         }
@@ -1928,7 +1946,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 652,
+          "line": 659,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_bus_events"
         }
@@ -1950,7 +1968,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 421,
+          "line": 423,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "health"
         }
@@ -1972,7 +1990,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 482,
+          "line": 484,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_config"
         }
@@ -1994,7 +2012,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 530,
+          "line": 532,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_readiness"
         }
@@ -2016,7 +2034,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 556,
+          "line": 558,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_smoke"
         }
@@ -2038,7 +2056,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1515,
+          "line": 1551,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "learning_summary"
         }
@@ -2060,7 +2078,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1161,
+          "line": 1168,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "accountability_report"
         }
@@ -2082,7 +2100,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 905,
+          "line": 912,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_model_runs"
         }
@@ -2104,7 +2122,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1176,
+          "line": 1183,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "observability_snapshot"
         }
@@ -2126,7 +2144,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1154,
+          "line": 1161,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_prompt_versions"
         }
@@ -2148,7 +2166,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1205,
+          "line": 1212,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_tenant_facts"
         }
@@ -2170,7 +2188,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 602,
+          "line": 604,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "product_attention"
         }
@@ -2192,7 +2210,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 610,
+          "line": 612,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "product_search"
         }
@@ -2214,7 +2232,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 431,
+          "line": 433,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "readiness"
         }
@@ -2236,7 +2254,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 535,
+          "line": 537,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "submission_readiness"
         }
@@ -2258,7 +2276,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 912,
+          "line": 919,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_tenant_profile"
         }
@@ -2280,7 +2298,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 869,
+          "line": 876,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_platform_tools"
         }
@@ -2302,7 +2320,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 875,
+          "line": 882,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_platform_tool_audit"
         }
@@ -2324,7 +2342,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 665,
+          "line": 672,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_trace"
         }
@@ -2346,7 +2364,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 680,
+          "line": 687,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_traces"
         }
@@ -2368,7 +2386,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1225,
+          "line": 1232,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_worker_runs"
         }
@@ -2390,7 +2408,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1230,
+          "line": 1237,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "worker_status"
         }
@@ -2412,7 +2430,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1523,
+          "line": 1559,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_writeback_tasks"
         }
@@ -2434,7 +2452,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1035,
+          "line": 1042,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_product_identifier"
         }
@@ -2456,7 +2474,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 975,
+          "line": 982,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_product"
         }
@@ -2478,7 +2496,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1006,
+          "line": 1013,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_product_variant"
         }
@@ -2500,7 +2518,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 740,
+          "line": 747,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "chat"
         }
@@ -2522,7 +2540,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1079,
+          "line": 1086,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "intake_connector_payload"
         }
@@ -2544,7 +2562,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1650,
+          "line": 1686,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "approve_decision"
         }
@@ -2566,7 +2584,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1725,
+          "line": 1761,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "reject_decision"
         }
@@ -2588,7 +2606,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1408,
+          "line": 1444,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_cold_chain"
         }
@@ -2610,7 +2628,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1357,
+          "line": 1393,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_cold_chain_agentic"
         }
@@ -2632,7 +2650,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1378,
+          "line": 1414,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_critic_rejection"
         }
@@ -2654,7 +2672,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1256,
+          "line": 1263,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_golden"
         }
@@ -2676,9 +2694,31 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1295,
+          "line": 1331,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_golden_agentic"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/demo/inventory-exception",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /demo/inventory-exception",
+      "note": null,
+      "operation_id": "demo_inventory_exception",
+      "path": "/demo/inventory-exception",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1297,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "demo_inventory_exception"
         }
       ],
       "status": "verified",
@@ -2698,7 +2738,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1388,
+          "line": 1424,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_procurement"
         }
@@ -2720,7 +2760,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1315,
+          "line": 1351,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_procurement_agentic"
         }
@@ -2742,7 +2782,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1261,
+          "line": 1268,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_recall"
         }
@@ -2764,7 +2804,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1398,
+          "line": 1434,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_sales"
         }
@@ -2786,7 +2826,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1336,
+          "line": 1372,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "demo_sales_agentic"
         }
@@ -2808,7 +2848,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 618,
+          "line": 620,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "ingest_event"
         }
@@ -2918,7 +2958,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1217,
+          "line": 1224,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "consolidate_memory"
         }
@@ -3011,7 +3051,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 920,
+          "line": 927,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_tenant_profile"
         }
@@ -3087,7 +3127,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1235,
+          "line": 1242,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "process_one_worker_event"
         }
@@ -3791,7 +3831,7 @@
       ],
       "sources": [
         {
-          "line": 729,
+          "line": 731,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_catalog_price_check"
         }
@@ -3823,7 +3863,7 @@
       ],
       "sources": [
         {
-          "line": 950,
+          "line": 952,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_cold_chain_cascade"
         }
@@ -3851,7 +3891,7 @@
       ],
       "sources": [
         {
-          "line": 1343,
+          "line": 1529,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_critic_rejection_cascade"
         }
@@ -3883,7 +3923,7 @@
       ],
       "sources": [
         {
-          "line": 859,
+          "line": 861,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_expiry_risk_check"
         }
@@ -3931,9 +3971,28 @@
       ],
       "sources": [
         {
-          "line": 56,
+          "line": 58,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_golden_cascade"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_golden_cascade.py::test_golden_cascade_is_math_backed_and_traceable"
+      ]
+    },
+    {
+      "entrypoint": "shelfwise_backend.cascade:run_inventory_exception_cascade",
+      "id": "workflow:inventory_exception",
+      "kind": "workflow",
+      "name": "Inventory Exception",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1385,
+          "path": "src/shelfwise_backend/cascade.py",
+          "symbol": "run_inventory_exception_cascade"
         }
       ],
       "status": "verified",
@@ -3963,7 +4022,7 @@
       ],
       "sources": [
         {
-          "line": 317,
+          "line": 319,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_procurement_cascade"
         }
@@ -3982,7 +4041,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1212,
+          "line": 1214,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_recall_cascade"
         }
@@ -4014,7 +4073,7 @@
       ],
       "sources": [
         {
-          "line": 548,
+          "line": 550,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_sales_cascade"
         }
@@ -4088,7 +4147,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:e15142b01c58ba1d1043cd0f345fe75c66ad70d3c0ed57e71ac46399b859b32b",
+  "fingerprint": "sha256:f8dec38d8bbcde5228b7447662d243926df11f9bfb49b5eb84b4ad8d4ab3191a",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

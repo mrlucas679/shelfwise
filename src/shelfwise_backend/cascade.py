@@ -41,6 +41,8 @@ _PROCUREMENT_SCENARIO_ID = "procurement_reorder_supplier_cover"
 _SALES_SCENARIO_ID = "pos_sale_price_integrity"
 _COLD_CHAIN_SCENARIO_ID = "cold_chain_generator_failure_facilities_review"
 _RECALL_SCENARIO_ID = "supplier_lot_recall_quarantine"
+_INVENTORY_EXCEPTION_SCENARIO_ID = "inventory_exception_review"
+_INVENTORY_EXCEPTION_TYPES = frozenset({"return", "damage", "shrink", "misplaced_stock"})
 _CRITIC_REJECTION_SCENARIO_ID = "critic_rejects_unsupported_supplier_switch"
 
 
@@ -1336,6 +1338,190 @@ def run_recall_cascade(event: Event) -> dict[str, Any]:
         "learning": {
             "status": "armed",
             "message": "After approval, record quarantined units and recall completion time.",
+        },
+    }
+
+
+def validate_inventory_exception(event: Event) -> None:
+    """Validate evidence required by each inventory exception policy."""
+    if event.type is not EventType.INVENTORY_EXCEPTION:
+        raise ValueError("event must be an inventory_exception")
+    payload = event.payload
+    common = ("exception_id", "exception_type", "sku", "reason", "location")
+    missing = [key for key in common if not str(payload.get(key) or "").strip()]
+    if missing:
+        raise ValueError(f"inventory_exception missing fields: {missing}")
+    exception_type = str(payload["exception_type"]).strip()
+    if exception_type not in _INVENTORY_EXCEPTION_TYPES:
+        raise ValueError(
+            "inventory_exception exception_type must be one of: "
+            + ", ".join(sorted(_INVENTORY_EXCEPTION_TYPES))
+        )
+    for key in common:
+        if len(str(payload[key])) > 200:
+            raise ValueError(f"inventory_exception {key} exceeds 200 characters")
+    if exception_type == "shrink":
+        expected = _int_payload(payload, "expected_units", -1)
+        counted = _int_payload(payload, "counted_units", -1)
+        if expected < 0 or counted < 0 or counted >= expected:
+            raise ValueError("shrink requires expected_units > counted_units >= 0")
+        if not str(payload.get("count_reference") or "").strip():
+            raise ValueError("shrink requires count_reference")
+        return
+    units = _int_payload(payload, "units", 0)
+    if units <= 0:
+        raise ValueError(f"{exception_type} units must be greater than zero")
+    if exception_type == "misplaced_stock":
+        expected_location = str(payload.get("expected_location") or "").strip()
+        observed_location = str(payload.get("observed_location") or "").strip()
+        if not expected_location or not observed_location:
+            raise ValueError("misplaced_stock requires expected_location and observed_location")
+        if expected_location == observed_location:
+            raise ValueError("misplaced_stock locations must differ")
+    elif not str(payload.get("source_reference") or "").strip():
+        raise ValueError(f"{exception_type} requires source_reference")
+
+
+def run_inventory_exception_cascade(event: Event) -> dict[str, Any]:
+    """Route validated inventory exceptions to distinct governed actions."""
+    validate_inventory_exception(event)
+    payload = event.payload
+    exception_id = str(payload["exception_id"]).strip()
+    exception_type = str(payload["exception_type"]).strip()
+    sku = str(payload["sku"]).strip()
+    reason = str(payload["reason"]).strip()
+    location = str(payload["location"]).strip()
+    if exception_type == "shrink":
+        expected_units = _int_payload(payload, "expected_units", 0)
+        counted_units = _int_payload(payload, "counted_units", 0)
+        units = expected_units - counted_units
+        action_type = "investigate_shrink"
+        action_detail = {
+            "expected_units": expected_units,
+            "counted_units": counted_units,
+            "count_reference": str(payload["count_reference"]),
+        }
+    elif exception_type == "misplaced_stock":
+        units = _int_payload(payload, "units", 0)
+        action_type = "relocate_stock"
+        action_detail = {
+            "expected_location": str(payload["expected_location"]),
+            "observed_location": str(payload["observed_location"]),
+        }
+    elif exception_type == "damage":
+        units = _int_payload(payload, "units", 0)
+        action_type = "quarantine_damaged_stock"
+        action_detail = {"source_reference": str(payload["source_reference"])}
+    else:
+        units = _int_payload(payload, "units", 0)
+        action_type = "process_return"
+        action_detail = {"source_reference": str(payload["source_reference"])}
+    source = SourceRef.dataset("inventory_exception", exception_id)
+    action = RecommendedAction(
+        action_type,
+        {
+            "exception_id": exception_id,
+            "exception_type": exception_type,
+            "sku": sku,
+            "units": units,
+            "location": location,
+            "reason": reason,
+            **action_detail,
+        },
+        RiskTier.HIGH if exception_type in {"damage", "shrink"} else RiskTier.MEDIUM,
+    )
+    evidence = [
+        EvidenceObject(
+            agent=AgentName.INVENTORY,
+            conclusion=(
+                f"Inventory exception {exception_id} records {units} units of SKU {sku} as "
+                f"{exception_type} at {location}."
+            ),
+            supporting_data=[
+                _supporting_fact("exception_type", exception_type, str(source), "exception_record"),
+                _supporting_fact("units", units, str(source), "validated_quantity"),
+                _supporting_fact("location", location, str(source), "exception_record"),
+            ],
+            confidence=Decimal("0.95"),
+            recommended_action=action,
+            sources=(source,),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.CRITIC,
+            conclusion=(
+                f"{exception_type} evidence satisfies its type-specific gate; route "
+                f"{action_type} for human review."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "exception_gate_passed", True, "inventory_exception_gate", exception_type
+                )
+            ],
+            confidence=Decimal("0.96"),
+            recommended_action=action,
+            sources=(source, SourceRef.tool("inventory_exception_gate")),
+            requires_human_review=True,
+        ),
+        EvidenceObject(
+            agent=AgentName.EXECUTIVE,
+            conclusion=(
+                f"Assign {action_type} for {units} units; do not mutate stock before approval."
+            ),
+            supporting_data=[
+                _supporting_fact(
+                    "writeback_policy",
+                    "pending_human_approval",
+                    "inventory_exception_policy",
+                    action_type,
+                )
+            ],
+            confidence=Decimal("0.94"),
+            recommended_action=action,
+            sources=(source, SourceRef.tool("inventory_exception_policy")),
+            requires_human_review=True,
+        ),
+    ]
+    decision = Decision(
+        id=_decision_id(event),
+        status=DecisionStatus.PENDING,
+        action=action,
+        caused_by=(event.id,),
+        summary=(
+            f"Pending inventory review: {action_type} for {units} units of SKU {sku} at {location}."
+        ),
+    ).to_dict()
+    decision.update(
+        {
+            "tenant_id": event.tenant_id,
+            "scenario_id": _INVENTORY_EXCEPTION_SCENARIO_ID,
+            "role": "inventory_manager",
+            "critic_verdict": "approved",
+            "expected_outcome": {
+                "exception_id": exception_id,
+                "exception_type": exception_type,
+                "units_reconciled": units,
+                "incremental_profit_minor_units": 0,
+            },
+        }
+    )
+    return {
+        "correlation_id": event.correlation_id,
+        "scenario": _INVENTORY_EXCEPTION_SCENARIO_ID,
+        "evidence": [item.to_dict() for item in evidence],
+        "decision": decision,
+        "trace": [
+            TraceSpan(
+                name="policy.validate_inventory_exception",
+                status="ok",
+                ms=0,
+                detail={"exception_type": exception_type, "units": units},
+            ).to_dict()
+        ],
+        "inference": load_inference_config().to_public_dict(),
+        "learning": {
+            "status": "armed",
+            "message": "After approval, record reconciled units and completion time.",
         },
     }
 

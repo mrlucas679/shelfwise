@@ -37,6 +37,7 @@ EVENT_TYPE_ROUTES: dict[EventType, EventTypeRoute] = {
         reason="fulfilment fact retained until shipment reconciliation consumes it",
     ),
     EventType.RECALL_NOTICE: EventTypeRoute(consumer="recall_quarantine_cascade"),
+    EventType.INVENTORY_EXCEPTION: EventTypeRoute(consumer="inventory_exception_cascade"),
 }
 
 
@@ -217,6 +218,23 @@ class World:
                             "units": 10,
                             "reason": "synthetic supplier recall drill",
                             "issued_by": "DairyCo Quality",
+                            "synthetic_probe": True,
+                        },
+                    ),
+                    self._mk(
+                        EventType.INVENTORY_EXCEPTION,
+                        ts_base + timedelta(hours=7, minutes=30),
+                        EventSource.MANUAL,
+                        {
+                            "store_id": self.cfg.store_id,
+                            "exception_id": f"EXC-PROBE-{current:%Y%m%d}",
+                            "exception_type": "shrink",
+                            "sku": "4011",
+                            "reason": "synthetic cycle-count discrepancy",
+                            "location": self.cfg.store_id,
+                            "expected_units": 30,
+                            "counted_units": 24,
+                            "count_reference": f"COUNT-PROBE-{current:%Y%m%d}",
                             "synthetic_probe": True,
                         },
                     ),

@@ -43,6 +43,7 @@ def test_scenario_rotation_covers_every_required_operational_surface() -> None:
         "misprice",
         "cold_chain",
         "recall_quarantine",
+        "inventory_exception",
         "connector_duplicate_invalid",
         "multimodal_review",
         "auth_tenant_isolation",
@@ -108,7 +109,7 @@ def test_real_full_system_rotation_passes_and_exports_receipts(tmp_path) -> None
     report = run_full_system(
         FullSystemConfig(
             world_cycles=3,
-            event_limit=8,
+            event_limit=9,
             assortment_sizes=(None,),
             chat_every_n_cycles=1,
             artifact_dir=artifact_dir,
@@ -132,6 +133,7 @@ def test_real_full_system_rotation_passes_and_exports_receipts(tmp_path) -> None
         "stock_update",
         "supplier_update",
         "recall_notice",
+        "inventory_exception",
     }
 
     manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
