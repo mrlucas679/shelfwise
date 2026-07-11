@@ -190,8 +190,22 @@ class PlatformToolRegistry:
         """Generate provider schemas directly from current registry callables."""
         return [platform_tool_to_openai_schema(tool) for tool in self._tools.values()]
 
-    async def execute(self, call: ToolCall, *, correlation_id: str) -> ToolExecution:
-        """Validate and execute one registered read-only tool call."""
+    async def execute(
+        self,
+        call: ToolCall,
+        *,
+        correlation_id: str,
+        trusted_overrides: Mapping[str, Any] | None = None,
+    ) -> ToolExecution:
+        """Validate and execute one registered read-only tool call.
+
+        trusted_overrides carries caller-authenticated context (e.g. tenant_id) that
+        must win over whatever the model put in the call arguments. Found live against
+        Gemma-4-E4B-it: the model invented tenant_id="default_tenant" for a tool whose
+        signature exposed the parameter, which both broke the lookup and - worse - would
+        have let a prompt-injected model read across tenants if the value were honored.
+        Overrides only apply to parameters the tool signature actually declares.
+        """
         if not correlation_id:
             raise ToolExecutionError("tool execution requires a correlation ID")
         tool = self._tools.get(call.name)
@@ -199,7 +213,13 @@ class PlatformToolRegistry:
             raise ToolPolicyError(f"tool is not registered: {call.name}")
         if not tool.read_only:
             raise ToolPolicyError(f"refusing write-capable tool: {call.name}")
-        arguments = _validated_arguments(tool, call.arguments)
+        merged_arguments = dict(call.arguments)
+        if trusted_overrides:
+            declared = set(signature(tool.fn).parameters)
+            for key, value in trusted_overrides.items():
+                if key in declared:
+                    merged_arguments[key] = value
+        arguments = _validated_arguments(tool, merged_arguments)
         started = perf_counter()
         try:
             result = tool.fn(**arguments)

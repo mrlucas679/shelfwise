@@ -150,6 +150,39 @@ def test_registry_executes_only_registered_read_only_tools() -> None:
         PlatformToolRegistry([_Tool("delete_stock", "Write stock.", False, _read_stock)])
 
 
+async def _tenant_scoped_lookup(sku: str, tenant_id: str = "sa_retail_demo") -> dict[str, Any]:
+    return {"sku": sku, "tenant_id": tenant_id}
+
+
+def test_trusted_overrides_beat_model_supplied_tenant_arguments() -> None:
+    """Found live against Gemma-4-E4B-it: the model invented tenant_id="default_tenant"
+    for a tool exposing that parameter. Honoring model-controlled tenant values is a
+    tenant-isolation hole - the caller-authenticated tenant must always win.
+    """
+    registry = PlatformToolRegistry(
+        [_Tool("tenant_lookup", "Tenant-scoped read.", True, _tenant_scoped_lookup)]
+    )
+
+    execution = asyncio.run(
+        registry.execute(
+            ToolCall("call_t", "tenant_lookup", {"sku": "4011", "tenant_id": "default_tenant"}),
+            correlation_id="corr-tenant",
+            trusted_overrides={"tenant_id": "sa_retail_demo"},
+        )
+    )
+    assert execution.result == {"sku": "4011", "tenant_id": "sa_retail_demo"}
+
+    # Overrides never introduce parameters a tool does not declare.
+    stock_execution = asyncio.run(
+        registry.execute(
+            ToolCall("call_s", "tenant_lookup", {"sku": "4011"}),
+            correlation_id="corr-tenant",
+            trusted_overrides={"tenant_id": "sa_retail_demo", "unrelated": "x"},
+        )
+    )
+    assert stock_execution.result["tenant_id"] == "sa_retail_demo"
+
+
 def test_parser_accepts_vllm_and_tagged_gemma_calls_but_rejects_bad_json() -> None:
     vllm = parse_tool_calls(
         {

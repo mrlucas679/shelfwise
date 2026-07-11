@@ -423,6 +423,9 @@ class AgentOrchestrator:
                 execution = await self._registry.execute(
                     call,
                     correlation_id=effective_correlation_id,
+                    # The authenticated tenant must always win over whatever tenant the
+                    # model wrote into its own tool arguments (tenant isolation).
+                    trusted_overrides={"tenant_id": tenant_id},
                 )
                 tool_executions.append(execution)
                 conversation.append(execution.to_tool_message())

@@ -110,10 +110,12 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
     ),
     RolePrompt(
         "critic",
-        "You are the ShelfWise Critic agent. Call list_open_decisions before concluding.",
-        "Review the current set of open HITL decisions for evidence quality. Call "
-        "list_open_decisions, then conclude.",
-        "list_open_decisions",
+        "You are the ShelfWise Critic agent. Call list_open_decisions to find the open "
+        "decisions, then call explain_decision on the first decision's id before concluding.",
+        "Review the current open HITL decisions for evidence quality. Call "
+        "list_open_decisions, then call explain_decision with the first decision's id, "
+        "then conclude.",
+        "explain_decision",
     ),
     RolePrompt(
         "executive",
@@ -170,6 +172,24 @@ async def _run(*, execution_mode: ExecutionMode) -> list[RoleCoverageResult]:
     decisions = create_decision_store()
     memory = create_learning_store()
     audit = AuditLog()
+    # One real pending decision so list_open_decisions returns a non-empty queue and
+    # explain_decision has a genuine id to resolve - without it the critic's
+    # explain_decision coverage would be untestable against an empty store.
+    decisions.upsert(
+        {
+            "id": "dec_role_coverage_seed",
+            "status": "pending",
+            "action": {
+                "type": "apply_markdown",
+                "params": {"sku": "4011", "discount_pct": "0.20"},
+                "risk_tier": "high",
+            },
+            "caused_by": ["role_coverage_seed"],
+            "summary": "Pending manager approval: 20% markdown for Amasi 2L at store_12.",
+            "tenant_id": "sa_retail_demo",
+            "critic_verdict": "approved",
+        }
+    )
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions, memory=memory, audit=audit
     )
@@ -193,6 +213,9 @@ async def _run_one(orchestrator: AgentOrchestrator, prompt: RolePrompt) -> RoleC
             final_schema=_ROLE_SCHEMA,
             final_schema_name=f"{prompt.role}_role_coverage",
             temperature=0.0,
+            # The orchestrator's trusted tenant override wins over model-invented tenant
+            # arguments, so this must match the tenant the seed decision was written under.
+            tenant_id="sa_retail_demo",
             require_tool_call_first=prompt.expected_tool is not None,
         )
     except _ROLE_FAILURE_EXCEPTIONS as exc:
