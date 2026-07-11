@@ -140,18 +140,30 @@ def assert_conclusion_grounded_in_tool_results(
     conclusion: str,
     tool_executions: Sequence[Any],
 ) -> None:
-    """Require the conclusion to cite at least one real number from every tool call.
+    """Require the conclusion to cite at least one real *computed* number per tool call.
 
-    Raises UngroundedAnswerError naming the first tool whose result went uncited.
+    Numbers that merely echo a call argument (e.g. the SKU the caller already passed in,
+    like `get_supplier_ranking(sku="4011")` echoing "4011" back) are excluded - citing an
+    identifier the caller already knew isn't evidence of real calculation, only citing a
+    value the tool actually computed is. Found live: Gemma correctly grounded its verdict
+    in genuine outputs (reorder quantities, profit figures) but was rejected for not also
+    repeating the bare SKU digit, which was never the point of this check.
+
+    Raises UngroundedAnswerError naming the first tool whose computed output went uncited.
     """
     for execution in tool_executions:
-        numbers = extract_salient_numbers(execution.result)
-        if not numbers:
+        input_numbers = set(extract_salient_numbers(execution.arguments))
+        output_numbers = [
+            number
+            for number in extract_salient_numbers(execution.result)
+            if number not in input_numbers
+        ]
+        if not output_numbers:
             continue
-        if not any(number in conclusion for number in numbers):
+        if not any(number in conclusion for number in output_numbers):
             raise UngroundedAnswerError(
-                f"conclusion never cites any value from {execution.name}'s result "
-                f"(expected one of {numbers[:5]}) - answer may be ungrounded, not "
+                f"conclusion never cites any computed value from {execution.name}'s result "
+                f"(expected one of {output_numbers[:5]}) - answer may be ungrounded, not "
                 "calculator-backed"
             )
 

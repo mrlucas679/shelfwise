@@ -56,7 +56,11 @@ from shelfwise_storage import (
 from shelfwise_worldgen import create_worldgen_run_store
 from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
-from .agentic_cascade import AgenticCascadeError, run_golden_cascade_via_agents
+from .agentic_cascade import (
+    AgenticCascadeError,
+    run_golden_cascade_via_agents,
+    run_procurement_cascade_via_agents,
+)
 from .cascade import (
     run_catalog_price_check,
     run_cold_chain_cascade,
@@ -1250,6 +1254,27 @@ def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_golden_cascade_via_agents(
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _record_cascade(result)
+
+
+@app.post("/demo/procurement/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
+    """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
+
+    Unlike /demo/procurement (deterministic math + hand-authored evidence), this route
+    requires an actual model call and tool-calling round trip over get_reorder_policy and
+    get_supplier_ranking. With live_required=true (default) it hard-fails with 503 instead
+    of silently falling back to an offline/deterministic answer.
+    """
+    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    try:
+        result = run_procurement_cascade_via_agents(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
