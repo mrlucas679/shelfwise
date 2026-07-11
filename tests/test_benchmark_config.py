@@ -29,7 +29,19 @@ def test_template_defines_all_strategies_and_workload_stages() -> None:
         ("synchronized_all_agents", 1),
     ]
     assert stages[-1].synchronize_all_agents is True
-    assert len(config.workflow.agents) == 8
+    assert [agent.name for agent in config.workflow.agents] == [
+        "orchestrator",
+        "inventory",
+        "sales",
+        "cold_chain",
+        "expiry",
+        "demand",
+        "procurement",
+        "opportunity",
+        "simulation",
+        "critic",
+        "executive",
+    ]
 
 
 def test_replicated_router_uses_round_robin_endpoint_pool() -> None:

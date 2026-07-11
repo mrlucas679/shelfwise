@@ -38,12 +38,34 @@ class InferenceConfig:
     timeout_seconds: int = 25
     compute_resource: str = ""
     accelerator: str = ""
+    routine_base_url: str = ""
+    strong_base_url: str = ""
+    routine_api_key: str = ""
+    strong_api_key: str = ""
 
     def model_for_agent(self, agent: str) -> str:
         return self.strong_model if agent in STRONG_AGENT_NAMES else self.routine_model
 
     def tier_for_agent(self, agent: str) -> ModelTier:
         return ModelTier.STRONG if agent in STRONG_AGENT_NAMES else ModelTier.SMALL
+
+    def base_url_for_agent(self, agent: str) -> str:
+        if self.tier_for_agent(agent) is ModelTier.STRONG:
+            return self.strong_base_url or self.base_url
+        return self.routine_base_url or self.base_url
+
+    def api_key_for_agent(self, agent: str) -> str:
+        if self.tier_for_agent(agent) is ModelTier.STRONG:
+            return self.strong_api_key or self.api_key
+        return self.routine_api_key or self.api_key
+
+    @property
+    def dual_model_configured(self) -> bool:
+        return bool(
+            self.routine_model != self.strong_model
+            and self.base_url_for_agent("inventory")
+            and self.base_url_for_agent("executive")
+        )
 
     def to_public_dict(self) -> dict[str, object]:
         return {
@@ -54,6 +76,9 @@ class InferenceConfig:
             "api_key_present": self.api_key_present,
             "contract": "openai_chat_completions",
             "base_url_host": _host_label(self.base_url),
+            "routine_base_url_host": _host_label(self.base_url_for_agent("inventory")),
+            "strong_base_url_host": _host_label(self.base_url_for_agent("executive")),
+            "dual_model_configured": self.dual_model_configured,
             "timeout_seconds": self.timeout_seconds,
             "compute_resource": self.compute_resource,
             "accelerator": self.accelerator,
@@ -115,16 +140,26 @@ def _default_accelerator(provider: ProviderKind) -> str:
 
 
 def load_inference_config() -> InferenceConfig:
-    base_url = os.getenv("LLM_BASE_URL", "")
+    common_base_url = os.getenv("LLM_BASE_URL", "")
+    routine_base_url = os.getenv("LLM_ROUTINE_BASE_URL", common_base_url)
+    strong_base_url = os.getenv("LLM_STRONG_BASE_URL", common_base_url)
+    base_url = common_base_url or routine_base_url or strong_base_url
+    api_key = os.getenv("LLM_API_KEY", "")
+    routine_api_key = os.getenv("LLM_ROUTINE_API_KEY", api_key)
+    strong_api_key = os.getenv("LLM_STRONG_API_KEY", api_key)
     provider = _detect_provider(base_url)
     return InferenceConfig(
         provider=provider,
         base_url=base_url,
         routine_model=os.getenv("LLM_ROUTINE_MODEL", os.getenv("LLM_MODEL", "offline-routine")),
         strong_model=os.getenv("LLM_STRONG_MODEL", os.getenv("LLM_MODEL", "offline-strong")),
-        api_key=os.getenv("LLM_API_KEY", ""),
-        api_key_present=bool(os.getenv("LLM_API_KEY", "")),
+        api_key=api_key,
+        api_key_present=bool(routine_api_key or strong_api_key),
         timeout_seconds=_timeout_seconds(),
         compute_resource=os.getenv("LLM_COMPUTE_RESOURCE", _default_compute_resource(provider)),
         accelerator=os.getenv("LLM_ACCELERATOR", _default_accelerator(provider)),
+        routine_base_url=routine_base_url,
+        strong_base_url=strong_base_url,
+        routine_api_key=routine_api_key,
+        strong_api_key=strong_api_key,
     )

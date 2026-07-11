@@ -129,7 +129,9 @@ class OpenAICompatibleInferenceClient:
         run_id = f"mr_{uuid4().hex[:12]}"
         effective_correlation_id = correlation_id or run_id
         effective_model = model or self._config.model_for_agent(agent)
-        effective_base_url = self._config.base_url if base_url is None else base_url
+        effective_base_url = (
+            self._config.base_url_for_agent(agent) if base_url is None else base_url
+        )
         provider = (
             self._config.provider.value
             if effective_base_url == self._config.base_url
@@ -160,7 +162,8 @@ class OpenAICompatibleInferenceClient:
                 user=user,
             )
             return result
-        if not self._config.api_key_present:
+        effective_api_key = self._config.api_key_for_agent(agent)
+        if not effective_api_key:
             self._record_error(
                 run_id=run_id,
                 correlation_id=effective_correlation_id,
@@ -195,7 +198,7 @@ class OpenAICompatibleInferenceClient:
             url,
             data=json.dumps(payload).encode("utf-8"),
             headers={
-                "Authorization": f"Bearer {self._config.api_key}",
+                "Authorization": f"Bearer {effective_api_key}",
                 "Content-Type": "application/json",
             },
             method="POST",
