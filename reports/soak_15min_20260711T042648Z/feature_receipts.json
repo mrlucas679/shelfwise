@@ -1,0 +1,186 @@
+[
+  {
+    "detail": "app=done retry=False dlq=True dead=1",
+    "evidence": {},
+    "feature": "worker_retry_dlq",
+    "passed": true,
+    "route": "POST /worker/process-one"
+  },
+  {
+    "detail": "cycles=333 accepted=26640 missing_consumers=[]",
+    "evidence": {
+      "observed_consumers": [
+        "cold_chain_alert",
+        "expiry_entry",
+        "sale",
+        "scan",
+        "supplier_update"
+      ],
+      "observed_types": [
+        "cold_chain_alert",
+        "expiry_entry",
+        "sale",
+        "scan",
+        "shipment",
+        "stock_update",
+        "supplier_update"
+      ],
+      "routes": {
+        "cold_chain_alert": {
+          "consumer": "cold_chain_cascade",
+          "reason": "",
+          "stored_only": false
+        },
+        "expiry_entry": {
+          "consumer": "expiry_risk_cascade",
+          "reason": "",
+          "stored_only": false
+        },
+        "sale": {
+          "consumer": "sales_or_catalog_price_cascade",
+          "reason": "",
+          "stored_only": false
+        },
+        "scan": {
+          "consumer": "golden_expiry_cascade",
+          "reason": "",
+          "stored_only": false
+        },
+        "shipment": {
+          "consumer": null,
+          "reason": "fulfilment fact retained until shipment reconciliation consumes it",
+          "stored_only": true
+        },
+        "stock_update": {
+          "consumer": null,
+          "reason": "inventory snapshot retained for joins and later demand reasoning",
+          "stored_only": true
+        },
+        "supplier_update": {
+          "consumer": "procurement_cascade",
+          "reason": "",
+          "stored_only": false
+        }
+      },
+      "stored_only": [
+        "shipment",
+        "stock_update"
+      ]
+    },
+    "feature": "world_event_stream",
+    "passed": true,
+    "route": "POST /ingest"
+  },
+  {
+    "detail": "golden_agents=['critic', 'demand', 'executive', 'expiry', 'inventory', 'opportunity', 'simulation'] expiry_seen=True",
+    "evidence": {},
+    "feature": "golden_expiry",
+    "passed": true,
+    "route": "POST /demo/golden"
+  },
+  {
+    "detail": "status=rejected critic=rejected",
+    "evidence": {},
+    "feature": "critic_rejection",
+    "passed": true,
+    "route": "POST /demo/critic-rejection"
+  },
+  {
+    "detail": "scenario=procurement_reorder_supplier_cover status=pending action=reorder",
+    "evidence": {},
+    "feature": "procurement",
+    "passed": true,
+    "route": "POST /demo/procurement"
+  },
+  {
+    "detail": "scenario=pos_sale_price_integrity status=approved action=record_sale",
+    "evidence": {},
+    "feature": "sales",
+    "passed": true,
+    "route": "POST /demo/sales"
+  },
+  {
+    "detail": "scenario=cold_chain_generator_failure_facilities_review status=pending action=dispatch_facilities_check",
+    "evidence": {},
+    "feature": "cold_chain",
+    "passed": true,
+    "route": "POST /demo/cold-chain"
+  },
+  {
+    "detail": "scenario=pos_price_outlier_review status=pending action=review_price_exception",
+    "evidence": {},
+    "feature": "misprice",
+    "passed": true,
+    "route": "POST /ingest"
+  },
+  {
+    "detail": "statuses=accepted,duplicate,invalid",
+    "evidence": {},
+    "feature": "connector_duplicate_invalid",
+    "passed": true,
+    "route": "POST /connectors/{system}/intake"
+  },
+  {
+    "detail": "review=True type=scan",
+    "evidence": {},
+    "feature": "multimodal_review",
+    "passed": true,
+    "route": "POST /scan/barcode"
+  },
+  {
+    "detail": "created=200 owner=200 cross=404/404/404",
+    "evidence": {},
+    "feature": "auth_tenant_isolation",
+    "passed": true,
+    "route": "GET|POST /decisions/{decision_id}"
+  },
+  {
+    "detail": "tools=11 agents=['cold_chain', 'critic', 'demand', 'executive', 'expiry', 'inventory', 'opportunity', 'procurement', 'sales', 'simulation'] total_units=30",
+    "evidence": {},
+    "feature": "tools_agents",
+    "passed": true,
+    "route": "GET /tools/platform; POST /intelligence/stock/fefo-split"
+  },
+  {
+    "detail": "approved=2934 rejected=56 mismatches=0",
+    "evidence": {},
+    "feature": "hitl_approval_rejection",
+    "passed": true,
+    "route": "POST /decisions/{decision_id}/{approve|reject}"
+  },
+  {
+    "detail": "tasks=2934 approvals=2934",
+    "evidence": {},
+    "feature": "writeback",
+    "passed": true,
+    "route": "GET /writeback/tasks"
+  },
+  {
+    "detail": "events=2934 movement=34/34",
+    "evidence": {},
+    "feature": "learning",
+    "passed": true,
+    "route": "GET /learning"
+  },
+  {
+    "detail": "calls=333 model=333 offline=0 errors=0",
+    "evidence": {},
+    "feature": "chat_inference",
+    "passed": true,
+    "route": "POST /chat; GET /mlops/model-runs"
+  },
+  {
+    "detail": "sections=['connectors', 'decisions', 'events', 'inference', 'learning', 'tenant_id', 'worker', 'writeback']",
+    "evidence": {},
+    "feature": "observability",
+    "passed": true,
+    "route": "GET /mlops/observability"
+  },
+  {
+    "detail": "backend=memory messages=26644 streams=['shelfwise:events:sa_retail_demo']",
+    "evidence": {},
+    "feature": "event_bus",
+    "passed": true,
+    "route": "GET /mlops/observability"
+  }
+]
