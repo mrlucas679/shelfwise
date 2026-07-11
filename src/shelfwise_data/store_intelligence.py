@@ -6,6 +6,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
 from typing import Any
 
+from shelfwise_decision_science import StockSourceCandidate, plan_stock_sourcing
+
 
 def _decimal(value: object) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
@@ -436,6 +438,44 @@ def build_store_intelligence_demo() -> dict[str, Any]:
             transfer_available_units=18,
         )
     )
+    stock_sourcing = None
+    if supplier_cover.gap_before_delivery_units > 0:
+        stock_sourcing = plan_stock_sourcing(
+            sku="4011",
+            units_needed=supplier_cover.gap_before_delivery_units,
+            candidates=(
+                StockSourceCandidate(
+                    source_type="branch",
+                    source_id="store_02_sandton",
+                    available_units=6,
+                    distance_km=Decimal("5"),
+                    lead_time_hours=Decimal("2"),
+                ),
+                StockSourceCandidate(
+                    source_type="branch",
+                    source_id="store_09_midrand",
+                    available_units=14,
+                    distance_km=Decimal("22"),
+                    lead_time_hours=Decimal("4"),
+                ),
+                StockSourceCandidate(
+                    source_type="distribution_center",
+                    source_id="dc_gauteng_central",
+                    available_units=400,
+                    distance_km=Decimal("65"),
+                    lead_time_hours=Decimal("18"),
+                    unit_cost=Decimal("18.00"),
+                ),
+                StockSourceCandidate(
+                    source_type="supplier",
+                    source_id="supplier:dairyco",
+                    available_units=200,
+                    distance_km=Decimal("140"),
+                    lead_time_hours=Decimal("72"),
+                    unit_cost=Decimal("18.00"),
+                ),
+            ),
+        )
     learning = summarize_outcome(
         DecisionOutcome(
             sku="yoghurt_1l",
@@ -450,5 +490,6 @@ def build_store_intelligence_demo() -> dict[str, Any]:
         "batch_split": batch_split.to_dict(),
         "delivery_reconciliation": delivery.to_dict(),
         "supplier_cover": supplier_cover.to_dict(),
+        "stock_sourcing": stock_sourcing.to_dict() if stock_sourcing is not None else None,
         "learning_summary": learning.to_dict(),
     }

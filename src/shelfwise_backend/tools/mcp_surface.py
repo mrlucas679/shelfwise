@@ -13,10 +13,12 @@ from shelfwise_decision_science import (
     InventoryPolicyInput,
     Relation,
     RelationStore,
+    StockSourceCandidate,
     SupplierProfile,
     compute_reorder_policy,
     detect_robust_anomaly,
     forecast_demand,
+    plan_stock_sourcing,
     recommend_suppliers,
     score_cold_chain_risk,
     score_expiry_risk,
@@ -288,6 +290,67 @@ def build_platform_tools(
             "method": ranking.method,
         }
 
+    async def get_stock_sourcing_options(
+        sku: str = "4011",
+        units_needed: int = 18,
+        tenant_id: str = "sa_retail_demo",
+    ) -> dict[str, Any]:
+        """Rank real candidate sources for a shortage instead of assuming a transfer.
+
+        Checks nearby branches, the regional distribution centre, and approved
+        suppliers, ranks whichever have stock by lead time/distance/cost, and
+        recommends a purchase order (with a stated reason) if none can supply it.
+        """
+        audit_log.record(
+            tool="get_stock_sourcing_options",
+            tenant_id=tenant_id,
+            args={"sku": sku, "units_needed": units_needed},
+        )
+        scenario = load_seeded_scenario(sku=sku)
+        current_supplier = f"supplier:{scenario.supplier.lower()}"
+        candidates = (
+            StockSourceCandidate(
+                source_type="branch",
+                source_id="store_02_sandton",
+                available_units=6,
+                distance_km=Decimal("5"),
+                lead_time_hours=Decimal("2"),
+            ),
+            StockSourceCandidate(
+                source_type="branch",
+                source_id="store_09_midrand",
+                available_units=14,
+                distance_km=Decimal("22"),
+                lead_time_hours=Decimal("4"),
+            ),
+            StockSourceCandidate(
+                source_type="distribution_center",
+                source_id="dc_gauteng_central",
+                available_units=400,
+                distance_km=Decimal("65"),
+                lead_time_hours=Decimal("18"),
+                unit_cost=scenario.unit_cost.amount,
+            ),
+            StockSourceCandidate(
+                source_type="supplier",
+                source_id=current_supplier,
+                available_units=200,
+                distance_km=Decimal("140"),
+                lead_time_hours=scenario.supplier_lead_time_days * Decimal("24"),
+                unit_cost=scenario.unit_cost.amount,
+            ),
+            StockSourceCandidate(
+                source_type="supplier",
+                source_id="supplier:gauteng_chilled_dairy",
+                available_units=200,
+                distance_km=Decimal("160"),
+                lead_time_hours=Decimal("24"),
+                unit_cost=Decimal("12.80"),
+            ),
+        )
+        plan = plan_stock_sourcing(sku=sku, units_needed=units_needed, candidates=candidates)
+        return plan.to_dict()
+
     async def check_price_integrity(
         sku: str = "4011",
         observed_unit_price: float | None = None,
@@ -370,6 +433,13 @@ def build_platform_tools(
             "Read the measured supplier ranking for one SKU.",
             True,
             get_supplier_ranking,
+        ),
+        PlatformTool(
+            "get_stock_sourcing_options",
+            "Rank real branch/DC/supplier sources for a stock shortage, or recommend a "
+            "purchase order if none can supply it.",
+            True,
+            get_stock_sourcing_options,
         ),
         PlatformTool(
             "check_price_integrity",

@@ -22,6 +22,12 @@ from .relations import (
     recommend_suppliers,
 )
 from .simulation import MarkdownSimulation, simulate_markdown
+from .sourcing import (
+    RankedStockSource,
+    StockSourceCandidate,
+    StockSourcingPlan,
+    plan_stock_sourcing,
+)
 from .tools import serialise_tool_result
 
 __all__ = [
@@ -37,9 +43,12 @@ __all__ = [
     "InventoryPolicyInput",
     "MarkdownSimulation",
     "RankedAction",
+    "RankedStockSource",
     "Relation",
     "RelationStore",
     "ReorderPolicy",
+    "StockSourceCandidate",
+    "StockSourcingPlan",
     "SupplierProfile",
     "SupplierRanking",
     "SupplierScore",
@@ -48,6 +57,7 @@ __all__ = [
     "detect_robust_anomaly",
     "forecast_demand",
     "forecast_demand_tsfm",
+    "plan_stock_sourcing",
     "rank_actions",
     "recommend_suppliers",
     "score_cold_chain_risk",

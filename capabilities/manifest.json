@@ -3319,7 +3319,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 374,
+          "line": 444,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3339,7 +3339,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 332,
+          "line": 395,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3359,7 +3359,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 356,
+          "line": 419,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3379,7 +3379,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 344,
+          "line": 407,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3399,7 +3399,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 350,
+          "line": 413,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3419,7 +3419,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 362,
+          "line": 425,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3439,7 +3439,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 324,
+          "line": 387,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3452,6 +3452,26 @@
       ]
     },
     {
+      "id": "tool:platform:get_stock_sourcing_options",
+      "kind": "tool",
+      "name": "Get Stock Sourcing Options",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 437,
+          "path": "src/shelfwise_backend/tools/mcp_surface.py",
+          "symbol": "PlatformTool"
+        }
+      ],
+      "status": "verified",
+      "surface": "platform",
+      "tool_name": "get_stock_sourcing_options",
+      "verification_nodeids": [
+        "tests/test_backend_observability_tools.py::test_platform_tools_are_read_only_grounded_and_audited"
+      ]
+    },
+    {
       "id": "tool:platform:get_supplier_ranking",
       "kind": "tool",
       "name": "Get Supplier Ranking",
@@ -3459,7 +3479,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 368,
+          "line": 431,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3479,7 +3499,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 325,
+          "line": 388,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3499,7 +3519,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 326,
+          "line": 389,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -3519,7 +3539,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 338,
+          "line": 401,
           "path": "src/shelfwise_backend/tools/mcp_surface.py",
           "symbol": "PlatformTool"
         }
@@ -4009,7 +4029,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:b11278aa816de3283c560301b6029d05c4b60278a3de29cee8ca4d1332a62fa1",
+  "fingerprint": "sha256:38ec98f6507074868682b27c92d1cadb602164aeb5e80afa558288198c8e5ac2",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }
