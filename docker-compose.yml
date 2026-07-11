@@ -46,7 +46,8 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       SHELFWISE_STORE_BACKEND: postgres
       SHELFWISE_BUS_BACKEND: redis

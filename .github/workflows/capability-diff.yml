@@ -42,7 +42,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install focused verification dependencies
-        run: python -m pip install --upgrade pip pydantic pytest ruff
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
 
       - name: Validate current capability snapshot
         if: github.event_name != 'pull_request'

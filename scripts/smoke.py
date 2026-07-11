@@ -18,7 +18,7 @@ def main() -> None:
     health = client.get("/health")
     assert health.status_code == 200, health.text
 
-    run = client.get("/demo/golden")
+    run = client.post("/demo/golden")
     assert run.status_code == 200, run.text
     body = run.json()
     assert body["decision"]["status"] == "pending"

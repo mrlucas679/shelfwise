@@ -275,6 +275,21 @@ def test_demo_golden_read_does_not_reset_resolved_decision() -> None:
     assert repeated_decision["review"] is None
 
 
+def test_demo_golden_get_is_preview_and_post_records_trace() -> None:
+    client = TestClient(app)
+
+    preview = client.get("/demo/golden")
+    preview_trace = client.get(f"/trace/{preview.json()['correlation_id']}")
+    recorded = client.post("/demo/golden")
+    recorded_trace = client.get(f"/trace/{recorded.json()['correlation_id']}")
+
+    assert preview.status_code == 200
+    assert preview_trace.status_code == 404
+    assert recorded.status_code == 200
+    assert recorded_trace.status_code == 200
+    assert recorded_trace.json()["trace"]["decision_id"] == recorded.json()["decision"]["id"]
+
+
 def test_demo_golden_exposes_store_intelligence_numbers() -> None:
     client = TestClient(app)
     response = client.post("/demo/golden")

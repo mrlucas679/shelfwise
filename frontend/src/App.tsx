@@ -279,7 +279,7 @@ declare global {
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
-const DEFAULT_API_BASE = 'http://localhost:8000'
+const DEFAULT_API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
 const DEMO_PATH = '/demo/golden'
 
 // Runtime config (public/shelfwise-config.js) lets a deployed bundle point at any backend
@@ -303,10 +303,7 @@ function joinUrl(base: string, path: string): string {
 }
 function requestUrls(path: string): string[] {
   const configured = configuredBase()
-  const urls: string[] = []
-  if (!configured && import.meta.env.DEV) urls.push(path)
-  urls.push(joinUrl(configured || DEFAULT_API_BASE, path))
-  return Array.from(new Set(urls))
+  return [joinUrl(configured || DEFAULT_API_BASE, path)]
 }
 function backendRequestUrls(path: string): string[] {
   return [joinUrl(configuredBase() || DEFAULT_API_BASE, path)]

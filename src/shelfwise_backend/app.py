@@ -485,23 +485,30 @@ def inference_readiness_payload() -> dict[str, object]:
     """Report whether live AMD MI300X/vLLM (or Fireworks) inference is configured."""
     config = load_inference_config()
     public = config.to_public_dict()
-    network_ready = (
-        bool(config.base_url)
-        and config.api_key_present
+    routine_ready = (
+        bool(config.base_url_for_agent("inventory"))
+        and bool(config.api_key_for_agent("inventory"))
         and bool(config.routine_model)
-        and bool(config.strong_model)
-        and config.timeout_seconds < 30
     )
-    amd_ready = network_ready and config.provider is ProviderKind.VLLM_MI300X
+    strong_ready = (
+        bool(config.base_url_for_agent("executive"))
+        and bool(config.api_key_for_agent("executive"))
+        and bool(config.strong_model)
+    )
+    network_ready = routine_ready and strong_ready and config.timeout_seconds < 30
+    dual_ready = network_ready and config.dual_model_configured
+    amd_ready = dual_ready and config.provider is ProviderKind.VLLM_MI300X
     return {
         "ready_for_live_inference": network_ready,
+        "ready_for_dual_model_inference": dual_ready,
         "ready_for_amd_demo": amd_ready,
         "amd_compute_used_by_default": config.provider is ProviderKind.VLLM_MI300X,
         "inference": public,
         "checks": {
             "openai_chat_completions_contract": "ok",
-            "base_url": "ok" if config.base_url else "missing",
-            "api_key": "ok" if config.api_key_present else "missing",
+            "routine_endpoint": "ok" if routine_ready else "missing",
+            "strong_endpoint": "ok" if strong_ready else "missing",
+            "distinct_model_ids": "ok" if config.dual_model_configured else "missing",
             "routine_model": "ok" if config.routine_model else "missing",
             "strong_model": "ok" if config.strong_model else "missing",
             "timeout_under_30s": "ok" if config.timeout_seconds < 30 else "risk",
@@ -510,9 +517,9 @@ def inference_readiness_payload() -> dict[str, object]:
             ),
         },
         "next_step": (
-            "Run /inference/smoke against the vLLM endpoint."
+            "Run routine and strong inference smoke checks against both vLLM endpoints."
             if amd_ready
-            else "Set LLM_BASE_URL, LLM_API_KEY, and model env vars for the MI300X vLLM endpoint."
+            else "Configure distinct routine and strong Gemma models and verify both endpoints."
         ),
     }
 

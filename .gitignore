@@ -10,6 +10,11 @@ venv/
 !.env.example
 .runtime-logs/
 data/training/
+!data/training/
+data/training/*
+!data/training/shelfwise_multimodal_smoke.jsonl
+!data/training/shelfwise_preference_smoke.jsonl
+!data/training/shelfwise_sft_smoke.jsonl
 data/harness_runs/
 .agents/
 .claude/

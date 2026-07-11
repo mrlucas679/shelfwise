@@ -36,10 +36,15 @@ tenant isolation enforced server-side, and structured markdown answers.
   finished with **333/333 chat calls genuinely model-backed (zero offline fallbacks, zero
   errors), 4,618 decisions with zero ID collisions, 2,990 HITL approve/reject cycles with
   zero mismatches** — the harness hard-fails a `live_required` run on any offline answer.
+- The soak was sequential product validation, not a concurrent inference-capacity benchmark.
+  See the [submission evidence report](reports/SUBMISSION_EVIDENCE_REPORT.md) for measured values,
+  missing telemetry, and the deployment recommendation.
 - Agentic endpoints default to `live_required`: if the MI300X endpoint is unreachable they
   return 503 instead of silently faking success.
 
 Submission assets (slide deck PDF and cover image) are in [`submission/`](submission/).
+The [original problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md) distinguishes proven,
+partial, and missing retailer workflows.
 
 ## Quick Start
 
@@ -243,15 +248,16 @@ config change, not a code change.
 
 ### AMD Developer Cloud / vLLM preflight
 
-Before creating the MI300X droplet, the app is ready to accept an OpenAI-compatible vLLM endpoint.
-When the droplet exists, configure the backend with:
+Configure routine and strong tiers independently. The common endpoint/key variables remain
+supported as a single-model fallback, but submission readiness requires distinct model IDs:
 
 ```powershell
-$env:LLM_BASE_URL="http://<mi300x-public-ip>:8000"
-$env:LLM_API_KEY="demo-key"
-$env:LLM_MODEL="shelfwise-demo"
-$env:LLM_ROUTINE_MODEL="shelfwise-demo"
-$env:LLM_STRONG_MODEL="shelfwise-demo"
+$env:LLM_ROUTINE_BASE_URL="http://<routine-endpoint>:8000"
+$env:LLM_STRONG_BASE_URL="http://<strong-endpoint>:8000"
+$env:LLM_ROUTINE_API_KEY="<routine-key>"
+$env:LLM_STRONG_API_KEY="<strong-key>"
+$env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-31B-it"
 $env:LLM_TIMEOUT_SECONDS="25"
 $env:LLM_COMPUTE_RESOURCE="AMD Developer Cloud"
 $env:LLM_ACCELERATOR="AMD Instinct MI300X"
@@ -265,8 +271,9 @@ Invoke-RestMethod http://127.0.0.1:8000/inference/smoke
 Invoke-RestMethod http://127.0.0.1:8000/submission/readiness
 ```
 
-For a hosted frontend, set `frontend/public/shelfwise-config.js` or build with `VITE_API_BASE`
-so the browser calls the public backend URL instead of localhost.
+The production Nginx image proxies frontend and API traffic through one origin. With the supplied
+Compose mapping, open `http://<host>:5173`; judge browsers never call their own localhost. A custom
+backend can still be selected at build time with `VITE_API_BASE`.
 
 ## Gemma 4 Multimodal Training Harness
 
