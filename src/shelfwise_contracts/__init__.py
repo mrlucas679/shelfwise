@@ -38,6 +38,7 @@ class EventType(StrEnum):
     SUPPLIER_UPDATE = "supplier_update"
     SHIPMENT = "shipment"
     RECALL_NOTICE = "recall_notice"
+    INVENTORY_EXCEPTION = "inventory_exception"
 
 
 class EventSource(StrEnum):

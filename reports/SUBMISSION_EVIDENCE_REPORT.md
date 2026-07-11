@@ -112,6 +112,9 @@ the decision. This avoids one model call per SKU.
 8. The original product had no recall event or quarantine workflow. Recall notices now fail closed
    on missing safety facts, create lot-specific stop-sale/quarantine decisions, require HITL, and
    participate in the world simulator and full-system receipt gate.
+9. Returns, damage, shrink, and misplaced stock previously shared only generic anomaly plumbing.
+   They now use one canonical inventory-exception event with type-specific validation and actions,
+   Critic/HITL governance, write-back tasks, world simulation, and a runnable UI drill.
 
 ## Deployment Alternatives
 

@@ -573,6 +573,10 @@ function describeAction(action?: RecommendedAction): string {
   if (action.type === 'monitor') return 'Monitor only'
   if (action.type === 'supplier_switch') return 'Switch supplier'
   if (action.type === 'quarantine_lot') return 'Quarantine recalled lot'
+  if (action.type === 'process_return') return 'Process inventory return'
+  if (action.type === 'quarantine_damaged_stock') return 'Quarantine damaged stock'
+  if (action.type === 'investigate_shrink') return 'Investigate stock shrink'
+  if (action.type === 'relocate_stock') return 'Relocate misplaced stock'
   return formatLabel(action.type)
 }
 function firstActionEvidence(evidence?: EvidenceObject[], actionType?: string): EvidenceObject | undefined {
@@ -1151,6 +1155,7 @@ const GATED_ENDPOINTS = [
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
   { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
   { label: 'Recall quarantine drill', method: 'POST', path: '/demo/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
+  { label: 'Inventory exception drill', method: 'POST', path: '/demo/inventory-exception', group: 'operations', detail: 'Runs a seeded shrink count through event ingest, type-specific evidence, HITL, and write-back.' },
   { label: 'Golden demo (agentic)', method: 'POST', path: '/demo/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Procurement demo', method: 'GET/POST', path: '/demo/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
   { label: 'Procurement demo (agentic)', method: 'POST', path: '/demo/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
@@ -2660,7 +2665,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => {
             const isAgentic = item.path.endsWith('/agentic')
-            const isRunnable = isAgentic || item.path === '/demo/recall'
+            const isRunnable = isAgentic || item.path === '/demo/recall' || item.path === '/demo/inventory-exception'
             const run = agenticRuns[item.path]
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
@@ -3098,7 +3103,7 @@ function App() {
         state: 'running',
         detail: path.endsWith('/agentic')
           ? 'Calling the live Gemma tool-calling loop...'
-          : 'Running the recall through event ingest, safety policy, and HITL...',
+          : 'Running the safety exception through event ingest, policy, and HITL...',
       },
     }))
     const controller = new AbortController()

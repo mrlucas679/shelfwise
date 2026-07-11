@@ -70,9 +70,11 @@ from .cascade import (
     run_critic_rejection_cascade,
     run_expiry_risk_check,
     run_golden_cascade,
+    run_inventory_exception_cascade,
     run_procurement_cascade,
     run_recall_cascade,
     run_sales_cascade,
+    validate_inventory_exception,
     validate_recall_notice,
 )
 from .chat import ChatBody, build_chat_reply_with_meta
@@ -629,6 +631,11 @@ def ingest_event(
     if event.type is EventType.RECALL_NOTICE:
         try:
             validate_recall_notice(event)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if event.type is EventType.INVENTORY_EXCEPTION:
+        try:
+            validate_inventory_exception(event)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1287,6 +1294,35 @@ def demo_recall() -> dict[str, object]:
     return cascade
 
 
+@app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
+def demo_inventory_exception() -> dict[str, object]:
+    """Drive a seeded shrink count through the real event and HITL pipeline."""
+    suffix = uuid4().hex[:12]
+    event = Event(
+        id=f"evt_demo_inventory_exception_{suffix}",
+        type=EventType.INVENTORY_EXCEPTION,
+        ts=datetime.now(UTC),
+        actor="cycle_count_team",
+        tenant_id="sa_retail_demo",
+        correlation_id=f"demo_inventory_exception_{suffix}",
+        payload={
+            "exception_id": f"EXC-DEMO-{suffix}",
+            "exception_type": "shrink",
+            "sku": "4011",
+            "reason": "cycle count below system stock",
+            "location": "store_12_soweto",
+            "expected_units": 30,
+            "counted_units": 24,
+            "count_reference": f"COUNT-{suffix}",
+        },
+    )
+    outcome = _record_pipeline_event(event)
+    cascade = outcome.get("cascade")
+    if not isinstance(cascade, dict):
+        raise HTTPException(status_code=500, detail="Inventory demo did not produce a decision")
+    return cascade
+
+
 @app.get("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
 def demo_golden_get() -> dict[str, object]:
     return _preview_demo_cascade(run_golden_cascade())
@@ -1820,6 +1856,10 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
     sku = str(event.payload.get("sku", ""))
     if event.type is EventType.RECALL_NOTICE:
         result = run_recall_cascade(event)
+        _attach_event_causality(result, event)
+        return _record_cascade(result)
+    if event.type is EventType.INVENTORY_EXCEPTION:
+        result = run_inventory_exception_cascade(event)
         _attach_event_causality(result, event)
         return _record_cascade(result)
     if event.type is EventType.SCAN and sku == "4011":
