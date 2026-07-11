@@ -1,4 +1,45 @@
-# HANDOFF — session state as of 2026-07-11 ~01:40 (local)
+# HANDOFF — session state as of 2026-07-11 ~05:15 (local)
+
+## Latest update (this session) — frontend E2E verified, droplet is LIVE not off
+
+Despite the prior note saying "user turned the droplet off," `/v1/models` and `/health` on
+`165.245.130.225:8000` both returned 200 with `google/gemma-4-E4B-it` loaded when checked
+just now. **It is live and billing right now** — either it was never actually stopped or it
+was restarted without a status update reaching this file. Verify current state before
+assuming either way.
+
+**Frontend end-to-end against the live backend is now VERIFIED** (the biggest previously-
+untested demo risk is closed): started `uvicorn shelfwise_backend.app:app` with `.env`
+loaded + the Vite dev server, drove the actual UI in a browser.
+- Chat: typed a real question in the UI, got a real answer; confirmed via direct curl that
+  `/chat` responses carry `x-shelfwise-answer-source: model`, `x-shelfwise-model:
+  google/gemma-4-E4B-it`, `x-shelfwise-provider: vllm_mi300x`, `x-shelfwise-replayed: false`.
+- HITL: clicked Approve on one pending decision (confirmation dialog → "Yes, apply it" →
+  real `POST /decisions/{id}/approve` → 200, UI updated to "Approved... 1 approval still
+  waiting"), then Reject on the other (→ `POST /decisions/{id}/reject` → 200).
+- Zero browser console errors throughout.
+- Both servers were left running (not stopped) so the next session can go straight to
+  recording. Backend log: `backend_verify.log` in repo root (gitignored, harmless to delete).
+
+A Haiku-model read-only audit (to save tokens) compared the original plan docs
+(CLAUDE.md, plot/domains/*.md, README.md, capability manifest) against actual code. Full
+coverage matrix was reported in-session; headline findings:
+- Confirms what was already known: only the golden cascade's Critic/Executive run through
+  real Gemma reasoning; procurement/sales/cold-chain cascades are deterministic math only.
+- Flagged that Postgres RLS policies would be bypassed if run under a superuser DB role —
+  **verified this is NOT currently relevant**: `.env` has `SHELFWISE_STORE_BACKEND=memory`,
+  so no Postgres/RLS is in the loop for the current demo deployment at all. Only matters if
+  the Postgres profile is ever actually used — note as a known gap for that profile, don't
+  chase it now.
+- Batch/lot-level expiry tracking and fleet-wide (500k SKU) scoring are not implemented —
+  legitimate gaps, multi-day scope, not fixable before today's deadline. Mention honestly in
+  the deck as roadmap, don't claim as done.
+- Dual-model routing is code-complete (`base_url_for_agent`/`api_key_for_agent`,
+  `dual_model_configured` flag) but only one model endpoint is actually deployed
+  (`dual_model_configured: false` confirmed live) — see "two-model deployment" below.
+
+Two more commits landed this session on top of the prior handoff (chat multi-user identity,
+dual-model routing config) — see updated commit log below.
 
 ## Critical correction — verified after the original handoff
 
@@ -28,6 +69,11 @@ untracked run-artifact dirs: `20260710T*/`, `reports/`, `shelfwise-gemma-final-a
 `stress_run_*/`, `data/harness_runs/`, `full_capacity_v2.log`).
 
 Latest commits (newest first):
+- `6965473` route routine/strong agent tiers to independently configured model endpoints
+- `45fec59` chat multi-user: conversation/message identity, idempotent replay, tenant isolation
+  (this commit also swept in the full_system.py stricter live_required audit + revalidation
+  script + HANDOFF.md, since they were pre-staged when committed - all content is real and
+  tested, the commit message just under-describes scope; not worth rewriting history over)
 - `5b30d15` tenant-isolation fix + full 11/11 tool coverage
 - `561c50b` bound /chat state (unbounded-prompt scaling bug)
 - `c615399` drop strict json_schema decoding (vLLM/Gemma whitespace-loop bug) + 11-role harness
@@ -35,7 +81,7 @@ Latest commits (newest first):
 - `c7fbdaf` wire golden cascade Critic/Executive through real Gemma tool calling
 - earlier: merge of gpu-notebook-testing, docker-compose env_file fix
 
-389/389 tests pass. `python -m pytest -q`, `python -m ruff check .`, and the production frontend
+394/394 tests pass. `python -m pytest -q`, `python -m ruff check .`, and the production frontend
 build pass. Capability manifest is in sync (`python scripts/compare_capability_manifests.py --write`
 regenerates it after any route/tool/test change — the contract test fails when stale).
 
@@ -89,16 +135,24 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
 
 ## NEXT STEPS, in priority order (the plan we were executing)
 
-1. Restore and prove the droplet from the cloud dashboard, then verify `/v1/models` and a
-   `live_required` `/chat` response. Re-run a bounded soak before claiming capacity success.
-2. **Frontend end-to-end against the live backend** — never verified this session (only
-   `npx tsc --noEmit`). The demo IS the frontend; this is the biggest remaining demo risk.
-   Backend: `uvicorn shelfwise_backend.app:app` with `.env` loaded; frontend: `npm run dev`
-   in `frontend/`. Verify: runtime-config/inference badge shows live MI300X, chat answers
-   come from the model, golden + agentic flows and HITL approve/reject work in the UI.
-3. **Record the demo video while the droplet is hot.**
+1. ~~Restore/verify the droplet~~ DONE this session - it's live (`165.245.130.225:8000`,
+   `google/gemma-4-E4B-it`). Just confirm it's still up before recording (`curl
+   http://165.245.130.225:8000/v1/models`) since availability has flip-flopped already.
+2. ~~Frontend end-to-end against the live backend~~ DONE this session - chat (real model
+   answers, verified via response headers), HITL approve, and HITL reject all confirmed
+   working through actual browser clicks against the live backend, zero console errors.
+   Both servers were left running: backend on :8000 (`uvicorn`, `.env` loaded), frontend on
+   :5173 (`npm run dev` / vite). If either died, restart: backend -
+   `set -a && source .env && set +a && python -m uvicorn shelfwise_backend.app:app --host
+   0.0.0.0 --port 8000 --app-dir src`; frontend - `npm run dev` in `frontend/`.
+3. **Record the demo video now, while the droplet is hot and the app is verified working.**
+   This is the top remaining priority - everything else is secondary to actually capturing it.
 4. **Merge this branch to `main`** (required for submission).
-5. Only if time remains: wire procurement cascade through the agentic path (pattern is in
+5. Only if time remains: deploy a second model on a second endpoint and set
+   `LLM_STRONG_BASE_URL`/`LLM_STRONG_API_KEY` (routing code is ready,
+   `dual_model_configured` will flip true once real credentials point at a second serving
+   endpoint) to genuinely satisfy "at least two models" rather than just the routing layer;
+   wire procurement cascade through the agentic path (pattern is in
    `src/shelfwise_backend/agentic_cascade.py`); run `shelfwise_benchmark` at 1/8/32
    concurrency against the live endpoint for the report.
 
@@ -111,6 +165,16 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
 - Training matrix: E2B/12B W7900 shakedown blocked (Jupyter portal down). Only E4B is live.
 - Benchmark architecture comparison (shared/replicated/per-agent/hybrid) is built + tested
   offline but has no real cloud measurements yet.
+- Only one model is actually deployed/served (google/gemma-4-E4B-it). The routine/strong
+  per-agent endpoint routing is real and tested (`dual_model_configured` flag), but it's
+  currently pointed at the same single endpoint for both tiers - genuinely deploying two
+  is unstarted infrastructure work, not just config.
+- Batch/lot-level expiry tracking and fleet-wide (500k+ SKU) scoring described in the
+  original blueprint are not implemented - real, multi-day scope, out of reach before the
+  deadline. State this as roadmap in the deck, not as done.
+- Postgres RLS policies exist in `schema.sql` but are irrelevant to the current demo
+  deployment (`SHELFWISE_STORE_BACKEND=memory` - no Postgres in the loop at all); only
+  matters if/when the Postgres profile is actually used in a future deployment.
 - MI300X operator-side AMD-SMI telemetry: not collected (provider gives no host access);
   report as missing evidence, never estimated. vLLM /metrics IS available on the droplet.
 
