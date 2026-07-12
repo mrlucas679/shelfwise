@@ -52,3 +52,45 @@ jobs:
 
       - name: Validate Compose
         run: docker compose config --quiet
+
+      - name: Boot production topology
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          SHELFWISE_COOKIE_SECURE: "false"
+        run: docker compose -f docker-compose.production.yml up --build -d --wait
+
+      - name: Smoke production public origin
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+        run: |
+          trap 'docker compose -f docker-compose.production.yml logs --no-color backend postgres migrate frontend' ERR
+          curl --fail --silent --show-error http://127.0.0.1/ > /dev/null
+          curl --fail --silent --show-error \
+            --cookie-jar /tmp/shelfwise.cookies \
+            --request POST http://127.0.0.1/auth/session > /tmp/session.json
+          curl --fail --silent --show-error \
+            --cookie /tmp/shelfwise.cookies \
+            --request POST http://127.0.0.1/demo/golden > /tmp/golden.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          session = json.loads(Path('/tmp/session.json').read_text())
+          golden = json.loads(Path('/tmp/golden.json').read_text())
+          assert session['mode'] == 'jwt'
+          assert session['session']['user_id'].startswith('demo_')
+          assert golden['decision']['status'] == 'pending'
+          assert golden['decision']['tenant_id'] == session['session']['tenant_id']
+          PY
+
+      - name: Stop production topology
+        if: always()
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+        run: docker compose -f docker-compose.production.yml down --volumes

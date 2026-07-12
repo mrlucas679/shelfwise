@@ -267,7 +267,9 @@ Connected API endpoints:
 - `GET/POST http://localhost:8000/demo/golden`
 - `GET/POST http://localhost:8000/demo/procurement`
 - `GET/POST http://localhost:8000/demo/sales`
+- `GET/POST http://localhost:8000/inventory/positions`
 - `GET/POST http://localhost:8000/tenants/me`
+- `POST http://localhost:8000/auth/session`
 - `POST http://localhost:8000/catalog/identifiers`
 - `POST http://localhost:8000/chat`
 - `POST http://localhost:8000/connectors/{system}/intake`
@@ -287,6 +289,7 @@ Connected API endpoints:
 - `POST http://localhost:8000/voice/in`
 - `POST http://localhost:8000/voice/out`
 - `POST http://localhost:8000/worker/process-one`
+- `POST http://localhost:8000/writeback/tasks/{task_id}/complete`
 
 ## Smoke
 

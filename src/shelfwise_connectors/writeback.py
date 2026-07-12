@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -50,6 +50,30 @@ class TaskWriteBackSink:
             tasks = [task for task in tasks if task.get("tenant_id") == tenant_id]
         return [deepcopy(task) for task in tasks]
 
+    def complete_task(
+        self, *, task_id: str, tenant_id: str, receipt: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        task = next(
+            (
+                item
+                for item in self._tasks_by_key.values()
+                if item["id"] == task_id and item["tenant_id"] == tenant_id
+            ),
+            None,
+        )
+        if task is None:
+            return None
+        if task["status"] == "completed":
+            if task.get("completion_receipt") != receipt:
+                raise ValueError("task already has a different completion receipt")
+            return deepcopy(task)
+        now = _now()
+        task["status"] = "completed"
+        task["completion_receipt"] = deepcopy(receipt)
+        task["completed_at"] = now
+        task["updated_at"] = now
+        return deepcopy(task)
+
     def clear(self) -> None:
         self._tasks_by_key.clear()
 
@@ -61,7 +85,8 @@ class PostgresTaskWriteBackSink:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresTaskWriteBackSink")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def create_task(
         self,
@@ -133,6 +158,41 @@ class PostgresTaskWriteBackSink:
                 params,
             ).fetchall()
         return [deepcopy(row["payload"]) for row in rows]
+
+    def complete_task(
+        self, *, task_id: str, tenant_id: str, receipt: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                select payload from shelfwise_writeback_tasks
+                where tenant_id = %s and task_id = %s
+                for update
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+            if row is None:
+                return None
+            task = deepcopy(row["payload"])
+            if task.get("status") == "completed":
+                if task.get("completion_receipt") != receipt:
+                    raise ValueError("task already has a different completion receipt")
+            else:
+                now = _now()
+                task["status"] = "completed"
+                task["completion_receipt"] = deepcopy(receipt)
+                task["completed_at"] = now
+                task["updated_at"] = now
+                conn.execute(
+                    """
+                    update shelfwise_writeback_tasks
+                    set status = 'completed', payload = %s, updated_at = %s
+                    where tenant_id = %s and task_id = %s
+                    """,
+                    (jsonb(task), now, tenant_id, task_id),
+                )
+                conn.commit()
+            return task
 
     def clear(self) -> None:
         with self._connect() as conn:

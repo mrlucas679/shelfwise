@@ -26,6 +26,30 @@ def test_backend_container_sandbox_is_declared_in_compose() -> None:
     assert "pids_limit: 256" in text
 
 
+def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> None:
+    text = (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
+
+    assert 'APP_ENV: production' in text
+    assert 'SHELFWISE_AUTH_MODE: jwt' in text
+    assert 'SHELFWISE_PUBLIC_DEMO_SESSION: "true"' in text
+    assert '- "80:80"' in text
+    assert '- "8000:8000"' not in text
+    assert '- "5432:5432"' not in text
+    assert '- "6379:6379"' not in text
+    assert "host.docker.internal:host-gateway" in text
+    assert "host.docker.internal:8000" in text
+    assert "host.docker.internal:8001" in text
+    assert 'SHELFWISE_AUTO_SCHEMA: "false"' in text
+    assert "service_completed_successfully" in text
+    assert "psql -h postgres" in text
+
+
+def test_frontend_proxy_includes_browser_session_route() -> None:
+    text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert "^/(auth|" in text
+
+
 def test_postgres_schema_is_mounted_for_compose_init() -> None:
     text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
@@ -38,6 +62,12 @@ def test_backend_image_runs_as_non_root_user() -> None:
 
     assert "adduser" in text
     assert "USER appuser" in text
+
+
+def test_backend_image_contains_seeded_runtime_datasets() -> None:
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY data ./data" in text
 
 
 def test_make_smoke_exercises_health_trace_approval_products_and_critic() -> None:
@@ -65,6 +95,16 @@ def test_ci_lints_executable_smoke_scripts() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     assert "python -m ruff check src tests scripts" in workflow
+
+
+def test_ci_boots_and_smokes_production_public_origin() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "docker-compose.production.yml up --build -d --wait" in workflow
+    assert "--request POST http://127.0.0.1/auth/session" in workflow
+    assert "--request POST http://127.0.0.1/demo/golden" in workflow
+    assert "logs --no-color backend postgres migrate frontend" in workflow
+    assert "docker-compose.production.yml down --volumes" in workflow
 
 
 def test_readme_connected_api_list_matches_backend_schema() -> None:

@@ -147,3 +147,79 @@ def test_jwt_auth_mode_scopes_decision_list_to_the_authenticated_tenant(
     assert len(tenant_a_list.json()["decisions"]) >= 1
     assert tenant_b_list.status_code == 200
     assert tenant_b_list.json()["decisions"] == []
+
+
+def test_jwt_auth_mode_scopes_traces_to_the_authenticated_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    tenant_a = {"Authorization": f"Bearer {_token('manager', tenant_id='sa_retail_demo')}"}
+    tenant_b = {"Authorization": f"Bearer {_token('manager', tenant_id='other_tenant')}"}
+
+    created = client.post("/ingest", json=_scan_event(), headers=tenant_a)
+    correlation_id = created.json()["cascade"]["correlation_id"]
+
+    assert client.get(f"/trace/{correlation_id}", headers=tenant_a).status_code == 200
+    assert client.get(f"/trace/{correlation_id}", headers=tenant_b).status_code == 404
+    tenant_b_traces = client.get("/traces", headers=tenant_b).json()["traces"]
+    assert all(item["correlation_id"] != correlation_id for item in tenant_b_traces)
+
+
+def test_jwt_auth_mode_assigns_demo_outputs_to_authenticated_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    tenant = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_demo')}"}
+
+    golden = client.post("/demo/golden", headers=tenant)
+    rejection = client.post("/demo/critic-rejection", headers=tenant)
+
+    assert golden.status_code == 200
+    assert golden.json()["decision"]["tenant_id"] == "tenant_demo"
+    assert rejection.status_code == 200
+    assert rejection.json()["decision"]["tenant_id"] == "tenant_demo"
+    decisions = client.get("/decisions", headers=tenant).json()["decisions"]
+    decision_ids = {item["id"] for item in decisions}
+    assert golden.json()["decision"]["id"] in decision_ids
+    assert rejection.json()["decision"]["id"] in decision_ids
+
+
+def test_public_demo_sessions_create_stable_isolated_browser_users(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    monkeypatch.setenv("SHELFWISE_PUBLIC_DEMO_SESSION", "true")
+    monkeypatch.setenv("SHELFWISE_COOKIE_SECURE", "false")
+    first = TestClient(app)
+    second = TestClient(app)
+
+    first_session = first.post("/auth/session")
+    replayed_session = first.post("/auth/session")
+    second_session = second.post("/auth/session")
+    first_user = first_session.json()["session"]["user_id"]
+    second_user = second_session.json()["session"]["user_id"]
+
+    assert first_session.status_code == 200
+    assert first_user == replayed_session.json()["session"]["user_id"]
+    assert first_user != second_user
+    assert first.post(
+        "/chat",
+        json={"question": "What needs attention?", "conversation_id": "shared"},
+    ).status_code == 200
+    assert first.get("/chat/conversations/shared").status_code == 200
+    assert second.get("/chat/conversations/shared").status_code == 404
+
+
+def test_public_demo_session_is_disabled_by_default_in_jwt_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    monkeypatch.delenv("SHELFWISE_PUBLIC_DEMO_SESSION", raising=False)
+
+    assert TestClient(app).post("/auth/session").status_code == 401

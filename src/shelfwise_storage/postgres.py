@@ -25,6 +25,16 @@ def current_tenant_id() -> str:
     return _default_tenant_id()
 
 
+def auto_schema_enabled() -> bool:
+    """Allow local stores to self-bootstrap; production migrations disable this."""
+    return os.getenv("SHELFWISE_AUTO_SCHEMA", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def connect(database_url: str, *, tenant_id: str | None = None) -> Any:
     try:
         import psycopg

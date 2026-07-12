@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -37,6 +37,7 @@ from shelfwise_inference import (
     load_inference_config,
 )
 from shelfwise_inference.orchestration import ExecutionMode
+from shelfwise_inventory import create_inventory_position_store
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
     ModelRun,
@@ -78,7 +79,7 @@ from .cascade import (
     validate_recall_notice,
 )
 from .chat import ChatBody, build_chat_reply_with_meta
-from .chat_store import ChatConversationStore
+from .chat_store import create_chat_store
 from .cold_chain_demo import ColdChainDemoService
 from .detective import analyze_root_cause, root_cause_cte_sql
 from .event_bus import create_event_bus
@@ -87,7 +88,13 @@ from .intelligence_api import router as intelligence_router
 from .observability import build_observability_snapshot
 from .product_catalog import product_attention_queue, search_product_catalog
 from .security.gateway import TokenBucket, rate_limit
-from .tenant import Role, TenantContext, default_tenant_context, verify_bearer_token
+from .tenant import (
+    Role,
+    TenantContext,
+    default_tenant_context,
+    encode_hs256_token,
+    verify_bearer_token,
+)
 from .tools.mcp_surface import AuditLog, build_platform_tools
 from .trace import TraceRegistry
 from .worker import (
@@ -138,7 +145,7 @@ app.add_middleware(
 )
 app.include_router(intelligence_router)
 
-chat_store = ChatConversationStore()
+chat_store = create_chat_store()
 
 try:
     from shelfwise_multimodal.router import build_scan_router, build_voice_router
@@ -167,6 +174,7 @@ tenant_profile_store = create_tenant_profile_store()
 writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
 product_catalog_store = create_product_catalog_store()
+inventory_position_store = create_inventory_position_store()
 worldgen_run_store = create_worldgen_run_store()
 cold_chain_demo = ColdChainDemoService()
 app.router.add_event_handler("startup", worker_service.start)
@@ -255,7 +263,7 @@ async def enforce_request_body_limit(request: Request, call_next: Any) -> Any:
 
 @app.middleware("http")
 async def bind_storage_tenant(request: Request, call_next: Any) -> Any:
-    tenant_id = _tenant_id_from_headers(request.headers.get("authorization"))
+    tenant_id = _tenant_id_from_request(request)
     token = bind_tenant_context(tenant_id)
     try:
         return await call_next(request)
@@ -274,12 +282,22 @@ def _auth_mode() -> str:
 _UNAUTHENTICATED_TENANT_ID = "__unauthenticated__"
 
 
-def _tenant_id_from_headers(authorization: str | None) -> str:
+SESSION_COOKIE = "shelfwise_session"
+
+
+def _request_authorization(request: Request, authorization: str | None = None) -> str | None:
+    if authorization:
+        return authorization
+    token = request.cookies.get(SESSION_COOKIE)
+    return f"Bearer {token}" if token else None
+
+
+def _tenant_id_from_request(request: Request) -> str:
     if _auth_mode() != "jwt":
         return default_tenant_context().tenant_id
     try:
         return verify_bearer_token(
-            authorization,
+            _request_authorization(request),
             secret=os.getenv("TENANT_AUTH_SECRET", ""),
         ).tenant_id
     except ValueError:
@@ -293,6 +311,7 @@ def write_path_guard(x_api_key: str | None = Header(default=None, alias="x-api-k
 
 
 def current_tenant_context(
+    request: Request,
     authorization: str | None = Header(default=None, alias="authorization"),
 ) -> TenantContext:
     mode = _auth_mode()
@@ -301,12 +320,64 @@ def current_tenant_context(
     if mode != "jwt":
         raise HTTPException(status_code=500, detail="Unsupported auth mode")
     try:
-        return verify_bearer_token(authorization, secret=os.getenv("TENANT_AUTH_SECRET", ""))
+        return verify_bearer_token(
+            _request_authorization(request, authorization),
+            secret=os.getenv("TENANT_AUTH_SECRET", ""),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Invalid tenant token") from exc
 
 
 CURRENT_TENANT_DEP = Depends(current_tenant_context)
+
+
+def _public_demo_sessions_enabled() -> bool:
+    return os.getenv("SHELFWISE_PUBLIC_DEMO_SESSION", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
+def create_public_demo_session(request: Request) -> JSONResponse:
+    """Issue one opaque browser identity for a same-origin public demonstration."""
+    if _auth_mode() != "jwt":
+        return JSONResponse({"session": default_tenant_context().to_dict(), "mode": "local"})
+    secret = os.getenv("TENANT_AUTH_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Tenant authentication is unavailable")
+    existing = _request_authorization(request)
+    if existing:
+        try:
+            ctx = verify_bearer_token(existing, secret=secret)
+            return JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+        except ValueError:
+            pass
+    if not _public_demo_sessions_enabled():
+        raise HTTPException(status_code=401, detail="Authentication is required")
+    ctx = TenantContext(
+        tenant_id=default_tenant_context().tenant_id,
+        user_id=f"demo_{uuid4().hex}",
+        role=Role.MANAGER,
+    )
+    lifetime = _env_positive_int("SHELFWISE_PUBLIC_SESSION_SECONDS", 43_200)
+    token = encode_hs256_token(
+        {**ctx.to_dict(), "exp": int(datetime.now(UTC).timestamp()) + lifetime},
+        secret=secret,
+    )
+    response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=lifetime,
+        httponly=True,
+        secure=os.getenv("SHELFWISE_COOKIE_SECURE", "true").strip().lower() != "false",
+        samesite="strict",
+        path="/",
+    )
+    return response
 
 
 def require_role(*allowed: Role):
@@ -366,6 +437,27 @@ class ConnectorIntakeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskCompletionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_reference: str = Field(min_length=1, max_length=200)
+    completed_units: int = Field(ge=0, le=1_000_000)
+    observed_location: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class InventoryPositionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str = Field(min_length=1, max_length=200)
+    location_type: Literal["shelf", "backroom", "bin", "quarantine", "returns"]
+    location_id: str = Field(min_length=1, max_length=200)
+    bin_id: str = Field(default="unassigned", min_length=1, max_length=200)
+    quantity: int = Field(ge=0, le=1_000_000)
+    state: Literal["available", "quarantined", "relocated", "count_pending"]
+    source_reference: str = Field(min_length=1, max_length=200)
 
 
 class ProductUpsertBody(BaseModel):
@@ -672,21 +764,17 @@ def _bus_message_tenant(message: dict[str, Any]) -> str | None:
 @app.get("/trace/{correlation_id}")
 def get_trace(
     correlation_id: str,
-    _ctx: TenantContext = CURRENT_TENANT_DEP,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    # NOTE: CascadeTrace does not yet carry tenant_id, so this requires a valid
-    # authenticated caller in jwt mode but does not filter by tenant. Full per-tenant
-    # trace scoping needs tenant_id threaded through TraceRegistry - tracked as a
-    # follow-up, not silently left fully open in the meantime.
-    trace = trace_registry.get(correlation_id)
+    trace = trace_registry.get(correlation_id, tenant_id=ctx.tenant_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return {"trace": trace}
 
 
 @app.get("/traces")
-def list_traces(_ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return {"traces": trace_registry.list()}
+def list_traces(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return {"traces": trace_registry.list(tenant_id=ctx.tenant_id)}
 
 
 @app.get("/detective/root-cause/{target_id}")
@@ -805,7 +893,10 @@ def _new_chat_response(
                 learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
             ),
         },
-        "traces": [_compact_chat_trace(item) for item in trace_registry.list()[:_CHAT_TRACE_LIMIT]],
+        "traces": [
+            _compact_chat_trace(item)
+            for item in trace_registry.list(tenant_id=ctx.tenant_id)[:_CHAT_TRACE_LIMIT]
+        ],
         "store_intelligence": build_store_intelligence_demo(),
     }
     conversation = chat_store.get(
@@ -880,8 +971,8 @@ def list_platform_tools() -> dict[str, object]:
 
 
 @app.get("/tools/platform/audit")
-def list_platform_tool_audit() -> dict[str, object]:
-    return {"events": tool_audit.list()}
+def list_platform_tool_audit(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return {"events": tool_audit.list(tenant_id=ctx.tenant_id)}
 
 
 @app.get("/cold-chain/feed")
@@ -902,8 +993,10 @@ def list_worldgen_runs(
 
 
 @app.get("/demo/worldgen-runs/{run_id}")
-def get_worldgen_run(run_id: str) -> dict[str, object]:
-    run = worldgen_run_store.get(run_id)
+def get_worldgen_run(
+    run_id: str, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
+    run = worldgen_run_store.get(run_id, tenant_id=ctx.tenant_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Worldgen run not found")
     return {"run": run}
@@ -1254,19 +1347,46 @@ def process_one_worker_event() -> dict[str, object]:
 _DEMO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
+def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
+    """Create a tenant-owned trigger while retaining the seeded demo inputs."""
+    suffix = uuid4().hex[:12]
+    return Event(
+        id=f"evt_demo_{event_type.value}_{suffix}",
+        type=event_type,
+        ts=datetime.now(UTC),
+        actor=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        correlation_id=f"demo_{event_type.value}_{suffix}",
+        payload={
+            "sku": "4011",
+            "location": "store_12_soweto",
+            "supplier": "dairyco",
+            "site_id": "store_12_soweto",
+        },
+    )
+
+
 def _preview_demo_cascade(result: dict[str, Any]) -> dict[str, Any]:
     """Enrich a read-only demo preview without mutating stores or traces."""
     _attach_decision_governance(result)
     return result
 
 
+def _assign_result_tenant(result: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    decision = result.get("decision")
+    if isinstance(decision, dict):
+        decision["tenant_id"] = tenant_id
+    result["tenant_id"] = tenant_id
+    return result
+
+
 @app.post("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
-def demo_golden() -> dict[str, object]:
-    return _record_cascade(run_golden_cascade())
+def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(run_golden_cascade(_demo_event(ctx, EventType.SCAN)))
 
 
 @app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
-def demo_recall() -> dict[str, object]:
+def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a seeded supplier recall through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
     event = Event(
@@ -1274,7 +1394,7 @@ def demo_recall() -> dict[str, object]:
         type=EventType.RECALL_NOTICE,
         ts=datetime.now(UTC),
         actor="supplier_dairyco_quality",
-        tenant_id="sa_retail_demo",
+        tenant_id=ctx.tenant_id,
         correlation_id=f"demo_recall_{suffix}",
         payload={
             "recall_id": f"REC-DEMO-{suffix}",
@@ -1295,7 +1415,7 @@ def demo_recall() -> dict[str, object]:
 
 
 @app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
-def demo_inventory_exception() -> dict[str, object]:
+def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a seeded shrink count through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
     event = Event(
@@ -1303,7 +1423,7 @@ def demo_inventory_exception() -> dict[str, object]:
         type=EventType.INVENTORY_EXCEPTION,
         ts=datetime.now(UTC),
         actor="cycle_count_team",
-        tenant_id="sa_retail_demo",
+        tenant_id=ctx.tenant_id,
         correlation_id=f"demo_inventory_exception_{suffix}",
         payload={
             "exception_id": f"EXC-DEMO-{suffix}",
@@ -1329,7 +1449,9 @@ def demo_golden_get() -> dict[str, object]:
 
 
 @app.post("/demo/golden/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_golden_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the golden scenario's Critic/Executive verdicts through a real Gemma tool loop.
 
     Unlike /demo/golden (deterministic math + hand-authored evidence), this route requires
@@ -1339,6 +1461,7 @@ def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_golden_cascade_via_agents(
+            _demo_event(ctx, EventType.SCAN),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1349,7 +1472,9 @@ def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/procurement/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_procurement_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
 
     Unlike /demo/procurement (deterministic math + hand-authored evidence), this route
@@ -1360,6 +1485,7 @@ def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_procurement_cascade_via_agents(
+            _demo_event(ctx, EventType.SUPPLIER_UPDATE),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1370,7 +1496,9 @@ def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/sales/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_sales_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the POS price-integrity verdict through a real Gemma tool loop.
 
     Unlike /demo/sales (deterministic math + hand-authored evidence), this route requires
@@ -1381,6 +1509,7 @@ def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_sales_cascade_via_agents(
+            _demo_event(ctx, EventType.SALE),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1391,7 +1520,9 @@ def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/cold-chain/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_cold_chain_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
 
     Unlike /demo/cold-chain (deterministic math + hand-authored evidence), this route
@@ -1402,6 +1533,7 @@ def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_cold_chain_cascade_via_agents(
+            _demo_event(ctx, EventType.COLD_CHAIN_ALERT),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1412,8 +1544,10 @@ def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
-def demo_critic_rejection() -> dict[str, object]:
-    return _record_cascade(run_critic_rejection_cascade())
+def demo_critic_rejection(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        _assign_result_tenant(run_critic_rejection_cascade(), ctx.tenant_id)
+    )
 
 
 @app.get("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
@@ -1422,8 +1556,10 @@ def demo_critic_rejection_get() -> dict[str, object]:
 
 
 @app.post("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
-def demo_procurement() -> dict[str, object]:
-    return _record_cascade(run_procurement_cascade())
+def demo_procurement(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE))
+    )
 
 
 @app.get("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
@@ -1432,8 +1568,8 @@ def demo_procurement_get() -> dict[str, object]:
 
 
 @app.post("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
-def demo_sales() -> dict[str, object]:
-    return _record_cascade(run_sales_cascade())
+def demo_sales(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(run_sales_cascade(_demo_event(ctx, EventType.SALE)))
 
 
 @app.get("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
@@ -1442,8 +1578,10 @@ def demo_sales_get() -> dict[str, object]:
 
 
 @app.post("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
-def demo_cold_chain() -> dict[str, object]:
-    return _record_cascade(run_cold_chain_cascade())
+def demo_cold_chain(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT))
+    )
 
 
 @app.get("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
@@ -1560,6 +1698,134 @@ def learning_summary() -> dict[str, object]:
 def list_writeback_tasks(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Return tenant-scoped pending task/draft records created by approval."""
     return {"tasks": writeback_sink.list(tenant_id=ctx.tenant_id)}
+
+
+@app.get("/inventory/positions")
+def list_inventory_positions(
+    sku: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    return {
+        "positions": inventory_position_store.list(
+            tenant_id=ctx.tenant_id,
+            sku=sku.strip() if sku else None,
+        )
+    }
+
+
+@app.post(
+    "/inventory/positions",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def upsert_inventory_position(
+    body: InventoryPositionBody,
+    ctx: TenantContext = INGEST_AUTH_DEP,
+) -> dict[str, object]:
+    return {
+        "position": inventory_position_store.upsert(
+            {"tenant_id": ctx.tenant_id, **body.model_dump()}
+        )
+    }
+
+
+@app.post(
+    "/writeback/tasks/{task_id}/complete",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def complete_writeback_task(
+    task_id: str,
+    body: TaskCompletionBody,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    existing = next(
+        (
+            item
+            for item in writeback_sink.list(tenant_id=ctx.tenant_id)
+            if item.get("id") == task_id
+        ),
+        None,
+    )
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Write-back task not found")
+    action = existing.get("action") if isinstance(existing.get("action"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    expected_units = params.get("units")
+    if isinstance(expected_units, int) and body.completed_units != expected_units:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Completion units must equal approved units ({expected_units})",
+        )
+    receipt = {
+        "source_reference": body.source_reference,
+        "completed_units": body.completed_units,
+        "observed_location": body.observed_location,
+        "note": body.note,
+        "completed_by": ctx.user_id,
+    }
+    try:
+        task = writeback_sink.complete_task(
+            task_id=task_id,
+            tenant_id=ctx.tenant_id,
+            receipt=receipt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:  # It may have disappeared between validation and completion.
+        raise HTTPException(status_code=404, detail="Write-back task not found")
+    positions = _record_completed_inventory_movement(task)
+    return {"task": task, "positions": positions}
+
+
+def _record_completed_inventory_movement(task: dict[str, Any]) -> list[dict[str, Any]]:
+    action = task.get("action") if isinstance(task.get("action"), dict) else {}
+    if action.get("type") != "relocate_stock":
+        return []
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    receipt = (
+        task.get("completion_receipt")
+        if isinstance(task.get("completion_receipt"), dict)
+        else {}
+    )
+    tenant_id = str(task.get("tenant_id") or "")
+    sku = str(params.get("sku") or "")
+    source = str(params.get("observed_location") or "")
+    destination = str(params.get("expected_location") or "")
+    source_reference = str(receipt.get("source_reference") or "")
+    units = int(receipt.get("completed_units") or 0)
+    if not all((tenant_id, sku, source, destination, source_reference)):
+        raise HTTPException(status_code=409, detail="Relocation receipt lacks position evidence")
+    return [
+        inventory_position_store.upsert(
+            {
+                "tenant_id": tenant_id,
+                "sku": sku,
+                "location_type": _physical_location_type(source),
+                "location_id": source,
+                "quantity": 0,
+                "state": "relocated",
+                "source_reference": source_reference,
+            }
+        ),
+        inventory_position_store.upsert(
+            {
+                "tenant_id": tenant_id,
+                "sku": sku,
+                "location_type": _physical_location_type(destination),
+                "location_id": destination,
+                "quantity": units,
+                "state": "available",
+                "source_reference": source_reference,
+            }
+        ),
+    ]
+
+
+def _physical_location_type(location_id: str) -> str:
+    lowered = location_id.lower()
+    for location_type in ("backroom", "shelf", "quarantine", "returns", "bin"):
+        if location_type in lowered:
+            return location_type
+    return "bin"
 
 
 @app.get("/decisions/{decision_id}")
@@ -1965,6 +2231,7 @@ def _worldgen_cold_chain_alert(
 
 def _attach_event_causality(result: dict[str, Any], event: Event) -> None:
     result["correlation_id"] = event.correlation_id
+    result["tenant_id"] = event.tenant_id
     decision = result.get("decision")
     if isinstance(decision, dict):
         decision["caused_by"] = [event.id]

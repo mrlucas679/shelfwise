@@ -168,6 +168,7 @@ def default_cascade_handler(event: Event) -> dict[str, Any]:
         return _attach_event_causality(run_cold_chain_cascade(event), event)
     return {
         "correlation_id": event.correlation_id,
+        "tenant_id": event.tenant_id,
         "scenario": None,
         "decision": None,
         "evidence": [],
@@ -185,6 +186,7 @@ def _run_id_from_message(message: dict[str, Any]) -> str | None:
 
 def _attach_event_causality(result: dict[str, Any], event: Event) -> dict[str, Any]:
     result["correlation_id"] = event.correlation_id
+    result["tenant_id"] = event.tenant_id
     decision = result.get("decision")
     if isinstance(decision, dict):
         decision["caused_by"] = [event.id]

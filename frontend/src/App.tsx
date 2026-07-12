@@ -320,6 +320,7 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
     try {
       const res = await fetch(url, {
         ...init,
+        credentials: 'same-origin',
         headers: { Accept: 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
         signal,
       })
@@ -331,6 +332,9 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
     }
   }
   throw new Error(`Could not reach ${path}. ${lastError}`)
+}
+async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
+  await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
 }
 const fetchDemo = (path: string, signal: AbortSignal) => fetchJson<GoldenDemo>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
@@ -360,6 +364,7 @@ async function postChat(
     try {
       const res = await fetch(url, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           Accept: 'text/plain',
           'Content-Type': 'application/json',
@@ -1114,6 +1119,7 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Worldgen runs', method: 'GET', path: '/demo/worldgen-runs', detail: 'Synthetic drill run history.' },
   { label: 'Worldgen run detail', method: 'GET', path: '/demo/worldgen-runs/{run_id}', detail: 'Parameterized synthetic drill run detail.' },
   { label: 'Tenant profile', method: 'GET', path: '/tenants/me', detail: 'Current tenant/store profile and connector policy.' },
+  { label: 'Inventory positions', method: 'GET', path: '/inventory/positions', detail: 'Tenant shelf, backroom, bin, quarantine, and returns ledger.' },
   { label: 'Connector catalogue', method: 'GET', path: '/connectors/systems', detail: 'Supported source-system connector capabilities.' },
   { label: 'Tenant connectors', method: 'GET', path: '/connectors/me', detail: 'Connector status for the current tenant.' },
   { label: 'Inbound records', method: 'GET', path: '/connectors/inbound-records', detail: 'Connector intake and validation records.' },
@@ -1131,6 +1137,7 @@ const OPERATION_READ_ENDPOINTS = [
 ]
 
 const GATED_ENDPOINTS = [
+  { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
   { label: 'Chat stream', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
@@ -1145,6 +1152,8 @@ const GATED_ENDPOINTS = [
   { label: 'Outcome summary', method: 'POST', path: '/intelligence/outcomes/summarize', group: 'intelligence', detail: 'Post-decision learning summary.' },
   { label: 'Approval approve', method: 'POST', path: '/decisions/{decision_id}/approve', group: 'operations', detail: 'Human approval transition and task-only write-back.' },
   { label: 'Approval reject', method: 'POST', path: '/decisions/{decision_id}/reject', group: 'operations', detail: 'Human rejection transition.' },
+  { label: 'Task completion receipt', method: 'POST', path: '/writeback/tasks/{task_id}/complete', group: 'operations', detail: 'Records physical completion evidence without directly mutating a source system.' },
+  { label: 'Inventory position upsert', method: 'POST', path: '/inventory/positions', group: 'operations', detail: 'Records a sourced physical stock position.' },
   { label: 'Tenant profile write', method: 'POST', path: '/tenants/me', group: 'operations', detail: 'Owner-only profile and connector policy update.' },
   { label: 'Worker process one', method: 'POST', path: '/worker/process-one', group: 'operations', detail: 'Manual worker execution; role and API-key gated.' },
   { label: 'Memory consolidation', method: 'POST', path: '/mlops/consolidate-memory', group: 'operations', detail: 'Governed learning fact consolidation.' },
@@ -2918,6 +2927,7 @@ function App() {
     setError(null)
     setOps(emptyOps())
     async function load() {
+      await ensureBrowserSession(controller.signal)
       const payload = await fetchDemo(DEMO_PATH, controller.signal)
       const openApi = await fetchOptional<{ paths?: JsonObject }>('/openapi.json', controller.signal)
       const apiPaths = Object.keys(asObject(openApi?.paths)).sort()

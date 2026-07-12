@@ -9,6 +9,7 @@ from shelfwise_backend.app import (
     event_bus,
     event_store,
     inbound_record_store,
+    inventory_position_store,
     journal,
     learning_store,
     model_run_registry,
@@ -37,6 +38,7 @@ def _reset_demo_stores() -> None:
     learning_store.clear()
     event_store.clear()
     inbound_record_store.clear()
+    inventory_position_store.clear()
     product_catalog_store.clear()
     event_bus.clear()
     journal.clear()

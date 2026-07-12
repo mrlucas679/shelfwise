@@ -1,0 +1,111 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shelfwise
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: shelfwise
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shelfwise -d shelfwise"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: pgvector/pgvector:pg16
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - ./src/shelfwise_storage/schema.sql:/schema.sql:ro
+    command:
+      - sh
+      - -ec
+      - psql -h postgres -U shelfwise -d shelfwise -v ON_ERROR_STOP=1 -f /schema.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build: .
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 2g
+    cpus: "2.0"
+    pids_limit: 256
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: production
+      SHELFWISE_AUTH_MODE: jwt
+      SHELFWISE_PUBLIC_DEMO_SESSION: "true"
+      SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-false}
+      TENANT_AUTH_SECRET: ${TENANT_AUTH_SECRET:?TENANT_AUTH_SECRET is required}
+      SHELFWISE_STORE_BACKEND: postgres
+      SHELFWISE_AUTO_SCHEMA: "false"
+      SHELFWISE_BUS_BACKEND: redis
+      DATABASE_URL: postgresql://shelfwise_app:${POSTGRES_APP_PASSWORD}@postgres:5432/shelfwise
+      REDIS_URL: redis://redis:6379/0
+      LLM_ROUTINE_BASE_URL: ${LLM_ROUTINE_BASE_URL:-http://host.docker.internal:8000}
+      LLM_STRONG_BASE_URL: ${LLM_STRONG_BASE_URL:-http://host.docker.internal:8001}
+      LLM_ROUTINE_MODEL: ${LLM_ROUTINE_MODEL:-google/gemma-4-E4B-it}
+      LLM_STRONG_MODEL: ${LLM_STRONG_MODEL:-google/gemma-4-31B-it}
+      WORKER_ENABLED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:

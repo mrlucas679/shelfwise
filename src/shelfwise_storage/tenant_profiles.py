@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from .postgres import connect, jsonb
+from .postgres import auto_schema_enabled, connect, jsonb
 from .rls import apply_tenant_rls
 
 DEFAULT_BUDGETS = {
@@ -62,7 +62,8 @@ class PostgresTenantProfileStore:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresTenantProfileStore")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def get(self, tenant_id: str) -> dict[str, Any] | None:
         tenant = _clean_tenant_id(tenant_id)

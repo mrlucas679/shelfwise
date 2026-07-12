@@ -10,6 +10,7 @@ from typing import Any
 @dataclass(slots=True)
 class CascadeTrace:
     correlation_id: str
+    tenant_id: str
     scenario: str | None
     spans: list[dict[str, Any]] = field(default_factory=list)
     evidence_agents: list[str] = field(default_factory=list)
@@ -19,6 +20,7 @@ class CascadeTrace:
     def to_dict(self) -> dict[str, Any]:
         return {
             "correlation_id": self.correlation_id,
+            "tenant_id": self.tenant_id,
             "scenario": self.scenario,
             "status": self.status,
             "spans": deepcopy(self.spans),
@@ -48,17 +50,17 @@ class TraceRegistry:
                 expired = self._order.popleft()
                 self._traces.pop(expired, None)
 
-    def get(self, correlation_id: str) -> dict[str, Any] | None:
+    def get(self, correlation_id: str, *, tenant_id: str) -> dict[str, Any] | None:
         with self._lock:
             found = self._traces.get(correlation_id)
-            return found.to_dict() if found else None
+            return found.to_dict() if found and found.tenant_id == tenant_id else None
 
-    def list(self) -> list[dict[str, Any]]:
+    def list(self, *, tenant_id: str) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 self._traces[item].to_dict()
                 for item in reversed(self._order)
-                if item in self._traces
+                if item in self._traces and self._traces[item].tenant_id == tenant_id
             ]
 
     def clear(self) -> None:
@@ -70,9 +72,13 @@ class TraceRegistry:
 def trace_from_cascade(cascade: dict[str, Any]) -> CascadeTrace:
     """Create a trace record from a cascade response payload."""
     decision = cascade.get("decision") if isinstance(cascade.get("decision"), dict) else {}
+    tenant_id = str(cascade.get("tenant_id") or decision.get("tenant_id") or "").strip()
+    if not tenant_id:
+        raise ValueError("cascade trace tenant_id is required")
     evidence = cascade.get("evidence") if isinstance(cascade.get("evidence"), list) else []
     return CascadeTrace(
         correlation_id=str(cascade.get("correlation_id") or ""),
+        tenant_id=tenant_id,
         scenario=cascade.get("scenario"),
         spans=deepcopy(cascade.get("trace") if isinstance(cascade.get("trace"), list) else []),
         evidence_agents=[

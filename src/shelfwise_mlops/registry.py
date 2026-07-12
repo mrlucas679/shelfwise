@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from shelfwise_storage import connect
+from shelfwise_storage import auto_schema_enabled, connect
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -170,7 +170,8 @@ class PostgresModelRunRegistry:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresModelRunRegistry")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def record(self, run: ModelRun) -> ModelRun:
         stored = run if run.created_at else replace(run, created_at=datetime.now(UTC).isoformat())
@@ -268,7 +269,8 @@ class PostgresPromptRegistry:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresPromptRegistry")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def record(self, version: PromptVersion) -> PromptVersion:
         existing = self.get(version.id, tenant_id=version.tenant_id)

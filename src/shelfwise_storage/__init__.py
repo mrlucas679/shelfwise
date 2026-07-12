@@ -1,4 +1,5 @@
 from .postgres import (
+    auto_schema_enabled,
     bind_tenant_context,
     connect,
     current_tenant_id,
@@ -31,6 +32,7 @@ __all__ = [
     "PostgresTenantProfileStore",
     "all_tenant_rls_sql",
     "apply_tenant_rls",
+    "auto_schema_enabled",
     "bind_tenant_context",
     "connect",
     "create_tenant_profile_store",
