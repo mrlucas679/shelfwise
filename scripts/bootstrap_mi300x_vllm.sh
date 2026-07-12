@@ -81,6 +81,9 @@ start_quick_start_server() {
     bash -lc \
     'mkdir -p /root/shelfwise-vllm; nohup vllm serve "$1" --host 0.0.0.0 --port "$2" --api-key "$VLLM_API_KEY" --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$3" --enable-auto-tool-choice --tool-call-parser gemma4 > "/root/shelfwise-vllm/vllm-$2.log" 2>&1 &' \
     bash "$model" "$port" "$memory_fraction"
+  sleep 3
+  docker exec "$VLLM_HOST_CONTAINER" bash -lc \
+    "pgrep -f '[v]llm serve.*--port ${port}' >/dev/null || { cat /root/shelfwise-vllm/vllm-${port}.log; exit 1; }"
 }
 
 start_server() {
@@ -185,8 +188,8 @@ main() {
   fi
   # A 192GB MI300X has room for both models plus bounded KV cache; do not raise these independently.
   start_server "$ROUTINE_CONTAINER" "$ROUTINE_MODEL" "$ROUTINE_PORT" "0.20"
-  start_server "$STRONG_CONTAINER" "$STRONG_MODEL" "$STRONG_PORT" "0.55"
   wait_for_model "$ROUTINE_PORT" "$ROUTINE_MODEL" "$ROUTINE_CONTAINER"
+  start_server "$STRONG_CONTAINER" "$STRONG_MODEL" "$STRONG_PORT" "0.55"
   wait_for_model "$STRONG_PORT" "$STRONG_MODEL" "$STRONG_CONTAINER"
   print_application_configuration
 }
