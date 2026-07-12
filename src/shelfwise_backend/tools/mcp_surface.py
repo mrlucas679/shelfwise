@@ -7,13 +7,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from shelfwise_contracts import Money
-from shelfwise_data import load_seeded_scenario
 from shelfwise_decision_science import (
     InventoryPolicyInput,
     Relation,
     RelationStore,
-    StockSourceCandidate,
     SupplierProfile,
     compute_reorder_policy,
     detect_robust_anomaly,
@@ -24,6 +21,8 @@ from shelfwise_decision_science import (
     score_expiry_risk,
     simulate_markdown,
 )
+
+from ..world_facts import WorldFactsProvider
 
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
 
@@ -73,14 +72,18 @@ def build_platform_tools(
     *,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider,
+    tenant_id: str,
     audit: AuditLog | None = None,
 ) -> list[PlatformTool]:
     """Build read-only tools for customer agents and internal MCP registration."""
+    if not tenant_id.strip():
+        raise ValueError("tenant_id is required to build platform tools")
     audit_log = audit or AuditLog()
 
-    async def get_stock(sku: str = "4011", tenant_id: str = "sa_retail_demo") -> dict[str, Any]:
+    async def get_stock(sku: str | None = None) -> dict[str, Any]:
         audit_log.record(tool="get_stock", tenant_id=tenant_id, args={"sku": sku})
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
         return {
             "sku": scenario.sku,
             "product_name": scenario.product_name,
@@ -88,14 +91,14 @@ def build_platform_tools(
             "on_hand": scenario.units_on_hand,
             "reorder_point": scenario.reorder_point,
             "days_to_expiry": scenario.days_to_expiry,
-            "source": "seeded_scenario",
+            "source": "generated_world",
         }
 
-    async def get_thresholds(tenant_id: str = "sa_retail_demo") -> dict[str, Any]:
+    async def get_thresholds() -> dict[str, Any]:
         audit_log.record(tool="get_thresholds", tenant_id=tenant_id, args={})
         return {"thresholds": memory.thresholds()}
 
-    async def list_open_decisions(tenant_id: str = "sa_retail_demo") -> dict[str, Any]:
+    async def list_open_decisions() -> dict[str, Any]:
         audit_log.record(tool="list_open_decisions", tenant_id=tenant_id, args={})
         rows = [
             item
@@ -107,7 +110,6 @@ def build_platform_tools(
 
     async def explain_decision(
         decision_id: str,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         audit_log.record(
             tool="explain_decision",
@@ -124,19 +126,18 @@ def build_platform_tools(
         }
 
     async def simulate_markdown_tool(
-        sku: str = "4011",
+        sku: str | None = None,
         discount_pct: float = 0.2,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         audit_log.record(
             tool="simulate_markdown",
             tenant_id=tenant_id,
             args={"sku": sku, "discount_pct": discount_pct},
         )
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
         recent_days = Decimal(len(scenario.recent_daily_units))
         result = simulate_markdown(
-            sku=sku,
+            sku=scenario.sku,
             units_on_hand=Decimal(scenario.units_on_hand),
             days_to_expiry=Decimal(scenario.days_to_expiry),
             base_daily_units=sum(scenario.recent_daily_units) / recent_days,
@@ -145,7 +146,7 @@ def build_platform_tools(
             discount_pct=Decimal(str(discount_pct)),
         )
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "discount_pct": str(discount_pct),
             "markdown_units_sold": str(result.markdown_units_sold),
             "markdown_waste_units": str(result.markdown_waste_units),
@@ -154,36 +155,32 @@ def build_platform_tools(
         }
 
     async def get_demand_forecast(
-        sku: str = "4011",
+        sku: str | None = None,
         horizon_days: int = 3,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         audit_log.record(
             tool="get_demand_forecast",
             tenant_id=tenant_id,
             args={"sku": sku, "horizon_days": horizon_days},
         )
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
         result = forecast_demand(
-            sku=sku,
+            sku=scenario.sku,
             recent_daily_units=list(scenario.recent_daily_units),
             horizon_days=horizon_days,
         )
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "daily_units": str(result.daily_units),
             "confidence": str(result.confidence),
             "method": result.method,
         }
 
-    async def get_expiry_risk(
-        sku: str = "4011",
-        tenant_id: str = "sa_retail_demo",
-    ) -> dict[str, Any]:
+    async def get_expiry_risk(sku: str | None = None) -> dict[str, Any]:
         audit_log.record(tool="get_expiry_risk", tenant_id=tenant_id, args={"sku": sku})
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
         demand = forecast_demand(
-            sku=sku,
+            sku=scenario.sku,
             recent_daily_units=list(scenario.recent_daily_units),
             horizon_days=3,
         )
@@ -193,7 +190,7 @@ def build_platform_tools(
             average_temp_c=Decimal("5"),
         )
         result = score_expiry_risk(
-            sku=sku,
+            sku=scenario.sku,
             units_on_hand=Decimal(scenario.units_on_hand),
             days_to_expiry=Decimal(scenario.days_to_expiry),
             forecast_daily_units=demand.daily_units,
@@ -202,7 +199,7 @@ def build_platform_tools(
             cold_chain_penalty_days=cold.penalty_days,
         )
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "risk": str(result.risk),
             "waste_units": str(result.waste_units),
             "zar_at_risk": result.zar_at_risk.to_dict(),
@@ -213,7 +210,6 @@ def build_platform_tools(
         area: str = "fridge_a",
         outage_hours: float = 3.0,
         average_temp_c: float = 7.0,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         audit_log.record(
             tool="get_cold_chain_status",
@@ -233,25 +229,26 @@ def build_platform_tools(
             "method": result.method,
         }
 
-    async def get_reorder_policy(
-        sku: str = "4011",
-        tenant_id: str = "sa_retail_demo",
-    ) -> dict[str, Any]:
+    async def get_reorder_policy(sku: str | None = None) -> dict[str, Any]:
         audit_log.record(tool="get_reorder_policy", tenant_id=tenant_id, args={"sku": sku})
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
+        recent = [Decimal(value) for value in scenario.recent_daily_units] or [Decimal("1")]
+        avg_daily_demand = sum(recent) / Decimal(len(recent))
+        variance = sum((value - avg_daily_demand) ** 2 for value in recent) / Decimal(len(recent))
+        demand_std = variance.sqrt() if variance > 0 else Decimal("0")
         policy = compute_reorder_policy(
             InventoryPolicyInput(
-                sku=sku,
-                on_hand=Decimal("20"),
-                committed_units=Decimal("8"),
-                avg_daily_demand=Decimal("10"),
-                demand_std=Decimal("2"),
-                lead_time_days=Decimal("3"),
+                sku=scenario.sku,
+                on_hand=Decimal(scenario.units_on_hand),
+                committed_units=Decimal("0"),
+                avg_daily_demand=avg_daily_demand,
+                demand_std=demand_std,
+                lead_time_days=scenario.supplier_lead_time_days,
                 unit_cost=scenario.unit_cost,
             )
         )
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "should_reorder": policy.should_reorder,
             "reorder_point_units": str(policy.reorder_point_units),
             "suggested_order_units": str(policy.suggested_order_units),
@@ -259,44 +256,43 @@ def build_platform_tools(
             "method": policy.method,
         }
 
-    async def get_supplier_ranking(
-        sku: str = "4011",
-        tenant_id: str = "sa_retail_demo",
-    ) -> dict[str, Any]:
+    async def get_supplier_ranking(sku: str | None = None) -> dict[str, Any]:
         audit_log.record(tool="get_supplier_ranking", tenant_id=tenant_id, args={"sku": sku})
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
+        current = facts.get_supplier_for_sku(tenant_id, scenario.sku)
         graph = RelationStore()
-        current_supplier = f"supplier:{scenario.supplier.lower()}"
-        backup_supplier = "supplier:gauteng_chilled_dairy"
-        graph.add(Relation(f"sku:{sku}", "supplied_by", current_supplier))
-        graph.add(Relation(f"sku:{sku}", "supplied_by", backup_supplier))
+        current_supplier = current["supplier_id"]
+        graph.add(Relation(f"sku:{scenario.sku}", "supplied_by", current_supplier))
         profiles = {
             current_supplier: SupplierProfile(
                 supplier_id=current_supplier,
-                lead_time_days=Decimal("3"),
-                fill_rate=Decimal("0.76"),
+                lead_time_days=Decimal(str(current["lead_time_days"])),
+                fill_rate=Decimal(str(current["fill_rate"])),
                 unit_cost=scenario.unit_cost,
             ),
-            backup_supplier: SupplierProfile(
-                supplier_id=backup_supplier,
-                lead_time_days=Decimal("1"),
-                fill_rate=Decimal("0.94"),
-                unit_cost=Money.zar("12.80"),
-            ),
         }
-        ranking = recommend_suppliers(sku, graph, profiles)
+        alternate = facts.get_alternate_supplier(tenant_id, exclude=current_supplier)
+        if alternate is not None:
+            backup_supplier = alternate["supplier_id"]
+            graph.add(Relation(f"sku:{scenario.sku}", "supplied_by", backup_supplier))
+            profiles[backup_supplier] = SupplierProfile(
+                supplier_id=backup_supplier,
+                lead_time_days=Decimal(str(alternate["lead_time_days"])),
+                fill_rate=Decimal(str(alternate["fill_rate"])),
+                unit_cost=scenario.unit_cost,
+            )
+        ranking = recommend_suppliers(scenario.sku, graph, profiles)
         top = ranking.ranked[0]
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "top_supplier": top.supplier_id,
             "coverage": str(ranking.coverage),
             "method": ranking.method,
         }
 
     async def get_stock_sourcing_options(
-        sku: str = "4011",
+        sku: str | None = None,
         units_needed: int = 18,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         """Rank real candidate sources for a shortage instead of assuming a transfer.
 
@@ -309,62 +305,23 @@ def build_platform_tools(
             tenant_id=tenant_id,
             args={"sku": sku, "units_needed": units_needed},
         )
-        scenario = load_seeded_scenario(sku=sku)
-        current_supplier = f"supplier:{scenario.supplier.lower()}"
-        candidates = (
-            StockSourceCandidate(
-                source_type="branch",
-                source_id="store_02_sandton",
-                available_units=6,
-                distance_km=Decimal("5"),
-                lead_time_hours=Decimal("2"),
-            ),
-            StockSourceCandidate(
-                source_type="branch",
-                source_id="store_09_midrand",
-                available_units=14,
-                distance_km=Decimal("22"),
-                lead_time_hours=Decimal("4"),
-            ),
-            StockSourceCandidate(
-                source_type="distribution_center",
-                source_id="dc_gauteng_central",
-                available_units=400,
-                distance_km=Decimal("65"),
-                lead_time_hours=Decimal("18"),
-                unit_cost=scenario.unit_cost.amount,
-            ),
-            StockSourceCandidate(
-                source_type="supplier",
-                source_id=current_supplier,
-                available_units=200,
-                distance_km=Decimal("140"),
-                lead_time_hours=scenario.supplier_lead_time_days * Decimal("24"),
-                unit_cost=scenario.unit_cost.amount,
-            ),
-            StockSourceCandidate(
-                source_type="supplier",
-                source_id="supplier:gauteng_chilled_dairy",
-                available_units=200,
-                distance_km=Decimal("160"),
-                lead_time_hours=Decimal("24"),
-                unit_cost=Decimal("12.80"),
-            ),
+        scenario = facts.get_scenario_facts(tenant_id, sku)
+        candidates = facts.get_sourcing_candidates(tenant_id, scenario.sku)
+        plan = plan_stock_sourcing(
+            sku=scenario.sku, units_needed=units_needed, candidates=candidates
         )
-        plan = plan_stock_sourcing(sku=sku, units_needed=units_needed, candidates=candidates)
         return plan.to_dict()
 
     async def check_price_integrity(
-        sku: str = "4011",
+        sku: str | None = None,
         observed_unit_price: float | None = None,
-        tenant_id: str = "sa_retail_demo",
     ) -> dict[str, Any]:
         audit_log.record(
             tool="check_price_integrity",
             tenant_id=tenant_id,
             args={"sku": sku, "observed_unit_price": observed_unit_price},
         )
-        scenario = load_seeded_scenario(sku=sku)
+        scenario = facts.get_scenario_facts(tenant_id, sku)
         catalog_price = scenario.unit_price.amount
         observed = (
             Decimal(str(observed_unit_price))
@@ -378,7 +335,7 @@ def build_platform_tools(
             history=list(scenario.recent_daily_units),
         )
         return {
-            "sku": sku,
+            "sku": scenario.sku,
             "observed_unit_price": str(observed),
             "catalog_unit_price": str(catalog_price),
             "price_delta": str(delta),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterable
 
@@ -138,6 +139,7 @@ async def run_demo_feed(
     fridges: Iterable[FridgeSpec] = DEMO_FRIDGES,
     scenario: PowerScenario = DEMO_SCENARIO,
     minutes: int = 60,
+    site_id: str | None = None,
 ) -> None:
     """Replay the labeled cold-chain drill at demo pace until cancelled."""
     specs = list(fridges)
@@ -148,8 +150,9 @@ async def run_demo_feed(
             profiles={fridge.asset_id: fridge.profile for fridge in specs},
         )
         previous_tick = None
+        resolved_site_id = site_id or os.getenv("SHELFWISE_SITE_ID") or "local-site"
         for reading in simulate_site(
-            site_id="store_12",
+            site_id=resolved_site_id,
             fridges=specs,
             scenario=scenario,
             minutes=minutes,

@@ -14,7 +14,6 @@ from shelfwise_contracts import (
     RiskTier,
     SourceRef,
 )
-from shelfwise_data import load_seeded_scenario
 from shelfwise_inference.config import load_inference_config
 from shelfwise_inference.orchestration import (
     AgentOrchestrationError,
@@ -26,6 +25,7 @@ from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
 )
+from shelfwise_worldgen import create_world_snapshot_store
 
 from .cascade import (
     _COLD_CHAIN_SCENARIO_ID,
@@ -35,8 +35,24 @@ from .cascade import (
     _cause_id,
     _decision_id,
 )
+from .tenant import default_tenant_context
 from .tools.mcp_surface import AuditLog, PlatformTool, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
+from .world_facts import WorldFactsProvider
+
+_default_facts_store: Any = None
+
+
+def _default_facts() -> WorldFactsProvider:
+    """Lazily-shared facts provider for callers that don't inject their own."""
+    global _default_facts_store
+    if _default_facts_store is None:
+        _default_facts_store = create_world_snapshot_store()
+    return WorldFactsProvider(_default_facts_store)
+
+
+def _tenant_id(event: Event | None) -> str:
+    return event.tenant_id if event is not None else default_tenant_context().tenant_id
 
 # Unlike run_golden_cascade (deterministic Python math plus hand-authored EvidenceObject
 # literals), this path hands the same seeded facts to Gemma as read-only tools and requires
@@ -160,6 +176,7 @@ def run_golden_cascade_via_agents(
     execution_mode: ExecutionMode = ExecutionMode.LIVE_REQUIRED,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> dict[str, Any]:
     """Run the golden scenario's Critic + Executive reasoning through real Gemma tool calls."""
@@ -169,6 +186,7 @@ def run_golden_cascade_via_agents(
             execution_mode=execution_mode,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=orchestrator_factory,
         )
     )
@@ -180,16 +198,23 @@ async def _run(
     execution_mode: ExecutionMode,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
 ) -> dict[str, Any]:
-    scenario = load_seeded_scenario()
+    resolved_facts = facts or _default_facts()
+    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
     correlation_id = event.correlation_id if event is not None else None
 
     audit = AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions, memory=memory, audit=audit
+        decisions=decisions,
+        memory=memory,
+        audit=audit,
+        facts=resolved_facts,
+        tenant_id=tenant_id,
     )
     orchestrator = (
         orchestrator_factory()
@@ -218,7 +243,7 @@ async def _run(
             final_schema=_CRITIC_SCHEMA,
             final_schema_name="critic_verdict",
             correlation_id=correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
             require_tool_call_first=True,
         )
@@ -242,7 +267,7 @@ async def _run(
             final_schema=_EXECUTIVE_SCHEMA,
             final_schema_name="executive_verdict",
             correlation_id=critic_run.correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
         )
         executive_answer = executive_run.answer
@@ -282,6 +307,7 @@ def _build_result(
     correlation_id = (
         event.correlation_id if event is not None else critic_run.correlation_id
     )
+    tenant_id = _tenant_id(event)
     critic_passed = bool(critic_answer["critic_passed"])
     action_type = executive_answer["recommended_action_type"]
     markdown = RecommendedAction(
@@ -343,7 +369,7 @@ def _build_result(
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = tenant_id
     decision_payload["scenario_id"] = _GOLDEN_SCENARIO_ID
     decision_payload["role"] = "store_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
@@ -371,6 +397,7 @@ def run_procurement_cascade_via_agents(
     execution_mode: ExecutionMode = ExecutionMode.LIVE_REQUIRED,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> dict[str, Any]:
     """Run the procurement reorder/supplier decision through real Gemma tool calls."""
@@ -380,6 +407,7 @@ def run_procurement_cascade_via_agents(
             execution_mode=execution_mode,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=orchestrator_factory,
         )
     )
@@ -391,16 +419,23 @@ async def _run_procurement(
     execution_mode: ExecutionMode,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
 ) -> dict[str, Any]:
-    scenario = load_seeded_scenario()
+    resolved_facts = facts or _default_facts()
+    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
     correlation_id = event.correlation_id if event is not None else None
 
     audit = AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions, memory=memory, audit=audit
+        decisions=decisions,
+        memory=memory,
+        audit=audit,
+        facts=resolved_facts,
+        tenant_id=tenant_id,
     )
     orchestrator = (
         orchestrator_factory()
@@ -427,7 +462,7 @@ async def _run_procurement(
             final_schema=_PROCUREMENT_CRITIC_SCHEMA,
             final_schema_name="procurement_critic_verdict",
             correlation_id=correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
             require_tool_call_first=True,
         )
@@ -452,7 +487,7 @@ async def _run_procurement(
             final_schema=_PROCUREMENT_EXECUTIVE_SCHEMA,
             final_schema_name="procurement_executive_verdict",
             correlation_id=critic_run.correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
         )
         executive_answer = executive_run.answer
@@ -483,6 +518,7 @@ def _build_procurement_result(
     correlation_id = (
         event.correlation_id if event is not None else critic_run.correlation_id
     )
+    tenant_id = _tenant_id(event)
     critic_passed = bool(critic_answer["critic_passed"])
     supplier_id = str(critic_answer["supplier_id"])
     action_type = executive_answer["recommended_action_type"]
@@ -545,7 +581,7 @@ def _build_procurement_result(
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = tenant_id
     decision_payload["scenario_id"] = _PROCUREMENT_SCENARIO_ID
     decision_payload["role"] = "procurement_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
@@ -573,6 +609,7 @@ def run_sales_cascade_via_agents(
     execution_mode: ExecutionMode = ExecutionMode.LIVE_REQUIRED,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> dict[str, Any]:
     """Run the POS price-integrity verdict through real Gemma tool calls."""
@@ -582,6 +619,7 @@ def run_sales_cascade_via_agents(
             execution_mode=execution_mode,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=orchestrator_factory,
         )
     )
@@ -593,9 +631,12 @@ async def _run_sales(
     execution_mode: ExecutionMode,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
 ) -> dict[str, Any]:
-    scenario = load_seeded_scenario()
+    resolved_facts = facts or _default_facts()
+    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
     correlation_id = event.correlation_id if event is not None else None
@@ -606,7 +647,11 @@ async def _run_sales(
 
     audit = AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions, memory=memory, audit=audit
+        decisions=decisions,
+        memory=memory,
+        audit=audit,
+        facts=resolved_facts,
+        tenant_id=tenant_id,
     )
     orchestrator = (
         orchestrator_factory()
@@ -633,7 +678,7 @@ async def _run_sales(
             final_schema=_SALES_CRITIC_SCHEMA,
             final_schema_name="sales_critic_verdict",
             correlation_id=correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
             require_tool_call_first=True,
         )
@@ -657,7 +702,7 @@ async def _run_sales(
             final_schema=_SALES_EXECUTIVE_SCHEMA,
             final_schema_name="sales_executive_verdict",
             correlation_id=critic_run.correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=tenant_id,
             temperature=0.0,
         )
         executive_answer = executive_run.answer
@@ -688,6 +733,7 @@ def _build_sales_result(
     correlation_id = (
         event.correlation_id if event is not None else critic_run.correlation_id
     )
+    tenant_id = _tenant_id(event)
     critic_passed = bool(critic_answer["critic_passed"])
     action_type = executive_answer["recommended_action_type"]
     record_sale = RecommendedAction("record_sale", {"sku": scenario_sku}, RiskTier.LOW)
@@ -747,7 +793,7 @@ def _build_sales_result(
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = tenant_id
     decision_payload["scenario_id"] = _SALES_SCENARIO_ID
     decision_payload["role"] = "sales_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "review_required"
@@ -775,6 +821,7 @@ def run_cold_chain_cascade_via_agents(
     execution_mode: ExecutionMode = ExecutionMode.LIVE_REQUIRED,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> dict[str, Any]:
     """Run the cold-chain facilities-escalation verdict through real Gemma tool calls."""
@@ -784,6 +831,7 @@ def run_cold_chain_cascade_via_agents(
             execution_mode=execution_mode,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=orchestrator_factory,
         )
     )
@@ -795,17 +843,27 @@ async def _run_cold_chain(
     execution_mode: ExecutionMode,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
 ) -> dict[str, Any]:
+    resolved_facts = facts or _default_facts()
     payload = event.payload if event is not None else {}
-    asset_id = str(payload.get("asset_id") or "fridge_dairy_1")
+    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    scenario = resolved_facts.get_scenario_facts(tenant_id)
+    asset_id = str(
+        payload.get("asset_id") or f"cold-chain:{scenario.location}:{scenario.category}"
+    )
     outage_hours = float(payload.get("measured_outage_hours") or 4.0)
     average_temp_c = float(payload.get("temp_c") or 8.2)
     correlation_id = event.correlation_id if event is not None else None
 
     audit = AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions, memory=memory, audit=audit
+        decisions=decisions,
+        memory=memory,
+        audit=audit,
+        facts=resolved_facts,
+        tenant_id=tenant_id,
     )
     orchestrator = (
         orchestrator_factory()
@@ -834,7 +892,7 @@ async def _run_cold_chain(
             final_schema=_COLD_CHAIN_CRITIC_SCHEMA,
             final_schema_name="cold_chain_critic_verdict",
             correlation_id=correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=event.tenant_id if event is not None else default_tenant_context().tenant_id,
             temperature=0.0,
             require_tool_call_first=True,
         )
@@ -858,7 +916,7 @@ async def _run_cold_chain(
             final_schema=_COLD_CHAIN_EXECUTIVE_SCHEMA,
             final_schema_name="cold_chain_executive_verdict",
             correlation_id=critic_run.correlation_id,
-            tenant_id=event.tenant_id if event is not None else "sa_retail_demo",
+            tenant_id=event.tenant_id if event is not None else default_tenant_context().tenant_id,
             temperature=0.0,
         )
         executive_answer = executive_run.answer
@@ -946,7 +1004,7 @@ def _build_cold_chain_result(
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = _tenant_id(event)
     decision_payload["scenario_id"] = _COLD_CHAIN_SCENARIO_ID
     decision_payload["role"] = "facilities_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"

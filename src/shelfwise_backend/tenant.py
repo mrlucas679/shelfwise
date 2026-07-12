@@ -35,9 +35,9 @@ class TenantContext:
 
 
 def default_tenant_context() -> TenantContext:
-    tenant_id = os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "sa_retail_demo"
+    tenant_id = os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "local"
     return TenantContext(
-        tenant_id=tenant_id.strip() or "sa_retail_demo",
+        tenant_id=tenant_id.strip() or "local",
         user_id="local",
         role=Role.OWNER,
     )

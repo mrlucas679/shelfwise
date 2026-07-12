@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from _world_test_support import demo_facts, demo_sku
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
+
+
+def _catalog_price() -> str:
+    scenario = demo_facts().get_scenario_facts("sa_retail_demo", demo_sku())
+    return str(scenario.unit_price.amount)
 
 
 def _square_payload(quantity: str = "240") -> dict[str, object]:
@@ -27,7 +33,7 @@ def _shopify_payload() -> dict[str, object]:
         "id": 1234,
         "created_at": "2026-07-06T10:00:00Z",
         "location_id": "store_12",
-        "line_items": [{"id": 1, "sku": "4011", "quantity": 2, "price": "30.00"}],
+        "line_items": [{"id": 1, "sku": demo_sku(), "quantity": 2, "price": _catalog_price()}],
     }
 
 
@@ -69,9 +75,9 @@ def test_shopify_connector_intake_enters_sales_cascade() -> None:
     body = response.json()
     assert body["status"] == "accepted"
     assert body["event"]["type"] == "sale"
-    assert body["event"]["payload"]["sku"] == "4011"
+    assert body["event"]["payload"]["sku"] == demo_sku()
     assert body["event"]["payload"]["location"] == "store_12"
-    assert body["event"]["payload"]["unit_price"] == "30.00"
+    assert body["event"]["payload"]["unit_price"] == _catalog_price()
     assert body["pipeline"]["cascade"]["scenario"] == "pos_sale_price_integrity"
     assert body["pipeline"]["cascade"]["decision"]["action"]["type"] == "record_sale"
 
@@ -125,7 +131,9 @@ def test_syspro_and_lightspeed_connector_intake_use_registered_mappers() -> None
                 "id": "ls_sale_1",
                 "created_at": "2026-07-06T10:00:00Z",
                 "shop_id": "store_12",
-                "lines": [{"id": "line_1", "sku": "4011", "quantity": 2, "price": "30.00"}],
+                "lines": [
+                    {"id": "line_1", "sku": demo_sku(), "quantity": 2, "price": "30.00"}
+                ],
             }
         },
     )

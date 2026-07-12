@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from shelfwise_backend.cascade import (
-    run_catalog_price_check,
     run_cold_chain_cascade,
     run_expiry_risk_check,
     run_golden_cascade,
@@ -148,18 +147,12 @@ class CascadeWorker:
 
 
 def default_cascade_handler(event: Event) -> dict[str, Any]:
-    sku = str(event.payload.get("sku", ""))
-    if event.type is EventType.SCAN and sku == "4011":
+    if event.type is EventType.SCAN:
         return _attach_event_causality(run_golden_cascade(event), event)
-    supplier = str(event.payload.get("supplier", "")).lower()
-    if event.type is EventType.SUPPLIER_UPDATE and supplier == "dairyco":
+    if event.type is EventType.SUPPLIER_UPDATE:
         return _attach_event_causality(run_procurement_cascade(event), event)
-    if event.type is EventType.SALE and sku == "4011":
-        return _attach_event_causality(run_sales_cascade(event), event)
     if event.type is EventType.SALE:
-        result = run_catalog_price_check(event)
-        if result is not None:
-            return _attach_event_causality(result, event)
+        return _attach_event_causality(run_sales_cascade(event), event)
     if event.type is EventType.EXPIRY_ENTRY:
         result = run_expiry_risk_check(event)
         if result is not None:

@@ -18,11 +18,23 @@ from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
 )
+from shelfwise_worldgen import create_world_snapshot_store
 
 from .product_catalog import search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
 from .tools.mcp_surface import AuditLog, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
+from .world_facts import WorldFactsProvider
+
+_default_facts_store: Any = None
+
+
+def _default_facts() -> WorldFactsProvider:
+    global _default_facts_store
+    if _default_facts_store is None:
+        _default_facts_store = create_world_snapshot_store()
+    return WorldFactsProvider(_default_facts_store)
+
 
 _CHAT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -40,7 +52,7 @@ _CHAT_SYSTEM_PROMPT = (
     "numbered lists when there is more than one item, and **bold** for the one or two "
     "figures that matter most. Keep single-fact answers to a short paragraph - only add "
     "structure when there is genuinely more than one point to make. Never describe the "
-    "shape of tool_results/state_json to the user (no \"the tool result is `null`\", no "
+    'shape of tool_results/state_json to the user (no "the tool result is `null`", no '
     "field names, no backticks around raw internal values, no mention of JSON) - speak in "
     "plain retail-operations language.\n\n"
     "You have real, live tools covering every part of the store - call the one that "
@@ -111,6 +123,7 @@ def build_chat_reply(
     live_required: bool = False,
     decisions: Any = None,
     memory: Any = None,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> str:
     """Build a chat answer from current backend state."""
@@ -123,6 +136,7 @@ def build_chat_reply(
         live_required=live_required,
         decisions=decisions,
         memory=memory,
+        facts=facts,
         orchestrator_factory=orchestrator_factory,
     )
     return answer
@@ -138,6 +152,7 @@ def build_chat_reply_with_meta(
     live_required: bool = False,
     decisions: Any = None,
     memory: Any = None,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Answer using a real agentic tool-calling loop when a decision/memory store is
@@ -153,7 +168,10 @@ def build_chat_reply_with_meta(
     the agentic cascades are.
     """
     inference = client or OpenAICompatibleInferenceClient()
-    subject, product, tool_calls = _tool_context(question)
+    resolved_facts = facts or _default_facts()
+    subject, product, tool_calls = _tool_context(
+        question, facts=resolved_facts, tenant_id=tenant_id
+    )
     meta: dict[str, Any] = {
         "tools_used": [call["tool"] for call in tool_calls],
         "subject": subject,
@@ -185,6 +203,7 @@ def build_chat_reply_with_meta(
                     inference=inference,
                     decisions=decisions,
                     memory=memory,
+                    facts=resolved_facts,
                     tenant_id=tenant_id,
                     correlation_id=correlation_id,
                     orchestrator_factory=orchestrator_factory,
@@ -206,7 +225,7 @@ def build_chat_reply_with_meta(
             system=(
                 "You are ShelfWise Executive chat. Be concise and evidence-grounded. "
                 "Never describe the shape of tool_results/state_json to the user (no "
-                "\"the tool result is `null`\", no field names, no backticks around raw "
+                '"the tool result is `null`", no field names, no backticks around raw '
                 "values) - speak in plain retail-operations language, the way a store "
                 "manager would talk to a colleague. If the question's subject has no "
                 "catalogue match or no dedicated data (tool_results.catalog_search is "
@@ -247,12 +266,19 @@ async def _run_agentic_chat(
     inference: OpenAICompatibleInferenceClient,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider,
     tenant_id: str,
     correlation_id: str | None,
     orchestrator_factory: Any,
 ) -> tuple[str, tuple[Any, ...]]:
     """Run chat through the real platform-tool registry and return a grounded answer."""
-    tools = build_platform_tools(decisions=decisions, memory=memory, audit=AuditLog())
+    tools = build_platform_tools(
+        decisions=decisions,
+        memory=memory,
+        audit=AuditLog(),
+        facts=facts,
+        tenant_id=tenant_id,
+    )
     orchestrator: AgentOrchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
@@ -308,11 +334,13 @@ def _extract_product_query(question: str) -> str:
     return " ".join(best) if len(best) >= 2 else question[:80]
 
 
-def _tool_context(question: str) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+def _tool_context(
+    question: str, *, facts: WorldFactsProvider, tenant_id: str
+) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
     subject = _extract_product_query(question)
     tool_calls: list[dict[str, Any]] = [{"tool": "products.search", "query": subject}]
     try:
-        result = search_product_catalog(query=subject, limit=3, synthetic_scan_budget=25_000)
+        result = search_product_catalog(facts=facts, query=subject, limit=3, tenant_id=tenant_id)
         products = result.get("products") or []
     except (TypeError, ValueError):
         products = []

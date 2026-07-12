@@ -7,8 +7,14 @@ import shelfwise_backend.app as app_module
 from shelfwise_backend.app import app
 from shelfwise_contracts import Event
 
+_HERO_SKU = app_module.world_facts.get_hero_sku("sa_retail_demo")
+_HERO_SUPPLIER = app_module.world_facts.get_supplier_for_sku("sa_retail_demo", _HERO_SKU)["name"]
+_HERO_UNIT_PRICE = str(
+    app_module.world_facts.get_scenario_facts("sa_retail_demo", _HERO_SKU).unit_price.amount
+)
 
-def _scan_event(event_id: str = "evt_scan_4011") -> dict[str, object]:
+
+def _scan_event(event_id: str = "evt_scan_hero") -> dict[str, object]:
     return {
         "id": event_id,
         "type": "scan",
@@ -16,11 +22,11 @@ def _scan_event(event_id: str = "evt_scan_4011") -> dict[str, object]:
         "actor": "store_12",
         "source": "scanner",
         "tenant_id": "sa_retail_demo",
-        "payload": {"sku": "4011", "location": "store_12"},
+        "payload": {"sku": _HERO_SKU, "location": "store_12"},
     }
 
 
-def _supplier_event(event_id: str = "evt_supplier_dairyco") -> dict[str, object]:
+def _supplier_event(event_id: str = "evt_supplier_hero") -> dict[str, object]:
     return {
         "id": event_id,
         "type": "supplier_update",
@@ -29,14 +35,14 @@ def _supplier_event(event_id: str = "evt_supplier_dairyco") -> dict[str, object]
         "source": "manual",
         "tenant_id": "sa_retail_demo",
         "payload": {
-            "supplier": "DairyCo",
+            "supplier": _HERO_SUPPLIER,
             "avg_lead_time_days": "3",
             "recent_delay": False,
         },
     }
 
 
-def _sale_event(event_id: str = "evt_sale_4011") -> dict[str, object]:
+def _sale_event(event_id: str = "evt_sale_hero") -> dict[str, object]:
     return {
         "id": event_id,
         "type": "sale",
@@ -45,10 +51,10 @@ def _sale_event(event_id: str = "evt_sale_4011") -> dict[str, object]:
         "source": "pos_csv",
         "tenant_id": "sa_retail_demo",
         "payload": {
-            "sku": "4011",
+            "sku": _HERO_SKU,
             "location": "store_12",
             "quantity": 2,
-            "unit_price": "30.00",
+            "unit_price": _HERO_UNIT_PRICE,
         },
     }
 
@@ -83,7 +89,7 @@ def test_event_contract_is_traceable_and_tolerant() -> None:
 
     assert event.correlation_id == event.id
     assert event.tenant_id == "sa_retail_demo"
-    assert event.payload["sku"] == "4011"
+    assert event.payload["sku"] == _HERO_SKU
     assert "future_field" not in event.to_dict()
     assert cloud["type"] == "shelfwise.scan"
     assert cloud["tenantid"] == "sa_retail_demo"
@@ -108,9 +114,9 @@ def test_ingest_records_event_runs_supported_scan_once() -> None:
     assert duplicate.json()["bus_message_id"] is None
     assert duplicate.json()["cascade"] is None
     assert events.status_code == 200
-    assert [event["id"] for event in events.json()["events"]] == ["evt_scan_4011"]
+    assert [event["id"] for event in events.json()["events"]] == ["evt_scan_hero"]
     assert bus.status_code == 200
-    assert [message["event"]["id"] for message in bus.json()["messages"]] == ["evt_scan_4011"]
+    assert [message["event"]["id"] for message in bus.json()["messages"]] == ["evt_scan_hero"]
 
 
 def test_ingest_self_heals_when_bus_publish_fails_after_event_is_recorded(monkeypatch) -> None:

@@ -29,7 +29,6 @@ from shelfwise_connectors import (
     record_to_event,
 )
 from shelfwise_contracts import Event, EventType, Money
-from shelfwise_data import build_store_intelligence_demo, load_seeded_scenario
 from shelfwise_inference import (
     InferenceError,
     OpenAICompatibleInferenceClient,
@@ -55,7 +54,7 @@ from shelfwise_storage import (
     default_tenant_profile,
     reset_tenant_context,
 )
-from shelfwise_worldgen import create_worldgen_run_store
+from shelfwise_worldgen import create_world_snapshot_store, create_worldgen_run_store
 from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
 from .agentic_cascade import (
@@ -104,6 +103,7 @@ from .worker import (
     create_journal,
     worker_enabled,
 )
+from .world_facts import WorldFactsProvider
 
 DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 _INSECURE_APP_ENV_NAMES = {"production", "prod", "staging", "stage"}
@@ -176,6 +176,8 @@ inbound_record_store = create_inbound_record_store()
 product_catalog_store = create_product_catalog_store()
 inventory_position_store = create_inventory_position_store()
 worldgen_run_store = create_worldgen_run_store()
+world_snapshot_store = create_world_snapshot_store()
+world_facts = WorldFactsProvider(world_snapshot_store)
 cold_chain_demo = ColdChainDemoService()
 app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
@@ -523,13 +525,13 @@ def health() -> dict[str, object]:
 
 
 @app.get("/readiness")
-def readiness() -> dict[str, object]:
+def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     inference_ready = inference_readiness_payload()
     inference = inference_ready["inference"]
     gateway_status = "offline-safe" if inference["provider"] == "offline" else "configured"
     seed_status = "ok"
     try:
-        load_seeded_scenario()
+        world_facts.get_hero_sku(ctx.tenant_id)
     except (FileNotFoundError, ValueError):
         seed_status = "error"
 
@@ -689,22 +691,29 @@ def inference_smoke(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object
 
 
 @app.get("/data/seed/summary")
-def seed_summary() -> dict[str, object]:
-    return {"seed_data": load_seeded_scenario().to_dict()}
+def seed_summary(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    hero_sku = world_facts.get_hero_sku(ctx.tenant_id)
+    return {"seed_data": world_facts.get_scenario_facts(ctx.tenant_id, hero_sku).to_dict()}
 
 
 @app.get("/products/attention")
-def product_attention(limit: int = 20) -> dict[str, object]:
+def product_attention(
+    limit: int = 20, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     try:
-        return product_attention_queue(limit=limit)
+        return product_attention_queue(facts=world_facts, limit=limit, tenant_id=ctx.tenant_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/products/search")
-def product_search(q: str = "", limit: int = 20) -> dict[str, object]:
+def product_search(
+    q: str = "", limit: int = 20, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     try:
-        return search_product_catalog(query=q, limit=limit)
+        return search_product_catalog(
+            facts=world_facts, query=q, limit=limit, tenant_id=ctx.tenant_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -897,7 +906,7 @@ def _new_chat_response(
             _compact_chat_trace(item)
             for item in trace_registry.list(tenant_id=ctx.tenant_id)[:_CHAT_TRACE_LIMIT]
         ],
-        "store_intelligence": build_store_intelligence_demo(),
+        "store_intelligence": world_facts.get_store_intelligence(ctx.tenant_id),
     }
     conversation = chat_store.get(
         tenant_id=ctx.tenant_id,
@@ -918,6 +927,7 @@ def _new_chat_response(
             live_required=body.live_required,
             decisions=decision_store,
             memory=learning_store,
+            facts=world_facts,
         )
     except InferenceError as exc:
         raise HTTPException(status_code=503, detail="Live chat inference failed") from exc
@@ -965,8 +975,14 @@ def _chat_response(
 
 
 @app.get("/tools/platform")
-def list_platform_tools() -> dict[str, object]:
-    tools = build_platform_tools(decisions=decision_store, memory=learning_store, audit=tool_audit)
+def list_platform_tools(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    tools = build_platform_tools(
+        decisions=decision_store,
+        memory=learning_store,
+        audit=tool_audit,
+        facts=world_facts,
+        tenant_id=ctx.tenant_id,
+    )
     return {"tools": [tool.to_dict() for tool in tools]}
 
 
@@ -1348,8 +1364,10 @@ _DEMO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
 def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
-    """Create a tenant-owned trigger while retaining the seeded demo inputs."""
+    """Create a tenant-owned trigger from the tenant's generated world facts."""
     suffix = uuid4().hex[:12]
+    scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
     return Event(
         id=f"evt_demo_{event_type.value}_{suffix}",
         type=event_type,
@@ -1358,10 +1376,10 @@ def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
         tenant_id=ctx.tenant_id,
         correlation_id=f"demo_{event_type.value}_{suffix}",
         payload={
-            "sku": "4011",
-            "location": "store_12_soweto",
-            "supplier": "dairyco",
-            "site_id": "store_12_soweto",
+            "sku": scenario.sku,
+            "location": scenario.location,
+            "supplier": str(supplier["name"]).lower(),
+            "site_id": scenario.location,
         },
     )
 
@@ -1382,28 +1400,32 @@ def _assign_result_tenant(result: dict[str, Any], tenant_id: str) -> dict[str, A
 
 @app.post("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
 def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return _record_cascade(run_golden_cascade(_demo_event(ctx, EventType.SCAN)))
+    return _record_cascade(
+        run_golden_cascade(_demo_event(ctx, EventType.SCAN), facts=world_facts)
+    )
 
 
 @app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
 def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    """Drive a seeded supplier recall through the real event and HITL pipeline."""
+    """Drive a generated-world supplier recall through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
+    scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
     event = Event(
         id=f"evt_demo_recall_{suffix}",
         type=EventType.RECALL_NOTICE,
         ts=datetime.now(UTC),
-        actor="supplier_dairyco_quality",
+        actor=f"supplier_{supplier['supplier_id']}",
         tenant_id=ctx.tenant_id,
         correlation_id=f"demo_recall_{suffix}",
         payload={
             "recall_id": f"REC-DEMO-{suffix}",
-            "sku": "4011",
-            "lot_id": "AMASI-OLD-0707",
-            "units": 10,
-            "location": "store_12_soweto",
+            "sku": scenario.sku,
+            "lot_id": f"LOT-{scenario.sku}",
+            "units": max(1, scenario.units_on_hand // 4),
+            "location": scenario.location,
             "reason": "possible cold-chain contamination",
-            "issued_by": "DairyCo Quality",
+            "issued_by": f"{supplier['name']} Quality",
             "issuer_verified": True,
         },
     )
@@ -1416,8 +1438,10 @@ def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
 
 @app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
 def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    """Drive a seeded shrink count through the real event and HITL pipeline."""
+    """Drive a generated-world shrink count through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
+    scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    counted_units = max(0, scenario.units_on_hand - max(1, scenario.units_on_hand // 10))
     event = Event(
         id=f"evt_demo_inventory_exception_{suffix}",
         type=EventType.INVENTORY_EXCEPTION,
@@ -1428,11 +1452,11 @@ def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[st
         payload={
             "exception_id": f"EXC-DEMO-{suffix}",
             "exception_type": "shrink",
-            "sku": "4011",
+            "sku": scenario.sku,
             "reason": "cycle count below system stock",
-            "location": "store_12_soweto",
-            "expected_units": 30,
-            "counted_units": 24,
+            "location": scenario.location,
+            "expected_units": scenario.units_on_hand,
+            "counted_units": counted_units,
             "count_reference": f"COUNT-{suffix}",
         },
     )
@@ -1445,7 +1469,7 @@ def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[st
 
 @app.get("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
 def demo_golden_get() -> dict[str, object]:
-    return _preview_demo_cascade(run_golden_cascade())
+    return _preview_demo_cascade(run_golden_cascade(facts=world_facts))
 
 
 @app.post("/demo/golden/agentic", dependencies=_DEMO_WRITE_DEPS)
@@ -1465,6 +1489,7 @@ def demo_golden_agentic(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
+            facts=world_facts,
         )
     except AgenticCascadeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1489,6 +1514,7 @@ def demo_procurement_agentic(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
+            facts=world_facts,
         )
     except AgenticCascadeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1513,6 +1539,7 @@ def demo_sales_agentic(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
+            facts=world_facts,
         )
     except AgenticCascadeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1537,6 +1564,7 @@ def demo_cold_chain_agentic(
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
+            facts=world_facts,
         )
     except AgenticCascadeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1546,47 +1574,49 @@ def demo_cold_chain_agentic(
 @app.post("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
 def demo_critic_rejection(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
-        _assign_result_tenant(run_critic_rejection_cascade(), ctx.tenant_id)
+        _assign_result_tenant(run_critic_rejection_cascade(facts=world_facts), ctx.tenant_id)
     )
 
 
 @app.get("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
 def demo_critic_rejection_get() -> dict[str, object]:
-    return _preview_demo_cascade(run_critic_rejection_cascade())
+    return _preview_demo_cascade(run_critic_rejection_cascade(facts=world_facts))
 
 
 @app.post("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
 def demo_procurement(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
-        run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE))
+        run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE), facts=world_facts)
     )
 
 
 @app.get("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
 def demo_procurement_get() -> dict[str, object]:
-    return _preview_demo_cascade(run_procurement_cascade())
+    return _preview_demo_cascade(run_procurement_cascade(facts=world_facts))
 
 
 @app.post("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
 def demo_sales(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return _record_cascade(run_sales_cascade(_demo_event(ctx, EventType.SALE)))
+    return _record_cascade(
+        run_sales_cascade(_demo_event(ctx, EventType.SALE), facts=world_facts)
+    )
 
 
 @app.get("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
 def demo_sales_get() -> dict[str, object]:
-    return _preview_demo_cascade(run_sales_cascade())
+    return _preview_demo_cascade(run_sales_cascade(facts=world_facts))
 
 
 @app.post("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
 def demo_cold_chain(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
-        run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT))
+        run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT), facts=world_facts)
     )
 
 
 @app.get("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
 def demo_cold_chain_get() -> dict[str, object]:
-    return _preview_demo_cascade(run_cold_chain_cascade())
+    return _preview_demo_cascade(run_cold_chain_cascade(facts=world_facts))
 
 
 @app.get("/demo/worldgen/{scenario_id}", dependencies=_DEMO_WRITE_DEPS)
@@ -1596,6 +1626,7 @@ def demo_worldgen_drill(
     seed_override: int | None = None,
     assortment_size: int | None = None,
     catalog_scale: str = "supermarket",
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     if limit <= 0 or limit > 500:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
@@ -1607,6 +1638,7 @@ def demo_worldgen_drill(
             seed_override=seed_override,
             assortment_size=assortment_size,
             catalog_scale=catalog_scale,
+            tenant_id=ctx.tenant_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Scenario not found") from exc
@@ -2119,7 +2151,6 @@ def _memory_evidence_refs(decision_id: str, decision: dict[str, Any]) -> tuple[s
 
 
 def _cascade_for_event(event: Event) -> dict[str, Any] | None:
-    sku = str(event.payload.get("sku", ""))
     if event.type is EventType.RECALL_NOTICE:
         result = run_recall_cascade(event)
         _attach_event_causality(result, event)
@@ -2128,23 +2159,27 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
         result = run_inventory_exception_cascade(event)
         _attach_event_causality(result, event)
         return _record_cascade(result)
-    if event.type is EventType.SCAN and sku == "4011":
-        result = run_golden_cascade(event)
+    if event.type is EventType.SCAN:
+        result = run_golden_cascade(event, facts=world_facts)
         _attach_event_causality(result, event)
         return _record_cascade(result)
-    supplier = str(event.payload.get("supplier", "")).lower()
-    if event.type is EventType.SUPPLIER_UPDATE and supplier == "dairyco":
-        result = run_procurement_cascade(event)
-        _attach_event_causality(result, event)
-        return _record_cascade(result)
-    if event.type is EventType.SALE and sku == "4011":
-        result = run_sales_cascade(event)
+    if event.type is EventType.SUPPLIER_UPDATE:
+        result = run_procurement_cascade(event, facts=world_facts)
         _attach_event_causality(result, event)
         return _record_cascade(result)
     if event.type is EventType.SALE:
-        result = run_catalog_price_check(event)
-        if result is None:
+        if (
+            ("unit_price_cents" in event.payload or "catalog_price_cents" in event.payload)
+            and not {"unit_price_cents", "catalog_price_cents"} <= event.payload.keys()
+        ):
             return None
+        if {"unit_price_cents", "catalog_price_cents"} <= event.payload.keys():
+            result = run_catalog_price_check(event)
+            if result is None:
+                return None
+            _attach_event_causality(result, event)
+            return _record_cascade(result)
+        result = run_sales_cascade(event, facts=world_facts)
         _attach_event_causality(result, event)
         return _record_cascade(result)
     if event.type is EventType.EXPIRY_ENTRY:
@@ -2154,7 +2189,7 @@ def _cascade_for_event(event: Event) -> dict[str, Any] | None:
         _attach_event_causality(result, event)
         return _record_cascade(result)
     if event.type is EventType.COLD_CHAIN_ALERT:
-        result = run_cold_chain_cascade(event)
+        result = run_cold_chain_cascade(event, facts=world_facts)
         _attach_event_causality(result, event)
         return _record_cascade(result)
     return None
@@ -2199,6 +2234,7 @@ def _worldgen_cold_chain_alert(
     area: str,
     schedule: list[dict[str, Any]],
 ) -> Event:
+    scenario = world_facts.get_scenario_facts(tenant_id)
     first_window = schedule[0] if schedule else {}
     alert_ts = str(first_window.get("end") or first_window.get("start") or "2026-06-23T10:00:00")
     stage = int(first_window.get("stage") or 4)
@@ -2215,14 +2251,16 @@ def _worldgen_cold_chain_alert(
             "payload": {
                 "site_id": actor,
                 "area": area,
-                "asset_id": "fridge_dairy_1",
-                "category": "dairy",
+                "asset_id": f"cold-chain:{actor}:{scenario.category}",
+                "category": scenario.category,
                 "diagnosis": "generator_failed",
                 "severity": 2,
                 "predicted_minutes_to_unsafe": "18",
                 "measured_outage_hours": str(measured_outage_hours),
                 "temp_c": "8.2",
-                "stock_at_risk": {"minor_units": 643_500, "currency": "ZAR"},
+                "stock_at_risk": (
+                    scenario.unit_price * scenario.units_on_hand
+                ).to_dict(),
                 "synthetic": True,
             },
         }

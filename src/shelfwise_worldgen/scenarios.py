@@ -62,6 +62,7 @@ def build(
     seed_override: int | None = None,
     assortment_size: int | None = None,
     catalog_scale: str = "supermarket",
+    tenant_id: str = "local",
 ) -> tuple[World, list[dict]]:
     """Build a world plus external schedule labels for a named scenario.
 
@@ -86,6 +87,7 @@ def build(
         area=scenario.area,
         stage=scenario.stage,
         incident_days=scenario.incident_days,
+        tenant_id=tenant_id,
         products=products,
     )
     schedule = [

@@ -1630,7 +1630,7 @@ function Sidebar({
                   </div>
                   <div>
                     <dt>Tenant</dt>
-                    <dd className="tnum">{fieldText(tenantProfile, 'tenant_id', 'sa_retail_demo')}</dd>
+                    <dd className="tnum">{fieldText(tenantProfile, 'tenant_id', 'unavailable')}</dd>
                   </div>
                   <div>
                     <dt>Currency</dt>
@@ -2982,7 +2982,7 @@ function App() {
         fetchIfAvailable<ProductAttentionPayload>('/products/attention?limit=20', '/products/attention'),
         fetchIfAvailable<{ model_runs?: JsonObject[] }>('/mlops/model-runs'),
         fetchIfAvailable<{ prompt_versions?: JsonObject[] }>('/mlops/prompts'),
-        fetchIfAvailable<{ report?: JsonObject; markdown?: string }>('/mlops/accountability?tenant_id=sa_retail_demo', '/mlops/accountability'),
+        fetchIfAvailable<{ report?: JsonObject; markdown?: string }>('/mlops/accountability'),
         fetchIfAvailable<{ facts?: JsonObject[] }>('/mlops/tenant-facts'),
         fetchIfAvailable<{ profile?: JsonObject }>('/tenants/me'),
         fetchIfAvailable<{ runs?: JsonObject[] }>('/worker/runs'),

@@ -13,6 +13,7 @@ from shelfwise_backend.agentic_cascade import (
     run_sales_cascade_via_agents,
 )
 from shelfwise_backend.tools.mcp_surface import AuditLog, build_platform_tools
+from shelfwise_backend.world_facts import WorldFactsProvider
 from shelfwise_inference.orchestration import (
     AgentArchitecture,
     AgentOrchestrator,
@@ -22,6 +23,7 @@ from shelfwise_inference.orchestration import (
     RoleModelTarget,
 )
 from shelfwise_memory import create_learning_store
+from shelfwise_worldgen.world_store import InMemoryWorldSnapshotStore
 
 
 @dataclass
@@ -85,19 +87,33 @@ def _build_tools():
     decisions = create_decision_store()
     memory = create_learning_store()
     audit = AuditLog()
-    return build_platform_tools(decisions=decisions, memory=memory, audit=audit), decisions, memory
+    facts = WorldFactsProvider(InMemoryWorldSnapshotStore())
+    tools = build_platform_tools(
+        decisions=decisions, memory=memory, audit=audit, facts=facts, tenant_id="sa_retail_demo"
+    )
+    return tools, decisions, memory, facts
 
 
-def _scripted_messages() -> list[dict[str, Any]]:
+def _hero_price_facts(facts: WorldFactsProvider) -> tuple[str, str, str, str]:
+    """Compute the real catalogue price and a 20%-over observed price (matches the
+    cascade's own mismatch construction: observed_unit_price = catalog_price * 1.2)."""
+    scenario = facts.get_scenario_facts("sa_retail_demo")
+    catalog_price = scenario.unit_price.amount
+    observed_price = round(float(catalog_price) * 1.2, 2)
+    delta = round(observed_price - float(catalog_price), 2)
+    return scenario.sku, str(observed_price), str(catalog_price), str(delta)
+
+
+def _scripted_messages(sku: str, observed: str, catalog: str, delta: str) -> list[dict[str, Any]]:
     return [
         _tool_call_message(
-            "call_1", "check_price_integrity", {"sku": "4011", "observed_unit_price": 36.0}
+            "call_1", "check_price_integrity", {"sku": sku, "observed_unit_price": float(observed)}
         ),
         _final_message(
             {
                 "conclusion": (
-                    "Observed price 36.0 differs from catalogue price 30.00 by a delta of "
-                    "6.00, so this must be routed for manager review."
+                    f"Observed price {observed} differs from catalogue price {catalog} by "
+                    f"a delta of {delta}, so this must be routed for manager review."
                 ),
                 "confidence": 0.83,
                 "critic_passed": False,
@@ -106,7 +122,7 @@ def _scripted_messages() -> list[dict[str, Any]]:
         ),
         _final_message(
             {
-                "conclusion": "Route the price exception at 36.0 vs 30.00 for review.",
+                "conclusion": f"Route the price exception at {observed} vs {catalog} for review.",
                 "confidence": 0.82,
                 "recommended_action_type": "review_price_exception",
             }
@@ -115,8 +131,9 @@ def _scripted_messages() -> list[dict[str, Any]]:
 
 
 def test_agentic_sales_cascade_drives_real_tool_calls_and_produces_decision() -> None:
-    tools, decisions, memory = _build_tools()
-    runtime = _FakeRuntime(_scripted_messages())
+    tools, decisions, memory, facts = _build_tools()
+    sku, observed, catalog, delta = _hero_price_facts(facts)
+    runtime = _FakeRuntime(_scripted_messages(sku, observed, catalog, delta))
 
     def factory() -> AgentOrchestrator:
         return AgentOrchestrator(tools=tools, model_runtime=runtime)
@@ -126,6 +143,7 @@ def test_agentic_sales_cascade_drives_real_tool_calls_and_produces_decision() ->
         execution_mode=ExecutionMode.OFFLINE_TEST,
         decisions=decisions,
         memory=memory,
+        facts=facts,
         orchestrator_factory=factory,
     )
 
@@ -137,7 +155,7 @@ def test_agentic_sales_cascade_drives_real_tool_calls_and_produces_decision() ->
 
     critic_evidence = next(e for e in result["evidence"] if e["agent"] == "sales")
     executive_evidence = next(e for e in result["evidence"] if e["agent"] == "executive")
-    assert "36.0" in critic_evidence["conclusion"]
+    assert observed in critic_evidence["conclusion"]
     assert executive_evidence["recommended_action"]["type"] == "review_price_exception"
 
     decision = result["decision"]
@@ -147,9 +165,10 @@ def test_agentic_sales_cascade_drives_real_tool_calls_and_produces_decision() ->
 
 
 def test_agentic_sales_cascade_hard_fails_when_live_required_sees_offline_provider() -> None:
-    tools, decisions, memory = _build_tools()
+    tools, decisions, memory, facts = _build_tools()
+    sku, observed, catalog, delta = _hero_price_facts(facts)
     runtime = _FakeRuntime(
-        _scripted_messages(),
+        _scripted_messages(sku, observed, catalog, delta),
         mode=ExecutionMode.LIVE_REQUIRED,
         used_network=False,
         provider="offline",
@@ -164,15 +183,17 @@ def test_agentic_sales_cascade_hard_fails_when_live_required_sees_offline_provid
             execution_mode=ExecutionMode.LIVE_REQUIRED,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=factory,
         )
 
 
 def test_agentic_sales_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
-    tools, decisions, memory = _build_tools()
+    tools, decisions, memory, facts = _build_tools()
+    sku, observed, _catalog, _delta = _hero_price_facts(facts)
     ungrounded_messages = [
         _tool_call_message(
-            "call_1", "check_price_integrity", {"sku": "4011", "observed_unit_price": 36.0}
+            "call_1", "check_price_integrity", {"sku": sku, "observed_unit_price": float(observed)}
         ),
         _final_message(
             {
@@ -194,5 +215,6 @@ def test_agentic_sales_cascade_rejects_a_conclusion_that_cites_no_real_numbers()
             execution_mode=ExecutionMode.OFFLINE_TEST,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=factory,
         )

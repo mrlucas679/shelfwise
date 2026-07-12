@@ -315,7 +315,11 @@ def run_full_system(config: FullSystemConfig | None = None) -> FullSystemReport:
         _reset_in_memory_state(runtime)
     runtime.write_limiter.configure(capacity=1_000_000, refill_per_s=50_000.0, max_keys=4096)
 
-    environment = {"WORKER_ENABLED": "false", "SHELFWISE_AUTH_MODE": "off"}
+    environment = {
+        "WORKER_ENABLED": "false",
+        "SHELFWISE_AUTH_MODE": "off",
+        "SHELFWISE_TENANT_ID": "local",
+    }
     with (
         _temporary_environment(environment),
         TestClient(runtime.app, raise_server_exceptions=False) as client,
@@ -329,6 +333,8 @@ class _FullSystemDriver:
         self.config = config
         self.runtime = runtime
         self.client = client
+        self.tenant_id = "local"
+        self.site_id = self.runtime.world_facts.get_scenario_facts(self.tenant_id).location
         self.run_id = config.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         self.started_at = datetime.now(UTC).isoformat()
         self.features: list[FeatureReceipt] = []
@@ -397,6 +403,7 @@ class _FullSystemDriver:
                     seed_override=seed,
                     assortment_size=size,
                     catalog_scale=scale,
+                    tenant_id=self.tenant_id,
                 )
                 stream = list(world.run())
                 contract = assert_world_event_contract(stream)
@@ -655,19 +662,22 @@ class _FullSystemDriver:
 
     def _probe_misprice(self) -> None:
         seed = self.config.base_seed + 900_000
+        tenant_id = "local"
+        scenario = self.runtime.world_facts.get_scenario_facts(tenant_id)
+        observed_price = scenario.unit_price.amount / 2
         event = {
             "id": f"evt_full_misprice_{seed}",
             "type": "sale",
             "ts": "2026-07-10T10:14:00Z",
-            "actor": "store_12",
+            "actor": scenario.location,
             "source": "pos_csv",
-            "tenant_id": "sa_retail_demo",
+            "tenant_id": tenant_id,
             "correlation_id": f"full_misprice_{seed}",
             "payload": {
-                "sku": f"MISPRICE-{seed}",
+                "sku": scenario.sku,
                 "units": 250,
-                "unit_price_cents": 1_000,
-                "catalog_price_cents": 2_000,
+                "unit_price_cents": int(observed_price * 100),
+                "catalog_price_cents": scenario.unit_price.minor_units,
             },
         }
         response = self._request("misprice", "POST", "/ingest", json=event)
@@ -698,7 +708,7 @@ class _FullSystemDriver:
                     "inventory_counts": [
                         {
                             "catalog_object_id": f"sq_full_{suffix}",
-                            "location_id": "store_12",
+                            "location_id": "local-site",
                             "quantity": str(240 + suffix % 10),
                         }
                     ]
@@ -754,9 +764,8 @@ class _FullSystemDriver:
             "POST",
             "/scan/barcode",
             json={
-                "code": "SKU-4011",
-                "location": "store_12",
-                "tenant_id": "sa_retail_demo",
+                "code": "SKU-local-probe",
+                "location": "local-site",
             },
         )
         body = _json_body(response)
@@ -766,7 +775,7 @@ class _FullSystemDriver:
             response.status_code == 200
             and body.get("requires_human_review") is True
             and event.get("type") == "scan"
-            and event.get("payload", {}).get("sku") == "4011"
+            and event.get("payload", {}).get("sku") == "local-probe"
         )
         self._feature(
             "multimodal_review",
@@ -792,7 +801,7 @@ class _FullSystemDriver:
                 secret=secret,
             )
 
-        owner_headers = {"Authorization": f"Bearer {token('sa_retail_demo')}"}
+        owner_headers = {"Authorization": f"Bearer {token('local')}"}
         other_headers = {"Authorization": f"Bearer {token('other_tenant')}"}
         event_id = f"evt_full_auth_{self.config.base_seed}"
         with _temporary_environment(
@@ -807,10 +816,10 @@ class _FullSystemDriver:
                     "id": event_id,
                     "type": "scan",
                     "ts": "2026-07-10T10:14:00Z",
-                    "actor": "store_12",
+                    "actor": self.site_id,
                     "source": "scanner",
-                    "tenant_id": "sa_retail_demo",
-                    "payload": {"sku": "4011", "location": "store_12"},
+                    "tenant_id": "local",
+                    "payload": {"sku": "local-probe", "location": "local-site"},
                 },
             )
             created_body = _json_body(created)
@@ -885,9 +894,9 @@ class _FullSystemDriver:
                 "id": event_id,
                 "type": "stock_update",
                 "ts": "2026-07-10T08:00:00Z",
-                "actor": "store_12",
+                "actor": self.site_id,
                 "source": "wms_csv",
-                "tenant_id": "sa_retail_demo",
+                "tenant_id": "local",
                 "payload": {"sku": "WORKER-PROBE", "on_hand": 10},
             },
         )
@@ -903,10 +912,10 @@ class _FullSystemDriver:
                 "id": f"evt_full_dlq_{self.config.base_seed}",
                 "type": "scan",
                 "ts": "2026-07-10T10:14:00Z",
-                "actor": "store_12",
+                "actor": self.site_id,
                 "source": "scanner",
-                "tenant_id": "sa_retail_demo",
-                "payload": {"sku": "4011", "location": "store_12"},
+                "tenant_id": "local",
+                "payload": {"sku": "local-probe", "location": "local-site"},
             }
         )
         bus.publish(failed_event)
@@ -1420,6 +1429,7 @@ def _load_runtime() -> Any:
         tenant_profile_store,
         tool_audit,
         trace_registry,
+        world_facts,
         worldgen_run_store,
         write_limiter,
         writeback_sink,
@@ -1444,6 +1454,7 @@ def _load_runtime() -> Any:
         worldgen_run_store=worldgen_run_store,
         write_limiter=write_limiter,
         writeback_sink=writeback_sink,
+        world_facts=world_facts,
     )
 
 

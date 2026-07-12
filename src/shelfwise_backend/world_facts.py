@@ -46,6 +46,20 @@ class WorldFactsProvider:
     def get_hero_sku(self, tenant_id: str) -> str:
         return str(self._snapshot(tenant_id)["constraints"]["hero_sku"])
 
+    def get_supplier_for_sku(self, tenant_id: str, sku: str) -> dict[str, Any]:
+        payload = self._snapshot(tenant_id)
+        product = self._product_row(payload, sku)
+        return self._supplier_row(payload, product["supplier"])
+
+    def get_alternate_supplier(self, tenant_id: str, *, exclude: str) -> dict[str, Any] | None:
+        """Return the fastest-lead-time supplier other than ``exclude``, if any exist."""
+        suppliers = [
+            row for row in self._snapshot(tenant_id)["suppliers"] if row["supplier_id"] != exclude
+        ]
+        if not suppliers:
+            return None
+        return min(suppliers, key=lambda row: row["lead_time_days"])
+
     def search_products(
         self, tenant_id: str, query: str, *, limit: int = 20
     ) -> list[dict[str, Any]]:
@@ -61,6 +75,12 @@ class WorldFactsProvider:
             or needle in row["sku"].lower()
         ]
         return matches[:limit]
+
+    def list_products(self, tenant_id: str) -> list[dict[str, Any]]:
+        return list(self._snapshot(tenant_id)["products"])
+
+    def list_stock(self, tenant_id: str) -> list[dict[str, Any]]:
+        return list(self._snapshot(tenant_id)["stock"])
 
     def get_scenario_facts(self, tenant_id: str, sku: str | None = None) -> SeededScenario:
         payload = self._snapshot(tenant_id)

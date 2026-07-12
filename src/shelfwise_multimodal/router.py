@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
+from shelfwise_backend.tenant import default_tenant_context, verify_bearer_token
 from shelfwise_contracts import Event, EventSource, EventType, SourceRef
 
 from .contracts import SpeechPurpose, Tone
@@ -43,8 +44,7 @@ class VoiceOutBody(BaseModel):
 
 class BarcodeScanBody(BaseModel):
     code: str = Field(min_length=3, max_length=64)
-    location: str = Field(default="store_12", min_length=1, max_length=64)
-    tenant_id: str = Field(default="sa_retail_demo", min_length=1, max_length=128)
+    location: str = Field(min_length=1, max_length=64)
 
     @field_validator("code")
     @classmethod
@@ -63,8 +63,7 @@ class ReceiptLineBody(BaseModel):
 
 class ReceiptScanBody(BaseModel):
     receipt_id: str = Field(min_length=1, max_length=128)
-    location: str = Field(default="store_12", min_length=1, max_length=64)
-    tenant_id: str = Field(default="sa_retail_demo", min_length=1, max_length=128)
+    location: str = Field(min_length=1, max_length=64)
     lines: list[ReceiptLineBody] = Field(min_length=1, max_length=200)
 
 
@@ -128,14 +127,23 @@ def build_scan_router(*, api_key: str | None = None) -> APIRouter:
     router = APIRouter(prefix="/scan", dependencies=[Depends(guard)])
 
     @router.post("/barcode")
-    async def scan_barcode(body: BarcodeScanBody) -> dict[str, object]:
-        candidate = _scan_event_candidate(body)
+    async def scan_barcode(
+        body: BarcodeScanBody,
+        authorization: str | None = Header(default=None, alias="authorization"),
+    ) -> dict[str, object]:
+        candidate = _scan_event_candidate(body, tenant_id=_tenant_id(authorization))
         return {"candidate": candidate, "requires_human_review": True}
 
     @router.post("/receipt")
-    async def scan_receipt(body: ReceiptScanBody) -> dict[str, object]:
+    async def scan_receipt(
+        body: ReceiptScanBody,
+        authorization: str | None = Header(default=None, alias="authorization"),
+    ) -> dict[str, object]:
+        tenant_id = _tenant_id(authorization)
         return {
-            "candidates": [_receipt_line_candidate(body, line) for line in body.lines],
+            "candidates": [
+                _receipt_line_candidate(body, line, tenant_id=tenant_id) for line in body.lines
+            ],
             "requires_human_review": True,
         }
 
@@ -167,15 +175,15 @@ def _looks_like_image(head: bytes) -> bool:
     return head[8:12] == b"WEBP" or any(head.startswith(magic) for magic in _IMAGE_MAGIC)
 
 
-def _scan_event_candidate(body: BarcodeScanBody) -> dict[str, object]:
+def _scan_event_candidate(body: BarcodeScanBody, *, tenant_id: str) -> dict[str, object]:
     sku = _sku_from_code(body.code)
     event = Event(
-        id=_event_id("barcode", body.tenant_id, body.location, body.code),
+        id=_event_id("barcode", tenant_id, body.location, body.code),
         type=EventType.SCAN,
         ts=datetime.now(UTC),
         actor=body.location,
         source=EventSource.SCANNER,
-        tenant_id=body.tenant_id,
+        tenant_id=tenant_id,
         payload={
             "sku": sku,
             "location": body.location,
@@ -190,10 +198,13 @@ def _scan_event_candidate(body: BarcodeScanBody) -> dict[str, object]:
     }
 
 
-def _receipt_line_candidate(body: ReceiptScanBody, line: ReceiptLineBody) -> dict[str, object]:
+def _receipt_line_candidate(
+    body: ReceiptScanBody, line: ReceiptLineBody, *, tenant_id: str
+) -> dict[str, object]:
     event = Event(
         id=_event_id(
             "receipt",
+            tenant_id,
             body.receipt_id,
             line.sku,
             str(line.quantity),
@@ -203,7 +214,7 @@ def _receipt_line_candidate(body: ReceiptScanBody, line: ReceiptLineBody) -> dic
         ts=datetime.now(UTC),
         actor=body.location,
         source=EventSource.SCANNER,
-        tenant_id=body.tenant_id,
+        tenant_id=tenant_id,
         payload={
             "sku": line.sku,
             "location": body.location,
@@ -225,6 +236,19 @@ def _sku_from_code(code: str) -> str:
     if cleaned.startswith("SKU-"):
         return cleaned.removeprefix("SKU-")
     return cleaned
+
+
+def _tenant_id(authorization: str | None) -> str:
+    """Resolve tenant identity from trusted auth, never from scan payload data."""
+    if os.getenv("SHELFWISE_AUTH_MODE", "off").strip().lower() != "jwt":
+        return default_tenant_context().tenant_id
+    try:
+        return verify_bearer_token(
+            authorization,
+            secret=os.getenv("TENANT_AUTH_SECRET", ""),
+        ).tenant_id
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid tenant token") from exc
 
 
 def _event_id(prefix: str, *parts: str) -> str:

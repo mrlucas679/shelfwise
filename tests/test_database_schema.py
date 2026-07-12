@@ -87,13 +87,13 @@ def test_storage_tenant_context_defaults_and_resets(
     monkeypatch.delenv("SHELFWISE_TENANT_ID", raising=False)
     monkeypatch.delenv("TENANT_ID", raising=False)
 
-    assert current_tenant_id() == "sa_retail_demo"
+    assert current_tenant_id() == "local"
     token = bind_tenant_context("tenant_2")
     try:
         assert current_tenant_id() == "tenant_2"
     finally:
         reset_tenant_context(token)
-    assert current_tenant_id() == "sa_retail_demo"
+    assert current_tenant_id() == "local"
 
 
 def test_runtime_schema_bootstrap_can_be_disabled_for_restricted_production_role(

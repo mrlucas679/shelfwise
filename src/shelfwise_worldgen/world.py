@@ -10,7 +10,18 @@ from typing import Any
 
 from shelfwise_contracts import Event, EventSource, EventType
 
-from .sa_ground_truth import PRODUCTS, demand_multiplier, seed_int
+from .catalog.sample import sample_assortment
+
+
+def seed_int(seed: int, value: str) -> int:
+    """Derive a stable integer from a world seed and a domain value."""
+    digest = hashlib.blake2b(f"{seed}:{value}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
+
+
+def demand_multiplier(current: date) -> float:
+    """Apply a small calendar effect without relying on a planted product story."""
+    return 1.15 if current.weekday() in {4, 5} else 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +58,7 @@ class WorldConfig:
     start: date = date(2026, 6, 22)
     days: int = 7
     scenario_id: str = "ad_hoc"
-    tenant_id: str = "sa_retail_demo"
+    tenant_id: str = "local"
     store_id: str = "store_obs_main"
     area: str = "observatory_blk7"
     stage: int = 4
@@ -60,7 +71,7 @@ class World:
 
     def __init__(self, cfg: WorldConfig) -> None:
         self.cfg = cfg
-        self.products = tuple(cfg.products or PRODUCTS)
+        self.products = tuple(cfg.products or sample_assortment(cfg.seed, size=24))
 
     def run(self) -> Iterator[Event]:
         """Emit events in timestamp order for the configured week."""
@@ -140,6 +151,14 @@ class World:
         events: list[Event] = []
         if day_index == 0:
             misprice_product = self.products[1] if len(self.products) > 1 else self.products[0]
+            hero_product = self.products[0]
+            expiry_product = next(
+                (product for product in self.products if _cat(product).refrigerated), hero_product
+            )
+            hero_sku = _sku(hero_product)
+            expiry_sku = _sku(expiry_product)
+            hero_units = self._opening_stock(hero_product)
+            hero_supplier = str(getattr(hero_product, "supplier", f"supplier_{hero_sku}"))
             misprice_catalog = max(_catalog_price(misprice_product), 100)
             events.extend(
                 [
@@ -150,7 +169,7 @@ class World:
                         {
                             "store_id": self.cfg.store_id,
                             "location": self.cfg.store_id,
-                            "sku": "4011",
+                            "sku": hero_sku,
                             "synthetic_probe": True,
                         },
                     ),
@@ -173,10 +192,10 @@ class World:
                         EventSource.WMS_CSV,
                         {
                             "store_id": self.cfg.store_id,
-                            "sku": "4020",
-                            "batch_id": f"B-PROBE-{current:%Y%m%d}",
-                            "category": "dairy",
-                            "storage": "chilled",
+                            "sku": expiry_sku,
+                            "batch_id": f"B-PROBE-{current:%Y%m%d}-{expiry_sku}",
+                            "category": _physics_name(expiry_product),
+                            "storage": _cat(expiry_product).storage,
                             "days_to_expiry": 1,
                             "synthetic_probe": True,
                         },
@@ -187,9 +206,9 @@ class World:
                         EventSource.API,
                         {
                             "store_id": self.cfg.store_id,
-                            "sku": "4011",
-                            "supplier": "dairyco",
-                            "lead_time_days": 3,
+                            "sku": hero_sku,
+                            "supplier": hero_supplier,
+                            "lead_time_days": 2 + seed_int(self.cfg.seed, hero_supplier) % 3,
                             "synthetic_probe": True,
                         },
                     ),
@@ -199,8 +218,8 @@ class World:
                         EventSource.API,
                         {
                             "store_id": self.cfg.store_id,
-                            "sku": "4011",
-                            "ordered_units": 80,
+                            "sku": hero_sku,
+                            "ordered_units": max(1, self._reorder_point(hero_product) * 2),
                             "eta": (current + timedelta(days=2)).isoformat(),
                             "synthetic_probe": True,
                         },
@@ -213,11 +232,11 @@ class World:
                             "store_id": self.cfg.store_id,
                             "location": self.cfg.store_id,
                             "recall_id": f"REC-PROBE-{current:%Y%m%d}",
-                            "sku": "4011",
+                            "sku": hero_sku,
                             "lot_id": f"B-PROBE-{current:%Y%m%d}",
                             "units": 10,
                             "reason": "synthetic supplier recall drill",
-                            "issued_by": "DairyCo Quality",
+                            "issued_by": f"{hero_supplier} Quality",
                             "synthetic_probe": True,
                         },
                     ),
@@ -229,11 +248,11 @@ class World:
                             "store_id": self.cfg.store_id,
                             "exception_id": f"EXC-PROBE-{current:%Y%m%d}",
                             "exception_type": "shrink",
-                            "sku": "4011",
+                            "sku": hero_sku,
                             "reason": "synthetic cycle-count discrepancy",
                             "location": self.cfg.store_id,
-                            "expected_units": 30,
-                            "counted_units": 24,
+                            "expected_units": hero_units,
+                            "counted_units": max(0, hero_units - max(1, hero_units // 10)),
                             "count_reference": f"COUNT-PROBE-{current:%Y%m%d}",
                             "synthetic_probe": True,
                         },
@@ -248,13 +267,20 @@ class World:
                     EventSource.API,
                     {
                         "site_id": self.cfg.store_id,
-                        "asset_id": "fridge_dairy_1",
-                        "category": "dairy",
+                        "asset_id": (
+                            f"cold-chain:{self.cfg.store_id}:"
+                            f"{_physics_name(self.products[0])}"
+                        ),
+                        "category": _physics_name(self.products[0]),
                         "diagnosis": "generator_failed",
                         "severity": 2,
                         "predicted_minutes_to_unsafe": "18",
                         "measured_outage_hours": "4",
-                        "stock_at_risk": {"minor_units": 643_500, "currency": "ZAR"},
+                        "stock_at_risk": {
+                            "minor_units": _catalog_price(self.products[0])
+                            * self._opening_stock(self.products[0]),
+                            "currency": str(getattr(self.products[0], "currency", "ZAR")),
+                        },
                         "synthetic_probe": True,
                     },
                 )

@@ -11,8 +11,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from random import Random
 from typing import Any, Protocol
+
+from shelfwise_contracts import Money
+from shelfwise_decision_science import simulate_markdown
 
 from .catalog.sample import sample_assortment
 
@@ -137,10 +141,31 @@ def populate_world(
         count=policy.min_price_anomalies,
     )
 
+    primary_location = f"store_{rng.randint(1, 99):02d}"
+    for row in stock_by_sku.values():
+        row["location"] = primary_location
+    for row in sales_rows:
+        row["location"] = primary_location
     sites = _build_sites(rng, policy.site_count, list(stock_by_sku.keys()))
 
-    hero_sku = (
-        near_expiry[0] if near_expiry else (low_stock[0] if low_stock else product_rows[0]["sku"])
+    product_by_sku = {row["sku"]: row for row in product_rows}
+    sales_by_sku: dict[str, list[dict[str, Any]]] = {}
+    for row in sales_rows:
+        sales_by_sku.setdefault(row["sku"], []).append(row)
+    near_expiry = _prefer_profitable_markdown(
+        near_expiry, product_by_sku=product_by_sku, sales_by_sku=sales_by_sku
+    )
+
+    hero_candidates = near_expiry or low_stock or [product_rows[0]["sku"]]
+    sales_by_sku: dict[str, list[int]] = {}
+    for row in sales_rows:
+        sales_by_sku.setdefault(str(row["sku"]), []).append(int(row["quantity"]))
+    hero_sku = max(
+        hero_candidates,
+        key=lambda sku: (
+            sum(sales_by_sku.get(sku, ())) / max(len(sales_by_sku.get(sku, ())), 1)
+        )
+        / max(int(stock_by_sku[sku]["on_hand"]), 1),
     )
 
     payload: dict[str, Any] = {
@@ -208,7 +233,7 @@ def _stock_row(rng: Random, product: Any, now: datetime) -> dict[str, Any]:
     received_days_ago = rng.randint(0, 6)
     return {
         "sku": product.sku,
-        "location": "store_12",
+        "location": "generated",
         "on_hand": on_hand,
         "reorder_point": reorder_point,
         "expiry_date": (now + timedelta(days=expiry_days)).date().isoformat(),
@@ -224,7 +249,7 @@ def _sales_rows(rng: Random, product: Any, now: datetime) -> list[dict[str, Any]
         rows.append(
             {
                 "sku": product.sku,
-                "location": "store_12",
+                "location": "generated",
                 "ts": ts.isoformat(),
                 "quantity": quantity,
                 "unit_price": round(product.price_cents / 100, 2),
@@ -254,12 +279,46 @@ def _select_near_expiry(
     rng.shuffle(skus)
     chosen = skus[:count]
     for sku in chosen:
-        days = rng.randint(0, 3)
+        days = rng.randint(2, 3)
         stock_by_sku[sku]["expiry_date"] = (now + timedelta(days=days)).date().isoformat()
         stock_by_sku[sku]["received_date"] = (
             (now - timedelta(days=rng.randint(1, 4))).date().isoformat()
         )
     return chosen
+
+
+def _prefer_profitable_markdown(
+    near_expiry: list[str],
+    *,
+    product_by_sku: dict[str, dict[str, Any]],
+    sales_by_sku: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """Reorder so a genuinely markdown-profitable SKU (per real simulate_markdown math)
+    leads the list and becomes hero_sku - never hardcode which one, compute it."""
+    if len(near_expiry) <= 1:
+        return near_expiry
+
+    def is_profitable(sku: str) -> bool:
+        product = product_by_sku[sku]
+        sales = sales_by_sku.get(sku) or []
+        if not sales:
+            return False
+        recent = [Decimal(str(row["quantity"])) for row in sales[-14:]]
+        base_daily = sum(recent) / Decimal(len(recent))
+        result = simulate_markdown(
+            sku=sku,
+            units_on_hand=Decimal("30"),
+            days_to_expiry=Decimal("2"),
+            base_daily_units=base_daily,
+            unit_price=Money.zar(str(product["unit_price"])),
+            unit_cost=Money.zar(str(product["unit_cost"])),
+            discount_pct=Decimal("0.2"),
+        )
+        return result.incremental_profit.minor_units > 0
+
+    profitable = [sku for sku in near_expiry if is_profitable(sku)]
+    rest = [sku for sku in near_expiry if sku not in profitable]
+    return profitable + rest if profitable else near_expiry
 
 
 def _select_low_stock(
@@ -334,7 +393,7 @@ def _build_sites(rng: Random, site_count: int, skus: list[str]) -> list[dict[str
     sites.append(
         {
             "site_type": "distribution_center",
-            "site_id": "dc_gauteng_central",
+            "site_id": f"dc_{rng.randint(1, 99):02d}",
             "distance_km": round(rng.uniform(50.0, 120.0), 1),
             "lead_time_hours": round(rng.uniform(12.0, 30.0), 1),
             "stock": dict.fromkeys(sample_skus, rng.randint(200, 800)),

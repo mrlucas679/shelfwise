@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+
 import pytest
+
+os.environ["SHELFWISE_TENANT_ID"] = "sa_retail_demo"
 
 from shelfwise_backend.app import (
     chat_store,

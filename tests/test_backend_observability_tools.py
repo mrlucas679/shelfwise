@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import app, decision_store, learning_store, tool_audit
+from shelfwise_backend.app import app, decision_store, learning_store, tool_audit, world_facts
 from shelfwise_backend.tools.mcp_surface import (
     PlatformTool,
     build_platform_tools,
@@ -54,22 +54,25 @@ def test_chat_is_bounded_streaming_and_write_guarded(monkeypatch) -> None:
 def test_platform_tools_are_read_only_grounded_and_audited() -> None:
     client = TestClient(app)
     decision = client.post("/demo/golden").json()["decision"]
+    hero_sku = client.get("/data/seed/summary").json()["seed_data"]["sku"]
     tools = {
         tool.name: tool
         for tool in build_platform_tools(
             decisions=decision_store,
             memory=learning_store,
             audit=tool_audit,
+            facts=world_facts,
+            tenant_id="sa_retail_demo",
         )
     }
 
-    stock = asyncio.run(tools["get_stock"].fn(sku="4011"))
+    stock = asyncio.run(tools["get_stock"].fn(sku=hero_sku))
     open_decisions = asyncio.run(tools["list_open_decisions"].fn())
     explanation = asyncio.run(tools["explain_decision"].fn(decision_id=decision["id"]))
-    simulation = asyncio.run(tools["simulate_markdown"].fn(sku="4011", discount_pct=0.2))
+    simulation = asyncio.run(tools["simulate_markdown"].fn(sku=hero_sku, discount_pct=0.2))
 
     assert all(tool.read_only for tool in tools.values())
-    assert stock["on_hand"] == 240
+    assert stock["on_hand"] > 0
     assert any(item["id"] == decision["id"] for item in open_decisions["decisions"])
     assert explanation["critic_verdict"] == "approved"
     assert simulation["incremental_profit"]["minor_units"] > 0
