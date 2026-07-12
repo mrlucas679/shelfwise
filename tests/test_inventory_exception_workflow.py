@@ -116,3 +116,53 @@ def test_inventory_exception_demo_registers_trace_and_approval_task() -> None:
     assert approved.json()["decision"]["status"] == "approved"
     task = next(item for item in tasks if item["idempotency_key"] == f"writeback:{decision_id}")
     assert task["action"]["type"] == "investigate_shrink"
+
+    receipt = {
+        "source_reference": "COUNT-COMPLETE-001",
+        "completed_units": task["action"]["params"]["units"],
+        "observed_location": "store_12_soweto",
+        "note": "Cycle count investigation completed",
+    }
+    completed = client.post(f"/writeback/tasks/{task['id']}/complete", json=receipt)
+    replayed = client.post(f"/writeback/tasks/{task['id']}/complete", json=receipt)
+
+    assert completed.status_code == 200
+    assert completed.json()["task"]["status"] == "completed"
+    assert completed.json()["task"]["completion_receipt"]["source_reference"] == receipt[
+        "source_reference"
+    ]
+    assert replayed.json()["task"] == completed.json()["task"]
+
+
+def test_completed_relocation_updates_physical_position_ledger() -> None:
+    client = TestClient(app)
+    event = _event(
+        "misplaced_stock",
+        units=5,
+        expected_location="shelf_a",
+        observed_location="backroom_b",
+    )
+    decision = client.post("/ingest", json=event).json()["cascade"]["decision"]
+    approved = client.post(f"/decisions/{decision['id']}/approve").json()
+    task = approved["decision"]["write_back"]
+
+    completed = client.post(
+        f"/writeback/tasks/{task['id']}/complete",
+        json={
+            "source_reference": "MOVE-4011-001",
+            "completed_units": 5,
+            "observed_location": "shelf_a",
+        },
+    )
+    positions = client.get("/inventory/positions?sku=4011").json()["positions"]
+
+    assert completed.status_code == 200
+    assert {(item["location_id"], item["quantity"], item["state"]) for item in positions} == {
+        ("backroom_b", 0, "relocated"),
+        ("shelf_a", 5, "available"),
+    }
+    mismatch = client.post(
+        f"/writeback/tasks/{task['id']}/complete",
+        json={"source_reference": "MOVE-OTHER", "completed_units": 4},
+    )
+    assert mismatch.status_code == 409

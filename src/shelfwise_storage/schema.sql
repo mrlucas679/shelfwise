@@ -235,6 +235,23 @@ create table if not exists shelfwise_chat_conversations (
 create index if not exists idx_shelfwise_chat_conversations_user_updated
 on shelfwise_chat_conversations (tenant_id, user_id, updated_at desc);
 
+create table if not exists shelfwise_inventory_positions (
+    tenant_id text not null,
+    sku text not null,
+    location_type text not null,
+    location_id text not null,
+    bin_id text not null default 'unassigned',
+    quantity integer not null check (quantity >= 0),
+    state text not null,
+    source_reference text not null,
+    payload jsonb not null,
+    updated_at timestamptz not null,
+    primary key (tenant_id, sku, location_type, location_id, bin_id)
+);
+
+create index if not exists idx_shelfwise_inventory_positions_tenant_sku
+on shelfwise_inventory_positions (tenant_id, sku, location_type);
+
 alter table shelfwise_decisions enable row level security;
 alter table shelfwise_decisions force row level security;
 drop policy if exists shelfwise_decisions_tenant_isolation on shelfwise_decisions;
@@ -370,5 +387,13 @@ alter table shelfwise_chat_conversations force row level security;
 drop policy if exists shelfwise_chat_conversations_tenant_isolation
 on shelfwise_chat_conversations;
 create policy shelfwise_chat_conversations_tenant_isolation on shelfwise_chat_conversations
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_inventory_positions enable row level security;
+alter table shelfwise_inventory_positions force row level security;
+drop policy if exists shelfwise_inventory_positions_tenant_isolation
+on shelfwise_inventory_positions;
+create policy shelfwise_inventory_positions_tenant_isolation on shelfwise_inventory_positions
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));

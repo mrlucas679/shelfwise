@@ -13,6 +13,7 @@ from shelfwise_connectors import (
     create_inbound_record_store,
     create_writeback_sink,
 )
+from shelfwise_inventory import InMemoryInventoryPositionStore, create_inventory_position_store
 from shelfwise_memory import InMemoryLearningStore, create_learning_store
 from shelfwise_mlops import (
     InMemoryModelRunRegistry,
@@ -44,6 +45,7 @@ def test_store_factories_default_to_memory(monkeypatch: pytest.MonkeyPatch) -> N
     assert isinstance(create_tenant_profile_store(), InMemoryTenantProfileStore)
     assert isinstance(create_writeback_sink(), TaskWriteBackSink)
     assert isinstance(create_inbound_record_store(), InMemoryInboundRecordStore)
+    assert isinstance(create_inventory_position_store(), InMemoryInventoryPositionStore)
     assert isinstance(create_worldgen_run_store(), InMemoryWorldgenRunStore)
 
 
@@ -83,6 +85,9 @@ def test_postgres_store_requires_database_url(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(ValueError, match="DATABASE_URL is required"):
         create_inbound_record_store()
+
+    with pytest.raises(ValueError, match="DATABASE_URL is required"):
+        create_inventory_position_store()
 
     with pytest.raises(ValueError, match="DATABASE_URL is required"):
         create_worldgen_run_store()
@@ -131,6 +136,9 @@ def test_store_factory_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(ValueError, match="unsupported SHELFWISE_STORE_BACKEND"):
         create_inbound_record_store()
+
+    with pytest.raises(ValueError, match="unsupported SHELFWISE_STORE_BACKEND"):
+        create_inventory_position_store()
 
     with pytest.raises(ValueError, match="unsupported SHELFWISE_STORE_BACKEND"):
         create_worldgen_run_store()

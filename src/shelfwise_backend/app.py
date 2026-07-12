@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -37,6 +37,7 @@ from shelfwise_inference import (
     load_inference_config,
 )
 from shelfwise_inference.orchestration import ExecutionMode
+from shelfwise_inventory import create_inventory_position_store
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
     ModelRun,
@@ -173,6 +174,7 @@ tenant_profile_store = create_tenant_profile_store()
 writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
 product_catalog_store = create_product_catalog_store()
+inventory_position_store = create_inventory_position_store()
 worldgen_run_store = create_worldgen_run_store()
 cold_chain_demo = ColdChainDemoService()
 app.router.add_event_handler("startup", worker_service.start)
@@ -435,6 +437,27 @@ class ConnectorIntakeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskCompletionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_reference: str = Field(min_length=1, max_length=200)
+    completed_units: int = Field(ge=0, le=1_000_000)
+    observed_location: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class InventoryPositionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str = Field(min_length=1, max_length=200)
+    location_type: Literal["shelf", "backroom", "bin", "quarantine", "returns"]
+    location_id: str = Field(min_length=1, max_length=200)
+    bin_id: str = Field(default="unassigned", min_length=1, max_length=200)
+    quantity: int = Field(ge=0, le=1_000_000)
+    state: Literal["available", "quarantined", "relocated", "count_pending"]
+    source_reference: str = Field(min_length=1, max_length=200)
 
 
 class ProductUpsertBody(BaseModel):
@@ -1675,6 +1698,134 @@ def learning_summary() -> dict[str, object]:
 def list_writeback_tasks(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Return tenant-scoped pending task/draft records created by approval."""
     return {"tasks": writeback_sink.list(tenant_id=ctx.tenant_id)}
+
+
+@app.get("/inventory/positions")
+def list_inventory_positions(
+    sku: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    return {
+        "positions": inventory_position_store.list(
+            tenant_id=ctx.tenant_id,
+            sku=sku.strip() if sku else None,
+        )
+    }
+
+
+@app.post(
+    "/inventory/positions",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def upsert_inventory_position(
+    body: InventoryPositionBody,
+    ctx: TenantContext = INGEST_AUTH_DEP,
+) -> dict[str, object]:
+    return {
+        "position": inventory_position_store.upsert(
+            {"tenant_id": ctx.tenant_id, **body.model_dump()}
+        )
+    }
+
+
+@app.post(
+    "/writeback/tasks/{task_id}/complete",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def complete_writeback_task(
+    task_id: str,
+    body: TaskCompletionBody,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    existing = next(
+        (
+            item
+            for item in writeback_sink.list(tenant_id=ctx.tenant_id)
+            if item.get("id") == task_id
+        ),
+        None,
+    )
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Write-back task not found")
+    action = existing.get("action") if isinstance(existing.get("action"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    expected_units = params.get("units")
+    if isinstance(expected_units, int) and body.completed_units != expected_units:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Completion units must equal approved units ({expected_units})",
+        )
+    receipt = {
+        "source_reference": body.source_reference,
+        "completed_units": body.completed_units,
+        "observed_location": body.observed_location,
+        "note": body.note,
+        "completed_by": ctx.user_id,
+    }
+    try:
+        task = writeback_sink.complete_task(
+            task_id=task_id,
+            tenant_id=ctx.tenant_id,
+            receipt=receipt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if task is None:  # It may have disappeared between validation and completion.
+        raise HTTPException(status_code=404, detail="Write-back task not found")
+    positions = _record_completed_inventory_movement(task)
+    return {"task": task, "positions": positions}
+
+
+def _record_completed_inventory_movement(task: dict[str, Any]) -> list[dict[str, Any]]:
+    action = task.get("action") if isinstance(task.get("action"), dict) else {}
+    if action.get("type") != "relocate_stock":
+        return []
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    receipt = (
+        task.get("completion_receipt")
+        if isinstance(task.get("completion_receipt"), dict)
+        else {}
+    )
+    tenant_id = str(task.get("tenant_id") or "")
+    sku = str(params.get("sku") or "")
+    source = str(params.get("observed_location") or "")
+    destination = str(params.get("expected_location") or "")
+    source_reference = str(receipt.get("source_reference") or "")
+    units = int(receipt.get("completed_units") or 0)
+    if not all((tenant_id, sku, source, destination, source_reference)):
+        raise HTTPException(status_code=409, detail="Relocation receipt lacks position evidence")
+    return [
+        inventory_position_store.upsert(
+            {
+                "tenant_id": tenant_id,
+                "sku": sku,
+                "location_type": _physical_location_type(source),
+                "location_id": source,
+                "quantity": 0,
+                "state": "relocated",
+                "source_reference": source_reference,
+            }
+        ),
+        inventory_position_store.upsert(
+            {
+                "tenant_id": tenant_id,
+                "sku": sku,
+                "location_type": _physical_location_type(destination),
+                "location_id": destination,
+                "quantity": units,
+                "state": "available",
+                "source_reference": source_reference,
+            }
+        ),
+    ]
+
+
+def _physical_location_type(location_id: str) -> str:
+    lowered = location_id.lower()
+    for location_type in ("backroom", "shelf", "quarantine", "returns", "bin"):
+        if location_type in lowered:
+            return location_type
+    return "bin"
 
 
 @app.get("/decisions/{decision_id}")
