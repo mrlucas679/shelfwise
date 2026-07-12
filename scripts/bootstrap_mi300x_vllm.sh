@@ -79,7 +79,7 @@ start_quick_start_server() {
     -e "VLLM_API_KEY=$VLLM_API_KEY" \
     "$VLLM_HOST_CONTAINER" \
     bash -lc \
-    'mkdir -p /root/shelfwise-vllm; nohup vllm serve "$1" --host 0.0.0.0 --port "$2" --api-key "$VLLM_API_KEY" --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$3" --enable-auto-tool-choice --tool-call-parser gemma4 > "/root/shelfwise-vllm/vllm-$2.log" 2>&1 &' \
+    'mkdir -p /root/shelfwise-vllm; nohup vllm serve "$1" --host 0.0.0.0 --port "$2" --api-key "$VLLM_API_KEY" --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$3" --enforce-eager --enable-auto-tool-choice --tool-call-parser gemma4 > "/root/shelfwise-vllm/vllm-$2.log" 2>&1 &' \
     bash "$model" "$port" "$memory_fraction"
   sleep 3
   docker exec "$VLLM_HOST_CONTAINER" bash -lc \
@@ -123,6 +123,7 @@ start_server() {
     --dtype bfloat16 \
     --max-model-len 8192 \
     --gpu-memory-utilization "$memory_fraction" \
+    --enforce-eager \
     --limit-mm-per-prompt image=0,audio=0 \
     --enable-auto-tool-choice \
     --tool-call-parser gemma4 \

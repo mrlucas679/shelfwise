@@ -26,6 +26,7 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "docker exec \"$VLLM_HOST_CONTAINER\" curl" in source
     assert "[v]llm serve" in source
     assert "--disable-log-requests" not in source
+    assert "--enforce-eager" in source
 
 
 def test_droplet_bootstrap_docs_keep_required_secrets_out_of_git() -> None:
