@@ -2082,10 +2082,16 @@ def _compact_chat_decision(decision: dict[str, Any]) -> dict[str, Any]:
         "summary",
         "role",
         "critic_verdict",
-        "action",
-        "expected_outcome",
     )
-    return {key: decision[key] for key in fields if key in decision}
+    compact = {key: decision[key] for key in fields if key in decision}
+    action = decision.get("action")
+    if isinstance(action, dict):
+        compact["action"] = {
+            key: action[key]
+            for key in ("type", "risk_tier")
+            if key in action
+        }
+    return compact
 
 
 def _bounded_chat_thresholds(

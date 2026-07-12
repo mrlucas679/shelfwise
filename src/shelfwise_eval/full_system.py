@@ -1189,6 +1189,9 @@ class _FullSystemDriver:
                     "latency_ms": latency_ms,
                     "model_answer": model_answer,
                     "model_run_ids": [run.id for run in after],
+                    "model_run_errors": [
+                        run.error_detail for run in after if run.error_detail
+                    ],
                 }
             )
 
