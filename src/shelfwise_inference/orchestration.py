@@ -18,6 +18,7 @@ from .tool_calling import (
     PlatformToolLike,
     PlatformToolRegistry,
     ToolExecution,
+    openai_json_schema_response_format,
     parse_and_validate_json_answer,
     parse_tool_calls,
 )
@@ -323,7 +324,11 @@ class AgentOrchestrator:
         normalized_role = _normalized_role(role)
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
-        response_format = _TEXT_RESPONSE_FORMAT
+        response_format = _final_response_format(
+            model=self._runtime.architecture.target_for(normalized_role).model,
+            schema_name=schema_name,
+            schema=final_schema,
+        )
         openai_tools = self._registry.openai_tools()
         conversation = [dict(message) for message in messages]
         conversation.append(
@@ -440,6 +445,19 @@ class AgentOrchestrator:
         raise AgentOrchestrationError(
             f"agent exceeded the {self._max_model_calls}-call orchestration limit"
         )
+
+
+def _final_response_format(
+    *,
+    model: str,
+    schema_name: str,
+    schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Use native constrained JSON only for the strong Gemma tier proven to support it."""
+
+    if model.strip().lower() == "google/gemma-4-31b-it":
+        return openai_json_schema_response_format(name=schema_name, schema=schema)
+    return _TEXT_RESPONSE_FORMAT
 
 
 def enforce_execution_mode(model_call: ModelCall, mode: ExecutionMode) -> None:

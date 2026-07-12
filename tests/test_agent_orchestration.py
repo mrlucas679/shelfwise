@@ -16,6 +16,7 @@ from shelfwise_inference.orchestration import (
     LiveInferenceRequiredError,
     ModelCall,
     RoleModelTarget,
+    _final_response_format,
 )
 from shelfwise_inference.tool_calling import FinalAnswerValidationError
 
@@ -83,6 +84,25 @@ def _schema() -> dict[str, Any]:
         "required": ["risk", "action"],
         "additionalProperties": False,
     }
+
+
+def test_strong_gemma_uses_native_json_schema_while_routine_stays_text() -> None:
+    schema = _schema()
+
+    strong = _final_response_format(
+        model="google/gemma-4-31B-it",
+        schema_name="agent_answer",
+        schema=schema,
+    )
+
+    assert strong["type"] == "json_schema"
+    assert strong["json_schema"]["strict"] is True
+    assert strong["json_schema"]["schema"] == schema
+    assert _final_response_format(
+        model="google/gemma-4-E4B-it",
+        schema_name="agent_answer",
+        schema=schema,
+    ) == {"type": "text"}
 
 
 def test_agent_executes_tool_feeds_result_back_and_returns_valid_json() -> None:
