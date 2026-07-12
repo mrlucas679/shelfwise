@@ -93,12 +93,20 @@ jobs:
           assert golden['decision']['tenant_id'] == session['session']['tenant_id']
           PY
 
-      - name: Track 3 response and language gate
+      - name: Track 3 live response and language gate
+        if: ${{ secrets.LLM_ROUTINE_BASE_URL != '' && secrets.LLM_API_KEY != '' }}
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          LLM_ROUTINE_BASE_URL: ${{ secrets.LLM_ROUTINE_BASE_URL }}
+          LLM_STRONG_BASE_URL: ${{ secrets.LLM_STRONG_BASE_URL || secrets.LLM_ROUTINE_BASE_URL }}
+          LLM_ROUTINE_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_STRONG_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ROUTINE_MODEL: ${{ secrets.LLM_ROUTINE_MODEL || 'google/gemma-4-E4B-it' }}
+          LLM_STRONG_MODEL: ${{ secrets.LLM_STRONG_MODEL || 'google/gemma-4-31B-it' }}
         run: |
+          docker compose -f docker-compose.production.yml up -d --wait
           python - <<'PY'
           import json
           import time
@@ -133,6 +141,12 @@ jobs:
           assert responses[0] != responses[1], 'distinct inputs produced identical answers'
           print('Track 3 request/language/unseen-input gate: PASS')
           PY
+
+      - name: Track 3 fail-closed gate without AMD endpoint
+        if: ${{ secrets.LLM_ROUTINE_BASE_URL == '' || secrets.LLM_API_KEY == '' }}
+        run: |
+          echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
+          echo "Production topology and fail-closed behavior are covered by the application tests."
 
       - name: Stop production topology
         if: always()

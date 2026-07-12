@@ -5,6 +5,7 @@ import pytest
 from shelfwise_backend.app import _request_timeout_seconds
 from shelfwise_backend.chat import ensure_english_response
 from shelfwise_inference.config import _timeout_seconds
+from shelfwise_inference.orchestration import AgentOrchestrationError, _ensure_english_payload
 
 
 def test_track3_english_guard_rejects_non_latin_model_output() -> None:
@@ -16,6 +17,11 @@ def test_track3_english_guard_accepts_operational_english() -> None:
     assert ensure_english_response("Stock is below the reorder point.") == (
         "Stock is below the reorder point."
     )
+
+
+def test_track3_agent_payload_english_guard_checks_nested_response_fields() -> None:
+    with pytest.raises(AgentOrchestrationError, match="non-English"):
+        _ensure_english_payload({"answer": "これは日本語です"})
 
 
 def test_track3_request_deadline_is_strictly_below_thirty_seconds(monkeypatch) -> None:

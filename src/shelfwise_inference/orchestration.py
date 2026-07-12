@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -275,6 +276,8 @@ class AgentOrchestrator:
         """Run from a system/user prompt and return one validated agent answer."""
         guarded_system = (
             f"{system.rstrip()}\n\n"
+            "All natural-language values in your JSON response must be written in English. "
+            "Do not switch languages.\n"
             "Use only the supplied tools. Never invent tool results. The tools are your "
             "calculator: any number in your conclusion must be one the tools actually "
             "returned, not a guess or a paraphrase. Explain your reasoning by citing the "
@@ -391,6 +394,7 @@ class AgentOrchestrator:
                         raise
                     final_answer_retries += 1
                     continue
+                _ensure_english_payload(answer)
                 return AgentRunResult(
                     role=normalized_role,
                     answer=answer,
@@ -452,6 +456,27 @@ def enforce_execution_mode(model_call: ModelCall, mode: ExecutionMode) -> None:
     is_offline_provider = any(label in provider for label in _OFFLINE_PROVIDERS)
     if model_call.fallback or is_offline_provider:
         raise LiveInferenceRequiredError("live_required rejected an offline/fallback model result")
+
+
+def _ensure_english_payload(value: Any) -> None:
+    """Reject generated JSON containing a clearly non-English writing system."""
+    if isinstance(value, str):
+        letters = [char for char in value if char.isalpha()]
+        if not letters:
+            return
+        latin_letters = sum(
+            "LATIN" in unicodedata.name(char, "") or char.isascii() for char in letters
+        )
+        if latin_letters / len(letters) < 0.8:
+            raise AgentOrchestrationError("model returned a non-English response")
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _ensure_english_payload(item)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+        for item in value:
+            _ensure_english_payload(item)
 
 
 def deepcopy_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:

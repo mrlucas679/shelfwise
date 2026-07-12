@@ -165,7 +165,7 @@
           "symbol": "STRONG_AGENT_NAMES"
         },
         {
-          "line": 240,
+          "line": 241,
           "path": "src/shelfwise_inference/orchestration.py",
           "symbol": "AgentOrchestrator"
         }
@@ -4271,7 +4271,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:2ebe2d2dfa8caa6500f7baef4e56b55cf5270a16256c11e8d6265b4daf1405f3",
+  "fingerprint": "sha256:994c1bdc200b0d8080395f0eea0b46ac7fd9deedef6ae26bdc4b7ce12bf9a5da",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }
