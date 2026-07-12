@@ -222,22 +222,32 @@ def build_chat_reply_with_meta(
         f"<user_question>{spotlight(question, max_len=2_000)}</user_question>"
     )
     if decisions is not None and memory is not None:
-        try:
-            answer, run_tool_calls = asyncio.run(
-                _run_agentic_chat(
-                    prompt=prompt,
-                    inference=inference,
-                    decisions=decisions,
-                    memory=memory,
-                    facts=resolved_facts,
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                    orchestrator_factory=orchestrator_factory,
+        last_error: AgentOrchestrationError | ToolCallingError | None = None
+        for attempt in range(2):
+            try:
+                answer, run_tool_calls = asyncio.run(
+                    _run_agentic_chat(
+                        prompt=prompt,
+                        inference=inference,
+                        decisions=decisions,
+                        memory=memory,
+                        facts=resolved_facts,
+                        tenant_id=tenant_id,
+                        correlation_id=(
+                            correlation_id if attempt == 0 else f"{correlation_id}:retry-{attempt}"
+                        ),
+                        orchestrator_factory=orchestrator_factory,
+                    )
                 )
-            )
-        except (AgentOrchestrationError, ToolCallingError) as exc:
+                meta["answer_source"] = "model"
+                meta["tools_used"] = [call.name for call in run_tool_calls]
+                return answer, meta
+            except (AgentOrchestrationError, ToolCallingError) as exc:
+                last_error = exc
+        assert last_error is not None
+        if last_error is not None:
             if live_required:
-                raise InferenceError(f"live agentic chat failed: {exc}") from exc
+                raise InferenceError(f"live agentic chat failed: {last_error}") from last_error
             return (
                 _offline_reply(
                     question=question,
@@ -249,9 +259,6 @@ def build_chat_reply_with_meta(
                 ),
                 meta,
             )
-        meta["answer_source"] = "model"
-        meta["tools_used"] = [call.name for call in run_tool_calls]
-        return answer, meta
     try:
         result = inference.complete(
             agent="executive",
