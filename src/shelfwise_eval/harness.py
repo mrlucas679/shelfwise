@@ -512,7 +512,7 @@ def _check_inference_and_submission(checks: list[EvalCheck], client: TestClient)
             checks,
             "submission_track_three",
             body.get("track") == "Track 3: Unicorn"
-            and submission_checks.get("docker_image_required") == "no",
+            and submission_checks.get("docker_image_required") == "required",
             (
                 f"track={body.get('track')} "
                 f"docker={submission_checks.get('docker_image_required')}"

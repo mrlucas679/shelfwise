@@ -62,7 +62,7 @@ def test_submission_readiness_exposes_track_three_prescreen(monkeypatch) -> None
     body = response.json()
     assert body["track"] == "Track 3: Unicorn"
     assert body["ready_for_submission_prescreen"] is True
-    assert body["checks"]["docker_image_required"] == "no"
+    assert body["checks"]["docker_image_required"] == "required"
     assert body["checks"]["amd_compute_usage"] == "ok"
 
 

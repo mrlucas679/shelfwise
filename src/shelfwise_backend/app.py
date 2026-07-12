@@ -668,7 +668,7 @@ def submission_readiness() -> dict[str, object]:
             "demo_video_required": "required",
             "slide_deck_pdf_required": "required",
             "hosted_url": "recommended",
-            "docker_image_required": "no",
+            "docker_image_required": "required",
             "amd_compute_usage": "ok" if inference_ready["ready_for_amd_demo"] else "pending",
             "response_timeout": "ok",
             "english_responses": "ok",
