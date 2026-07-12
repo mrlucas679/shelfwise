@@ -91,6 +91,15 @@ def test_ci_lints_executable_smoke_scripts() -> None:
     assert "python -m ruff check src tests scripts" in workflow
 
 
+def test_ci_boots_and_smokes_production_public_origin() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "docker-compose.production.yml up --build -d --wait" in workflow
+    assert "--request POST http://127.0.0.1/auth/session" in workflow
+    assert "--request POST http://127.0.0.1/demo/golden" in workflow
+    assert "docker-compose.production.yml down --volumes" in workflow
+
+
 def test_readme_connected_api_list_matches_backend_schema() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     section = readme.split("Connected API endpoints:", 1)[1].split("## Smoke", 1)[0]
