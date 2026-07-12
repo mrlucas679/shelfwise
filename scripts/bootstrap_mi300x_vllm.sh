@@ -67,12 +67,31 @@ ensure_quick_start_container_running() {
   fi
 }
 
+publish_quick_start_port() {
+  # The Quick Start container publishes only its default port; map the strong tier explicitly.
+  local port="$1"
+  local container_ip
+  container_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$VLLM_HOST_CONTAINER")"
+  [[ -n "$container_ip" ]] || { echo "unable to resolve Quick Start container IP" >&2; exit 1; }
+  if ! iptables -t nat -C DOCKER ! -i docker0 -p tcp --dport "$port" \
+    -j DNAT --to-destination "$container_ip:$port" 2>/dev/null; then
+    iptables -t nat -I DOCKER 1 ! -i docker0 -p tcp --dport "$port" \
+      -j DNAT --to-destination "$container_ip:$port"
+  fi
+  if ! iptables -C DOCKER -d "$container_ip/32" ! -i docker0 -o docker0 -p tcp \
+    --dport "$port" -j ACCEPT 2>/dev/null; then
+    iptables -I DOCKER 1 -d "$container_ip/32" ! -i docker0 -o docker0 -p tcp \
+      --dport "$port" -j ACCEPT
+  fi
+}
+
 start_quick_start_server() {
   # Start one server inside the provider's preinstalled vLLM container without replacing its image.
   local model="$1"
   local port="$2"
   local memory_fraction="$3"
   ensure_quick_start_container_running
+  publish_quick_start_port "$port"
   docker exec "$VLLM_HOST_CONTAINER" bash -lc \
     "pkill -f '[v]llm serve.*--port ${port}' >/dev/null 2>&1 || true"
   docker exec -d \
