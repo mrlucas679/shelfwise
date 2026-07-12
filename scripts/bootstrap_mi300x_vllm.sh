@@ -139,8 +139,15 @@ wait_for_model() {
 
   echo "Waiting for $model on port $port; model download and ROCm warmup can take several minutes."
   until (( SECONDS >= deadline )); do
-    if response="$(curl --fail --silent --show-error --max-time 10 \
-      -H "Authorization: Bearer $VLLM_API_KEY" "http://127.0.0.1:$port/v1/models" 2>/dev/null)"; then
+    if use_quick_start_container; then
+      response="$(docker exec "$VLLM_HOST_CONTAINER" curl --fail --silent --show-error \
+        --max-time 10 -H "Authorization: Bearer $VLLM_API_KEY" \
+        "http://127.0.0.1:$port/v1/models" 2>/dev/null || true)"
+    else
+      response="$(curl --fail --silent --show-error --max-time 10 \
+        -H "Authorization: Bearer $VLLM_API_KEY" "http://127.0.0.1:$port/v1/models" 2>/dev/null || true)"
+    fi
+    if [[ -n "$response" ]]; then
       if grep --fixed-strings --quiet "$model" <<<"$response"; then
         echo "$container ready on port $port with $model"
         return 0

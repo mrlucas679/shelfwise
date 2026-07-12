@@ -23,6 +23,7 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "wait_for_model \"$ROUTINE_PORT\"" in source
     assert "pgrep -f '[v]llm serve" in source
     assert "model download and ROCm warmup can take several minutes" in source
+    assert "docker exec \"$VLLM_HOST_CONTAINER\" curl" in source
     assert "[v]llm serve" in source
     assert "--disable-log-requests" not in source
 
