@@ -136,6 +136,8 @@ $env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
 ```
 
 See [Inference Strategy](#inference-strategy) for independent routine/strong tier variables.
+For a new AMD MI300X host that pulls both required Gemma models and starts the two vLLM tiers,
+follow [DROPLET_BOOTSTRAP.md](DROPLET_BOOTSTRAP.md) rather than the historical restart-only notes.
 
 ### Run
 

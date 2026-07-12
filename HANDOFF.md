@@ -82,6 +82,16 @@ Read this section before continuing. The worktree contained active application/f
 when this recovery pass began. They were preserved, tested, and are intended to be saved on
 `developers`; do not reset or discard them.
 
+### New MI300X provisioning path
+
+- `scripts/bootstrap_mi300x_vllm.sh` is the authoritative new-droplet command. It requires a
+  user-supplied Hugging Face token with accepted Gemma licences and a vLLM API key, pulls the
+  official Gemma 4 ROCm vLLM image, starts E4B routine on `8000` and 31B strong on `8001`, and
+  blocks until both `/v1/models` responses prove the intended models are loaded.
+- `DROPLET_BOOTSTRAP.md` contains the exact clone, secret, firewall, application configuration,
+  and Track 3 prescreen sequence. Do not use the historical `docker start rocm` commands for a
+  newly created droplet; those only apply to the old pre-existing container.
+
 ### Recovery setup now implemented
 
 - `scripts/session_capsule.py` creates a safe recovery capsule and archive. It captures Git HEAD,
