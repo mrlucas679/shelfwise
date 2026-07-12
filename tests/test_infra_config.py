@@ -39,6 +39,9 @@ def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> N
     assert "host.docker.internal:host-gateway" in text
     assert "host.docker.internal:8000" in text
     assert "host.docker.internal:8001" in text
+    assert 'SHELFWISE_AUTO_SCHEMA: "false"' in text
+    assert "service_completed_successfully" in text
+    assert "psql -h postgres" in text
 
 
 def test_frontend_proxy_includes_browser_session_route() -> None:

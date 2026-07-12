@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .provenance import InboundRecord
@@ -57,7 +57,8 @@ class PostgresInboundRecordStore:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresInboundRecordStore")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def record(
         self,

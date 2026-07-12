@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -101,7 +101,8 @@ class PostgresJournal:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresJournal")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def start_run(self, run_id: str, *, tenant_id: str) -> None:
         with self._connect() as conn:

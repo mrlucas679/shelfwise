@@ -7,7 +7,7 @@ from threading import Lock
 from typing import Any
 
 from shelfwise_contracts import Event
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -52,7 +52,8 @@ class PostgresEventStore:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresEventStore")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def record(self, event: Event) -> bool:
         payload = event.to_dict()

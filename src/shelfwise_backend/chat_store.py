@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
 
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -129,7 +129,8 @@ class PostgresChatConversationStore:
             raise ValueError("DATABASE_URL is required for PostgresChatConversationStore")
         self._database_url = database_url
         self._history_limit = history_limit
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     @contextmanager
     def locked(self, *, tenant_id: str, user_id: str, conversation_id: str) -> Iterator[None]:

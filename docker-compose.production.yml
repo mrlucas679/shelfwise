@@ -29,6 +29,21 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    image: pgvector/pgvector:pg16
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - ./src/shelfwise_storage/schema.sql:/schema.sql:ro
+    command:
+      - sh
+      - -ec
+      - psql -h postgres -U shelfwise -d shelfwise -v ON_ERROR_STOP=1 -f /schema.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build: .
     restart: unless-stopped
@@ -52,6 +67,7 @@ services:
       SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-false}
       TENANT_AUTH_SECRET: ${TENANT_AUTH_SECRET:?TENANT_AUTH_SECRET is required}
       SHELFWISE_STORE_BACKEND: postgres
+      SHELFWISE_AUTO_SCHEMA: "false"
       SHELFWISE_BUS_BACKEND: redis
       DATABASE_URL: postgresql://shelfwise_app:${POSTGRES_APP_PASSWORD}@postgres:5432/shelfwise
       REDIS_URL: redis://redis:6379/0
@@ -67,6 +83,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
       interval: 10s

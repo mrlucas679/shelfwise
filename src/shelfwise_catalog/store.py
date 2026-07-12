@@ -5,7 +5,7 @@ from copy import deepcopy
 from threading import Lock
 from typing import Any
 
-from shelfwise_storage import connect, jsonb
+from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .models import Product, ProductIdentifier, ProductVariant
@@ -105,7 +105,8 @@ class PostgresProductCatalogStore:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresProductCatalogStore")
         self._database_url = database_url
-        self._ensure_schema()
+        if auto_schema_enabled():
+            self._ensure_schema()
 
     def upsert_product(self, product: Product) -> dict[str, Any]:
         payload = product.to_dict()

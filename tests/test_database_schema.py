@@ -9,6 +9,7 @@ from shelfwise_storage import (
     TENANT_SCOPED_TABLES,
     all_tenant_rls_sql,
     apply_tenant_rls,
+    auto_schema_enabled,
     bind_tenant_context,
     current_tenant_id,
     reset_tenant_context,
@@ -92,6 +93,16 @@ def test_storage_tenant_context_defaults_and_resets(
     finally:
         reset_tenant_context(token)
     assert current_tenant_id() == "sa_retail_demo"
+
+
+def test_runtime_schema_bootstrap_can_be_disabled_for_restricted_production_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    assert auto_schema_enabled() is False
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "true")
+    assert auto_schema_enabled() is True
 
 
 def test_compose_init_schema_matches_tenant_scoped_tables() -> None:
