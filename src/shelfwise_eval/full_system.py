@@ -1159,7 +1159,14 @@ class _FullSystemDriver:
             "chat_inference",
             "POST",
             "/chat",
-            json={"question": question, "live_required": self.config.live_required},
+            json={
+                "question": question,
+                "live_required": self.config.live_required,
+                # Synthetic world questions must not accumulate a shared conversation
+                # transcript and distort later prompt size or latency measurements.
+                "conversation_id": f"full-system-{self.run_id}-{cycle}",
+                "message_id": f"full-system-message-{cycle}",
+            },
         )
         latency_ms = round((time.monotonic() - started) * 1_000, 1)
         after = [run for run in self.runtime.model_run_registry.list() if run.id not in before]
