@@ -240,6 +240,8 @@ def _build_supplier(rng: Random, name: str) -> dict[str, Any]:
         "lead_time_days": round(rng.uniform(1.0, 5.0), 2),
         "fill_rate": round(rng.uniform(0.70, 0.98), 2),
         "recent_delay": False,
+        "distance_km": round(rng.uniform(80.0, 250.0), 1),
+        "available_units": rng.randint(500, 2000),
     }
 
 

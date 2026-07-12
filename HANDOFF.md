@@ -34,13 +34,17 @@ Full research/design context: `IMPLEMENTATION_PLAN.md` TASK 4.
       near-expiry / 5 low-stock / 2 delayed-supplier / 2 price-anomaly SKUs from the generated
       set (not hardcoded), hero SKU chosen dynamically. Determinism re-confirmed (same seed →
       byte-identical receipt).
-- [ ] 5. New facts provider `src/shelfwise_backend/world_facts.py`: `WorldFactsProvider` with
+- [x] 5. New facts provider `src/shelfwise_backend/world_facts.py`: `WorldFactsProvider` with
       `get_scenario_facts(tenant_id, sku)`, `get_store_intelligence(tenant_id)`,
       `get_sourcing_candidates(tenant_id, sku, units_needed)`, `search_products(tenant_id, query,
       limit)`, `get_hero_sku(tenant_id)`. Lazy-populates a tenant's snapshot on first access
       (via `DEMO_POLICY`) if none exists yet, so zero-config flows keep working. Every method
       round-trips through the store (real query per call, no long-lived cache) — Postgres must
-      genuinely be hit per request, not just at boot.
+      genuinely be hit per request, not just at boot. Verified live against Postgres: hero-sku
+      lazy population, scenario facts, full store_intelligence (batch split, delivery
+      reconciliation, supplier cover, stock sourcing, learning summary), sourcing candidates
+      (branches correctly fall through to supplier when they have no stock for that SKU), and
+      product search all produced coherent, non-hardcoded, genuinely-computed results.
 - [ ] 6. Rewire call sites (test suite green between each):
       - [ ] 6a. `src/shelfwise_backend/tools/mcp_surface.py` — 8 tools
         (get_stock, simulate_markdown, get_demand_forecast, get_expiry_risk, get_reorder_policy,
