@@ -59,8 +59,16 @@ jobs:
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
           SHELFWISE_COOKIE_SECURE: "false"
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
         run: |
           docker compose -f docker-compose.production.yml build
+          for service in backend frontend; do
+            image=$(docker compose -f docker-compose.production.yml images -q "$service")
+            test -n "$image"
+            architecture=$(docker image inspect "$image" --format '{{.Architecture}}')
+            echo "$service image architecture: $architecture"
+            test "$architecture" = amd64
+          done
           started=$(date +%s)
           docker compose -f docker-compose.production.yml up --build -d --wait
           elapsed=$(( $(date +%s) - started ))

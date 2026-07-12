@@ -9,12 +9,14 @@
 Track 3 requires all of the following:
 
 1. A Docker image is present in the GitHub repository.
-2. The deployed application demonstrably uses AMD compute. The production path must use
+2. Container images are publicly pullable at submission time and include a `linux/amd64`
+   manifest. A local image or a private registry image is not sufficient.
+3. The deployed application demonstrably uses AMD compute. The production path must use
    AMD vLLM (`provider=vllm_mi300x`), not Fireworks or offline fallback.
-3. The container is ready within 60 seconds after images are built.
-4. Every request returns within 30 seconds.
-5. Model responses are in English.
-6. Answers are generated for unseen variants; there is no question-to-answer cache or
+4. The container is ready within 60 seconds after images are built.
+5. Every request returns within 30 seconds.
+6. Model responses are in English.
+7. Answers are generated for unseen variants; there is no question-to-answer cache or
    hardcoded answer table.
 
 The repository-side implementation is complete and locally verified. The only remaining
@@ -47,6 +49,10 @@ Do not mark the objective complete until that receipt exists.
 - Local image build was completed successfully:
   - `amdactii-backend:latest` (~402 MB)
   - `amdactii-frontend:latest` (~75.7 MB)
+- Those local images are **not submission-ready**: they are not publicly pullable and their
+  pushed registry location has not yet been assigned. Do not claim this requirement is done.
+- The judging VM is `linux/amd64`. Every published image must be built and pushed with an
+  explicit `linux/amd64` platform and must expose an amd64 manifest.
 - Local Compose configuration passed. Local Compose services were not left running.
 - CI builds images first, then measures `docker compose ... up --build -d --wait` and fails if
   readiness takes 60 seconds or more.
@@ -118,13 +124,64 @@ python scripts/track3_prescreen.py `
 Expected result is `"verdict": "PASS"`. A configuration/readiness response without this
 receipt is not proof of cloud startup or response latency.
 
+## Public Image Packaging — Required Before Submission
+
+This is a separate blocker from local Docker build success. Choose a public registry and a
+stable public image namespace before submission. Do not put registry credentials in the repo.
+For GHCR, the package visibility must be changed to **public** after the first push.
+
+Build and publish both production images explicitly for the judging VM architecture:
+
+```bash
+export IMAGE_NAMESPACE=ghcr.io/<public-owner>/shelfwise
+export IMAGE_TAG=<immutable-submission-tag>
+
+docker buildx build \
+  --platform linux/amd64 \
+  --tag "$IMAGE_NAMESPACE-backend:$IMAGE_TAG" \
+  --push .
+
+docker buildx build \
+  --platform linux/amd64 \
+  --tag "$IMAGE_NAMESPACE-frontend:$IMAGE_TAG" \
+  --push ./frontend
+```
+
+Verify the manifest and public pullability from a clean environment before submitting:
+
+```bash
+docker buildx imagetools inspect "$IMAGE_NAMESPACE-backend:$IMAGE_TAG"
+docker buildx imagetools inspect "$IMAGE_NAMESPACE-frontend:$IMAGE_TAG"
+docker pull --platform linux/amd64 "$IMAGE_NAMESPACE-backend:$IMAGE_TAG"
+docker pull --platform linux/amd64 "$IMAGE_NAMESPACE-frontend:$IMAGE_TAG"
+docker image inspect "$IMAGE_NAMESPACE-backend:$IMAGE_TAG" \
+  --format '{{.Architecture}}'
+docker image inspect "$IMAGE_NAMESPACE-frontend:$IMAGE_TAG" \
+  --format '{{.Architecture}}'
+```
+
+Required evidence to save in the handoff/submission folder:
+
+- public backend image reference and immutable tag;
+- public frontend image reference and immutable tag;
+- `imagetools inspect` output showing `linux/amd64`;
+- clean `docker pull --platform linux/amd64` output;
+- registry visibility confirmed without credentials;
+- the exact image references used by the production Compose deployment.
+
+Do not use `--load` as the final publication step. `--load` only places a local image in the
+builder; `--push` is required for a publicly pullable submission image. Do not use an untagged
+`latest` image as the only submission reference; retain the immutable tag for the judges.
+
 ## Exact Resume Procedure
 
 1. Read this section and run `git status --short`; preserve all untracked evidence.
 2. Commit the current prescreen implementation and this handoff update on `developers`.
-3. Confirm the AMD cloud endpoint is on. For the existing MI300X vLLM droplet, first check
+3. Assign and publish the public `linux/amd64` backend/frontend images using the packaging
+   procedure above. Verify clean pulls before spending AMD cloud credits.
+4. Confirm the AMD cloud endpoint is on. For the existing MI300X vLLM droplet, first check
    `/v1/models`; do not assume a previous IP/process is still alive.
-4. Configure production with distinct Gemma tiers, for example:
+5. Configure production with distinct Gemma tiers, for example:
 
 ```bash
 export APP_ENV=production
@@ -138,7 +195,7 @@ export LLM_ACCELERATOR="AMD Instinct MI300X"
 export LLM_TIMEOUT_SECONDS=25
 ```
 
-5. Build once, then measure startup separately from image build:
+6. Build once, then measure startup separately from image build:
 
 ```bash
 docker compose -f docker-compose.production.yml build
@@ -148,15 +205,15 @@ elapsed=$(( $(date +%s) - started ))
 test "$elapsed" -lt 60
 ```
 
-6. Run `scripts/track3_prescreen.py` against the public origin and retain its JSON receipt.
-7. Run the live-required full-system harness and inspect row-level receipts. Fail on offline
+7. Run `scripts/track3_prescreen.py` against the public origin and retain its JSON receipt.
+8. Run the live-required full-system harness and inspect row-level receipts. Fail on offline
    answers, reused decision IDs, HITL mismatches, empty model answers, or zero model-backed
    chat calls.
-8. Verify the browser frontend against the same live backend, then record the demo while the
+9. Verify the browser frontend against the same live backend, then record the demo while the
    AMD endpoint is warm.
-9. Before merging, run `python -m pytest -q`, `python -m ruff check src tests scripts`,
+10. Before merging, run `python -m pytest -q`, `python -m ruff check src tests scripts`,
    `npm run typecheck --if-present` from `frontend/`, and `git diff --check`.
-10. Only after the cloud receipt and demo proof are saved, merge `developers` into `main` and
+11. Only after public image pulls, the cloud receipt, and demo proof are saved, merge `developers` into `main` and
     verify both local and remote branch state. Do not delete evidence folders or force-reset
     either branch.
 
@@ -172,6 +229,8 @@ test "$elapsed" -lt 60
 ## Remaining Risks / Do Not Claim As Done
 
 - The AMD cloud endpoint may be powered off or unreachable; verify it before spending credits.
+- Public `linux/amd64` image publication is not complete until a public registry namespace is
+  chosen, both images are pushed, and clean unauthenticated pulls succeed.
 - The local Docker image build passed, but local CPU build/start is not AMD evidence.
 - Actual container readiness under 60 seconds and actual model responses under 30 seconds need
   the cloud receipt.
