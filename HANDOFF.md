@@ -396,10 +396,13 @@ test "$elapsed" -lt 60
 
 ## Current Verification Baseline
 
-- Full Python suite: `453 passed, 3 skipped`.
+- Full Python suite: `457 passed, 3 skipped` locally without `SHELFWISE_TEST_DATABASE_URL`.
+- Real Postgres world integration: `3 passed` against an ephemeral `pgvector/pgvector:pg16`
+  container on local port `55433`.
 - Ruff: clean.
-- Frontend TypeScript typecheck: passed in the prior verification pass.
-- Capability manifest: regenerated and committed after route/test changes.
+- Frontend TypeScript typecheck and production build: passed.
+- Capability manifest: regenerated after route/tool/test changes (`178 capabilities`,
+  `sha256:49611e09f1e0c66b84f4e43cb75d534e16e2667852e8a75d89028f836c9dc6e2`).
 - Focused Track 3 prescreen test is present in `tests/test_track3_prescreen.py`.
 - Live cloud timing and AMD response proof: **not yet run in this continuation**.
 
@@ -416,8 +419,10 @@ test "$elapsed" -lt 60
   the live AMD endpoint is not yet measured in this current proof cycle.
 - Routine/strong routing is implemented; actual deployment of two distinct serving endpoints
   still has to be confirmed by `/inference/readiness` and the prescreen receipt.
-- Two smaller deterministic guardrail checks remain deterministic-only; do not describe every
-  internal check as a model agent unless the route receipt proves it.
+- Catalog-price and expiry-risk guardrail proof routes now exist as
+  `/demo/catalog-price/agentic` and `/demo/expiry-risk/agentic`. Normal ingest still keeps the
+  deterministic guardrail functions for uptime; only the explicit `/agentic` route receipts should
+  be claimed as model-agent evidence.
 - Historical sections below may mention old branches, counts, IPs, or deadlines. Treat them as
   archival evidence only; this current section controls the next actions.
 
@@ -539,13 +544,14 @@ Full research/design context: `IMPLEMENTATION_PLAN.md` TASK 4.
       `populate_world` round-trip through Postgres, `WorldFactsProvider` reading from a real
       connection, and tenant isolation between two snapshot rows. The fixture auto-forces
       `SHELFWISE_AUTO_SCHEMA=false` so it only needs the one env var to work against the
-      restricted app role. **Not yet added to CI** (no Postgres service container in
-      `ci.yml` for this specific test) — flagged as a follow-up, not done in this pass.
+      restricted app role. Follow-up closed in this continuation: CI now boots an ephemeral
+      `pgvector/pgvector:pg16` container with the real schema and restricted app role, then
+      runs the test with `SHELFWISE_TEST_DATABASE_URL`.
 - [x] 11. Full suite green: 444 passed, 3 skipped (the new Postgres integration tests
       without the env var) — zero failures. Ruff clean. Capability manifest regenerated
-      (175 capabilities). **README/DEMO_RUNBOOK not yet updated** for the new generated-world
-      data model — still describes the old CSV-seed framing in places; genuine follow-up,
-      not done in this pass given time spent on the harder correctness work above.
+      (175 capabilities). Follow-up closed in this continuation: README, DEMO_RUNBOOK, and
+      IMPLEMENTATION_STATUS now describe the generated-world/Postgres model instead of the old
+      seeded-CSV framing.
 - [x] 12. Commits landed incrementally per phase (schema+store+populate, facts provider,
       call-site rewiring, evidence-label fix, test fixes, integration test) — see git log
       on the `developers` branch. This entry is that final summary update.
@@ -555,10 +561,9 @@ or literal demo fixtures anywhere in the live request path — `load_seeded_scen
 `build_store_intelligence_demo` are no longer called from any production code path (only
 `shelfwise_data`'s own internals/tests still reference them, which is fine — they're the
 low-level building blocks the old CSV loader was built from, now superseded).
-**Two follow-ups explicitly NOT done, flagged honestly:** (a) CI has no Postgres service
-container yet, so the new integration test only runs locally/manually; (b) README/
-DEMO_RUNBOOK still need a pass to describe the generated-world model instead of the old
-seeded-CSV framing.
+**Follow-ups closed in the 2026-07-12 continuation:** CI now runs the Postgres world
+integration test against a real pgvector container, and README/DEMO_RUNBOOK/IMPLEMENTATION_STATUS
+now describe the generated-world model instead of the old seeded-CSV framing.
 
 ## Coordination note (2026-07-11 ~12:00) — judge-readiness pass on main, doc-only
 
@@ -748,10 +753,9 @@ Each is additive - the original deterministic routes (`/demo/procurement`, `/dem
 so a broken endpoint 503s instead of silently faking success. 408/408 tests pass (12 new
 tests: 3 cascades x offline-success/live_required-hardfail/ungrounded-rejection).
 
-**Remaining deterministic-only**: the two smaller conditional checks
-(`run_catalog_price_check`, `run_expiry_risk_check` in `cascade.py` - narrower guardrails,
-not primary demo scenarios) were not converted. Diminishing returns given remaining time;
-flag if there's time left after recording.
+**Closed in the 2026-07-12 continuation**: the two smaller conditional checks now have explicit
+agentic proof routes, `/demo/catalog-price/agentic` and `/demo/expiry-risk/agentic`, backed by
+regression tests for real tool calls, live-required hard-fail behavior, and grounded conclusions.
 
 While building this, fixed a real precision bug in the calculator-grounding check below
 (it required citing bare echoed identifiers, e.g. a SKU digit, not just genuinely computed
@@ -809,9 +813,12 @@ coverage matrix was reported in-session; headline findings:
   so no Postgres/RLS is in the loop for the current demo deployment at all. Only matters if
   the Postgres profile is ever actually used — note as a known gap for that profile, don't
   chase it now.
-- Batch/lot-level expiry tracking and fleet-wide (500k SKU) scoring are not implemented —
-  legitimate gaps, multi-day scope, not fixable before today's deadline. Mention honestly in
-  the deck as roadmap, don't claim as done.
+- Batch/lot expiry is now represented in the generated-world snapshot: perishable SKU rows have
+  two or three active lots with receipt, expiry, quantity, and source-confidence fields; FEFO reads
+  those lots and preserves compatibility with earlier aggregate-only snapshots. The repeatable
+  `scripts/fleet_scale_eval.py` proof streams 500,000 product-location-lot rows in 1,000-row chunks,
+  retains only the top 200 exceptions, and writes a receipt. Persisting score history/deltas for a
+  real retailer remains a production data-layer follow-up, not a gap in the demo's scale proof.
 - Dual-model routing is code-complete (`base_url_for_agent`/`api_key_for_agent`,
   `dual_model_configured` flag) but only one model endpoint is actually deployed
   (`dual_model_configured: false` confirmed live) — see "two-model deployment" below.
@@ -931,19 +938,19 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
       `LLM_STRONG_API_KEY` (routing code is ready, `dual_model_configured` flips true
       automatically once real credentials point at a second serving endpoint) - the one
       remaining gap between "routing is built" and "two models are actually running."
-   b. Wire the two smaller conditional checks (`run_catalog_price_check`,
-      `run_expiry_risk_check`) through the agentic pattern too - same recipe as
-      golden/procurement/sales/cold-chain in `src/shelfwise_backend/agentic_cascade.py`.
+   b. ~~Wire the two smaller conditional checks (`run_catalog_price_check`,
+      `run_expiry_risk_check`) through the agentic pattern too~~ DONE in this continuation via
+      `/demo/catalog-price/agentic` and `/demo/expiry-risk/agentic`.
    c. Run `shelfwise_benchmark` at 1/8/32 concurrency against the live endpoint for the
       architecture-comparison report.
 
 ## Known honest gaps (do not overclaim in the deck/video)
 
-- UPDATE: golden, procurement, sales, and cold-chain cascades are now ALL genuinely
-  agentic (`/demo/{golden,procurement,sales,cold-chain}/agentic`, `live_required` default).
-  Only the two smaller conditional guardrail checks (`run_catalog_price_check`,
-  `run_expiry_risk_check` in `cascade.py`) remain deterministic-only. The original
-  deterministic routes are all still present and unchanged alongside the new agentic ones.
+- UPDATE: golden, procurement, sales, cold-chain, catalog-price, and expiry-risk proof routes are
+  now genuinely agentic (`/demo/{golden,procurement,sales,cold-chain,catalog-price,expiry-risk}/agentic`,
+  `live_required` default). The original deterministic routes/functions are still present for the
+  normal ingest path and should not be described as model agents unless an explicit `/agentic`
+  route receipt proves it.
 - Training matrix: E2B/12B W7900 shakedown blocked (Jupyter portal down). Only E4B is live.
 - Benchmark architecture comparison (shared/replicated/per-agent/hybrid) is built + tested
   offline but has no real cloud measurements yet.
@@ -951,9 +958,9 @@ Model weights are cached in the container (~15GB). The Jupyter hackathon noteboo
   per-agent endpoint routing is real and tested (`dual_model_configured` flag), but it's
   currently pointed at the same single endpoint for both tiers - genuinely deploying two
   is unstarted infrastructure work, not just config.
-- Batch/lot-level expiry tracking and fleet-wide (500k+ SKU) scoring described in the
-  original blueprint are not implemented - real, multi-day scope, out of reach before the
-  deadline. State this as roadmap in the deck, not as done.
+- Batch/lot expiry state and a repeatable 500k synthetic scoring proof are implemented in this
+  worktree. Do not overclaim it as a production retailer data platform: score-history persistence,
+  real-source ingest, and live operational scale measurements still need their own deployment proof.
 - Postgres RLS policies exist in `schema.sql` but are irrelevant to the current demo
   deployment (`SHELFWISE_STORE_BACKEND=memory` - no Postgres in the loop at all); only
   matters if/when the Postgres profile is actually used in a future deployment.

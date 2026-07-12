@@ -144,15 +144,11 @@ class WorldFactsProvider:
         hero_sku = str(payload["constraints"]["hero_sku"])
         hero_stock = self._stock_row(payload, hero_sku)
 
-        batch = StockBatch(
+        batch_split = split_stock_by_fefo(
             sku=hero_sku,
-            lot=f"LOT-{hero_sku}",
-            units=hero_stock["on_hand"],
-            expiry_date=date.fromisoformat(hero_stock["expiry_date"]),
-            received_date=date.fromisoformat(hero_stock["received_date"]),
-            location=hero_stock["location"],
+            as_of=self._now.date(),
+            batches=self._stock_batches(hero_sku, hero_stock),
         )
-        batch_split = split_stock_by_fefo(sku=hero_sku, as_of=self._now.date(), batches=(batch,))
 
         low_stock_skus = payload["constraints"].get("low_stock_skus") or []
         delivery_sku = str(low_stock_skus[0]) if low_stock_skus else hero_sku
@@ -233,6 +229,33 @@ class WorldFactsProvider:
             snapshot = self._store.get(tenant_id)
         assert snapshot is not None  # populate_world always saves before returning
         return snapshot["payload"]
+
+    @staticmethod
+    def _stock_batches(sku: str, stock: dict[str, Any]) -> tuple[StockBatch, ...]:
+        """Read lot rows while accepting snapshots written before batch support existed."""
+        batches = stock.get("batches")
+        if isinstance(batches, list) and batches:
+            return tuple(
+                StockBatch(
+                    sku=sku,
+                    lot=str(batch["lot_id"]),
+                    units=int(batch["on_hand"]),
+                    expiry_date=date.fromisoformat(str(batch["expiry_date"])),
+                    received_date=date.fromisoformat(str(batch["received_date"])),
+                    location=str(stock["location"]),
+                )
+                for batch in batches
+            )
+        return (
+            StockBatch(
+                sku=sku,
+                lot=f"LOT-{sku}",
+                units=int(stock["on_hand"]),
+                expiry_date=date.fromisoformat(str(stock["expiry_date"])),
+                received_date=date.fromisoformat(str(stock["received_date"])),
+                location=str(stock["location"]),
+            ),
+        )
 
     def _product_row(self, payload: dict[str, Any], sku: str) -> dict[str, Any]:
         for row in payload["products"]:

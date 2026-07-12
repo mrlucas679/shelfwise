@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import zlib
 from collections.abc import Iterator
+from dataclasses import replace
 from random import Random
 
 from .brands import pool
@@ -13,12 +14,16 @@ from .taxonomy import iter_subcats
 
 VAT_STANDARD = 0.15
 SCALE = {"convenience": (3, 1, 3), "supermarket": (6, 3, 5), "hypermarket": (12, 5, 8)}
+FLEET_SKU_TARGET = 500_000
 _TIER_FACTOR = {"value": 0.82, "mainstream": 1.0, "premium": 1.38}
 _FLAVOURS = ("Original", "Lite", "Low Fat", "Family", "Value", "Extra", "Choice", "Classic", "Rich")
 
 
 def generate_catalog(seed: int, *, scale: str = "supermarket") -> Iterator[CatalogProduct]:
     """Stream deterministic synthetic products expanded from the taxonomy."""
+    if scale == "fleet":
+        yield from _generate_fleet_catalog(seed)
+        return
     if scale not in SCALE:
         raise ValueError(f"unknown catalog scale: {scale}")
     n_brand, n_variant, n_pack = SCALE[scale]
@@ -64,6 +69,8 @@ def generate_catalog(seed: int, *, scale: str = "supermarket") -> Iterator[Catal
 
 def count_estimate(seed: int, scale: str = "supermarket") -> int:
     """Estimate how many products a scale profile will generate."""
+    if scale == "fleet":
+        return FLEET_SKU_TARGET
     if scale not in SCALE:
         raise ValueError(f"unknown catalog scale: {scale}")
     n_brand, n_variant, n_pack = SCALE[scale]
@@ -75,6 +82,33 @@ def count_estimate(seed: int, scale: str = "supermarket") -> int:
             * min(n_pack, len(PACKS[subcat.pack]))
         )
     return total
+
+
+def _generate_fleet_catalog(seed: int) -> Iterator[CatalogProduct]:
+    """Repeat the rich hypermarket base deterministically to a 500k-SKU fleet asset.
+
+    The iterator intentionally retains only the 15k-product base catalogue. Consumers can
+    stream the remaining records to bulk import or scoring jobs without a 500k in-memory list.
+    """
+    base_catalog = tuple(generate_catalog(seed, scale="hypermarket"))
+    for sequence in range(1, FLEET_SKU_TARGET + 1):
+        template = base_catalog[(sequence - 1) % len(base_catalog)]
+        range_number = (sequence - 1) // len(base_catalog) + 1
+        name = f"{template.name} Range {range_number}"
+        plu = (
+            None
+            if template.plu is None
+            else make_plu(sequence, organic=template.plu.startswith("9"))
+        )
+        yield replace(
+            template,
+            product_id=f"P{sequence:08d}",
+            barcode=None if template.barcode is None else make_ean13(sequence),
+            plu=plu,
+            name=name,
+            receipt_name=receipt_name(name, template.size_label),
+            shelf_location=f"{template.department[:1].upper()}-{(sequence % 40) + 1:02d}",
+        )
 
 
 def _seed_int(*parts: object) -> int:

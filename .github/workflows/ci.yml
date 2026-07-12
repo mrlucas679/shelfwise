@@ -23,10 +23,33 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
+      - name: Boot Postgres integration database
+        run: |
+          docker rm -f shelfwise-ci-postgres >/dev/null 2>&1 || true
+          docker run --name shelfwise-ci-postgres -d \
+            -p 5432:5432 \
+            -e POSTGRES_USER=shelfwise \
+            -e POSTGRES_PASSWORD=ci-postgres-password \
+            -e POSTGRES_DB=shelfwise \
+            -e POSTGRES_APP_PASSWORD=ci-app-password \
+            -v "$PWD/src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro" \
+            -v "$PWD/src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro" \
+            pgvector/pgvector:pg16
+          for attempt in $(seq 1 60); do
+            if docker exec shelfwise-ci-postgres pg_isready -U shelfwise -d shelfwise; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs shelfwise-ci-postgres
+          exit 1
+
       - name: Lint backend
         run: python -m ruff check src tests scripts
 
       - name: Test backend
+        env:
+          SHELFWISE_TEST_DATABASE_URL: postgresql://shelfwise_app:ci-app-password@127.0.0.1:5432/shelfwise
         run: python -m pytest -q
 
       - name: Run ShelfWise eval gate
@@ -163,3 +186,7 @@ jobs:
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
         run: docker compose -f docker-compose.production.yml down --volumes
+
+      - name: Stop Postgres integration database
+        if: always()
+        run: docker rm -f shelfwise-ci-postgres >/dev/null 2>&1 || true

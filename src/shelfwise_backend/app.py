@@ -61,7 +61,9 @@ from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
 from .agentic_cascade import (
     AgenticCascadeError,
+    run_catalog_price_check_via_agents,
     run_cold_chain_cascade_via_agents,
+    run_expiry_risk_check_via_agents,
     run_golden_cascade_via_agents,
     run_procurement_cascade_via_agents,
     run_sales_cascade_via_agents,
@@ -1464,6 +1466,53 @@ def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
     )
 
 
+def _demo_catalog_price_event(ctx: TenantContext) -> Event:
+    """Create a generated-world POS price exception for the agentic guardrail route."""
+    scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    today = datetime.now(UTC).date().isoformat()
+    key = f"{ctx.tenant_id}:catalog_price_agentic:{scenario.sku}:{today}"
+    suffix = _demo_occurrence_suffix(key, id_prefix="evt_demo_catalog_price_agentic")
+    observed = scenario.unit_price * Decimal("1.20")
+    return Event(
+        id=f"evt_demo_catalog_price_agentic_{suffix}",
+        type=EventType.SALE,
+        ts=datetime.now(UTC),
+        actor=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        correlation_id=f"demo_catalog_price_agentic_{suffix}",
+        payload={
+            "sku": scenario.sku,
+            "location": scenario.location,
+            "units": 2,
+            "unit_price_cents": observed.minor_units,
+            "catalog_price_cents": scenario.unit_price.minor_units,
+        },
+    )
+
+
+def _demo_expiry_risk_event(ctx: TenantContext) -> Event:
+    """Create a generated-world imminent-expiry event for the agentic guardrail route."""
+    scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    today = datetime.now(UTC).date().isoformat()
+    key = f"{ctx.tenant_id}:expiry_risk_agentic:{scenario.sku}:{today}"
+    suffix = _demo_occurrence_suffix(key, id_prefix="evt_demo_expiry_risk_agentic")
+    return Event(
+        id=f"evt_demo_expiry_risk_agentic_{suffix}",
+        type=EventType.EXPIRY_ENTRY,
+        ts=datetime.now(UTC),
+        actor=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        correlation_id=f"demo_expiry_risk_agentic_{suffix}",
+        payload={
+            "sku": scenario.sku,
+            "batch_id": f"BATCH-{scenario.sku}",
+            "category": scenario.category,
+            "location": scenario.location,
+            "days_to_expiry": 1,
+        },
+    )
+
+
 def _preview_demo_cascade(result: dict[str, Any]) -> dict[str, Any]:
     """Enrich a read-only demo preview without mutating stores or traces."""
     _attach_decision_governance(result)
@@ -1627,6 +1676,48 @@ def demo_sales_agentic(
         )
     except AgenticCascadeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _record_cascade(result)
+
+
+@app.post("/demo/catalog-price/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_catalog_price_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
+    """Run the POS catalogue-price guardrail through a real Gemma tool loop."""
+    mode = _production_execution_mode(live_required)
+    try:
+        result = run_catalog_price_check_via_agents(
+            _demo_catalog_price_event(ctx),
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+            facts=world_facts,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=500, detail="Catalog-price demo did not produce a decision")
+    return _record_cascade(result)
+
+
+@app.post("/demo/expiry-risk/agentic", dependencies=_DEMO_WRITE_DEPS)
+def demo_expiry_risk_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
+    """Run the imminent-expiry guardrail through a real Gemma tool loop."""
+    mode = _production_execution_mode(live_required)
+    try:
+        result = run_expiry_risk_check_via_agents(
+            _demo_expiry_risk_event(ctx),
+            execution_mode=mode,
+            decisions=decision_store,
+            memory=learning_store,
+            facts=world_facts,
+        )
+    except AgenticCascadeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=500, detail="Expiry-risk demo did not produce a decision")
     return _record_cascade(result)
 
 

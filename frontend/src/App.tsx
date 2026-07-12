@@ -1216,6 +1216,8 @@ const GATED_ENDPOINTS = [
   { label: 'Procurement demo (agentic)', method: 'POST', path: '/demo/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Sales demo', method: 'GET/POST', path: '/demo/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
   { label: 'Sales demo (agentic)', method: 'POST', path: '/demo/sales/agentic', group: 'operations', detail: 'Runs the POS price-integrity verdict through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Catalog price guardrail (agentic)', method: 'POST', path: '/demo/catalog-price/agentic', group: 'operations', detail: 'Runs the conditional POS catalog-price exception guardrail through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Expiry risk guardrail (agentic)', method: 'POST', path: '/demo/expiry-risk/agentic', group: 'operations', detail: 'Runs the conditional imminent-expiry guardrail through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Cold-chain demo', method: 'GET/POST', path: '/demo/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
   { label: 'Cold-chain demo (agentic)', method: 'POST', path: '/demo/cold-chain/agentic', group: 'operations', detail: 'Runs the cold-chain facilities-escalation verdict through a real Gemma tool-calling loop; live_required by default.' },
   { label: 'Critic rejection demo', method: 'GET/POST', path: '/demo/critic-rejection', group: 'operations', detail: 'Scenario endpoint for the critic-rejection path.' },

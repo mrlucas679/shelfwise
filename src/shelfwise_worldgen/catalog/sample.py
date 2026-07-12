@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from itertools import islice
 from random import Random
 
 from .generate import generate_catalog
@@ -39,7 +40,14 @@ def sample_assortment(
 ) -> list[CatalogProduct]:
     """Sample a deterministic store range from a bounded shuffled catalog draw."""
     rng = Random(seed)
-    catalog = list(generate_catalog(seed, scale=scale))
+    # The fleet profile is intentionally a 500k streaming asset. A store simulator
+    # samples a bounded prefix instead of turning that asset into a process-wide list.
+    products = (
+        islice(generate_catalog(seed, scale=scale), size * 6)
+        if scale == "fleet"
+        else generate_catalog(seed, scale=scale)
+    )
+    catalog = list(products)
     rng.shuffle(catalog)
     return catalog[:size]
 

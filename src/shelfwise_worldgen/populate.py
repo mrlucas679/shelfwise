@@ -9,6 +9,7 @@ condition, recording the selection transparently in the returned receipt.
 
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -227,18 +228,81 @@ def _product_row(product: Any) -> dict[str, Any]:
 
 
 def _stock_row(rng: Random, product: Any, now: datetime) -> dict[str, Any]:
+    """Create a current SKU row with independently traceable active lots."""
+    # Preserve the original global random sequence. The later policy-selection pass
+    # depends on it for stable demo scenarios.
     on_hand = rng.randint(15, 80)
     reorder_point = rng.randint(5, 25)
     expiry_days = rng.randint(10, 90)
     received_days_ago = rng.randint(0, 6)
+    perishable_physics = {
+        "dairy", "meat", "poultry", "seafood", "deli", "chilled_other", "frozen"
+    }
+    lot_count = (
+        2 + zlib.crc32(f"{product.sku}:lot-count".encode()) % 2
+        if product.physics in perishable_physics
+        else 1
+    )
+    batches = _batch_rows(
+        product,
+        now,
+        total_units=on_hand,
+        expiry_days=expiry_days,
+        received_days_ago=received_days_ago,
+        lot_count=lot_count,
+    )
     return {
         "sku": product.sku,
         "location": "generated",
         "on_hand": on_hand,
         "reorder_point": reorder_point,
+        # These aggregate fields preserve the existing scenario contract. Batch-level
+        # consumers use ``batches`` below and must not infer one lot from this row.
         "expiry_date": (now + timedelta(days=expiry_days)).date().isoformat(),
         "received_date": (now - timedelta(days=received_days_ago)).date().isoformat(),
+        "batches": batches,
     }
+
+
+def _batch_rows(
+    product: Any,
+    now: datetime,
+    *,
+    total_units: int,
+    expiry_days: int,
+    received_days_ago: int,
+    lot_count: int,
+) -> list[dict[str, Any]]:
+    """Create deterministic batch facts that reconcile to the SKU-level stock total."""
+    local_rng = Random(zlib.crc32(f"{product.sku}:lots".encode()))
+    remaining = total_units
+    rows: list[dict[str, Any]] = []
+    for index in range(lot_count):
+        units = (
+            remaining
+            if index == lot_count - 1
+            else local_rng.randint(1, remaining - (lot_count - index - 1))
+        )
+        remaining -= units
+        batch_expiry_days = (
+            expiry_days if index == 0 else expiry_days + local_rng.randint(1, 45)
+        )
+        batch_received_days_ago = (
+            received_days_ago if index == 0 else local_rng.randint(0, received_days_ago)
+        )
+        rows.append(
+            {
+                "lot_id": f"LOT-{product.sku}-{index + 1:02d}",
+                "on_hand": units,
+                "reserved": 0,
+                "damaged": 0,
+                "expiry_date": (now + timedelta(days=batch_expiry_days)).date().isoformat(),
+                "received_date": (now - timedelta(days=batch_received_days_ago)).date().isoformat(),
+                "source_system": "worldgen",
+                "source_confidence": "high",
+            }
+        )
+    return rows
 
 
 def _sales_rows(rng: Random, product: Any, now: datetime) -> list[dict[str, Any]]:
@@ -280,10 +344,15 @@ def _select_near_expiry(
     chosen = skus[:count]
     for sku in chosen:
         days = rng.randint(2, 3)
-        stock_by_sku[sku]["expiry_date"] = (now + timedelta(days=days)).date().isoformat()
-        stock_by_sku[sku]["received_date"] = (
-            (now - timedelta(days=rng.randint(1, 4))).date().isoformat()
-        )
+        received_date = (now - timedelta(days=rng.randint(1, 4))).date().isoformat()
+        stock = stock_by_sku[sku]
+        batches = stock.get("batches") or []
+        if batches:
+            earliest = batches[0]
+            earliest["expiry_date"] = (now + timedelta(days=days)).date().isoformat()
+            earliest["received_date"] = received_date
+        stock["expiry_date"] = (now + timedelta(days=days)).date().isoformat()
+        stock["received_date"] = received_date
     return chosen
 
 

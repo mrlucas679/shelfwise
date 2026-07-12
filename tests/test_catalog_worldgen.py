@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from shelfwise_worldgen.catalog.generate import count_estimate, generate_catalog
+from itertools import islice
+
+from shelfwise_worldgen.catalog.generate import FLEET_SKU_TARGET, count_estimate, generate_catalog
 from shelfwise_worldgen.catalog.grammar import PACKS
 from shelfwise_worldgen.catalog.gs1 import ean13_check_digit, is_valid_ean13, make_ean13, make_plu
 from shelfwise_worldgen.catalog.physics import PHYSICS
@@ -72,6 +74,13 @@ def test_scale_profiles_grow_monotonically():
     assert count_estimate(1, "convenience") < count_estimate(1, "supermarket")
     assert count_estimate(1, "supermarket") < count_estimate(1, "hypermarket")
     assert count_estimate(1, "hypermarket") > 5_000
+
+
+def test_fleet_profile_streams_a_half_million_unique_skus_without_materializing_them():
+    assert count_estimate(1, "fleet") == FLEET_SKU_TARGET == 500_000
+    sample = list(islice(generate_catalog(1, scale="fleet"), 20_000))
+    assert len({product.sku for product in sample}) == len(sample)
+    assert all(product.synthetic for product in sample)
 
 
 def test_assortment_spans_departments_and_is_deterministic():
