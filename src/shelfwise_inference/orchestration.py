@@ -273,6 +273,7 @@ class AgentOrchestrator:
         max_tokens: int = 800,
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
+        required_tool_names: Sequence[str] = (),
     ) -> AgentRunResult:
         """Run from a system/user prompt and return one validated agent answer."""
         guarded_system = (
@@ -299,6 +300,7 @@ class AgentOrchestrator:
             max_tokens=max_tokens,
             tenant_id=tenant_id,
             require_tool_call_first=require_tool_call_first,
+            required_tool_names=required_tool_names,
         )
 
     async def run_messages(
@@ -313,6 +315,7 @@ class AgentOrchestrator:
         max_tokens: int = 800,
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
+        required_tool_names: Sequence[str] = (),
     ) -> AgentRunResult:
         """Run a bounded tool loop from pre-built OpenAI-compatible messages.
 
@@ -330,6 +333,11 @@ class AgentOrchestrator:
             schema=final_schema,
         )
         openai_tools = self._registry.openai_tools()
+        available_tool_names = {tool["function"]["name"] for tool in openai_tools}
+        required_names = tuple(dict.fromkeys(name.strip() for name in required_tool_names if name.strip()))
+        unknown_required = set(required_names).difference(available_tool_names)
+        if unknown_required:
+            raise ValueError(f"required tools are not registered: {sorted(unknown_required)}")
         conversation = [dict(message) for message in messages]
         conversation.append(
             {
@@ -350,7 +358,11 @@ class AgentOrchestrator:
 
         for call_index in range(self._max_model_calls):
             tool_choice: str | dict[str, Any] | None
-            if not openai_tools:
+            executed_names = {execution.name for execution in tool_executions}
+            next_required = next((name for name in required_names if name not in executed_names), None)
+            if next_required is not None:
+                tool_choice = {"type": "function", "function": {"name": next_required}}
+            elif not openai_tools:
                 tool_choice = None
             elif require_tool_call_first and call_index == 0:
                 tool_choice = "required"

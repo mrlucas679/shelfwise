@@ -54,6 +54,7 @@ class RolePrompt:
     system: str
     user: str
     expected_tool: str | None
+    required_tools: tuple[str, ...] = ()
 
 
 _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
@@ -122,6 +123,7 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "then conclude. Cite the pending 20% markdown value from the open decision in "
         "your conclusion.",
         "explain_decision",
+        ("list_open_decisions", "explain_decision"),
     ),
     RolePrompt(
         "executive",
@@ -240,6 +242,7 @@ async def _run_one(
             # arguments, so this must match the tenant the seed decision was written under.
             tenant_id=tenant_id,
             require_tool_call_first=prompt.expected_tool is not None,
+            required_tool_names=prompt.required_tools,
         )
         if isinstance(run_result.answer, dict):
             assert_conclusion_grounded_in_tool_results(
@@ -257,11 +260,23 @@ async def _run_one(
             error=str(exc),
         )
     total_tokens = sum(call.input_tokens + call.output_tokens for call in run_result.model_calls)
+    tools_called = tuple(call.name for call in run_result.tool_calls)
+    if prompt.expected_tool is not None and prompt.expected_tool not in tools_called:
+        return RoleCoverageResult(
+            role=prompt.role,
+            ok=False,
+            expected_tool=prompt.expected_tool,
+            tools_called=tools_called,
+            answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
+            model_call_count=len(run_result.model_calls),
+            total_tokens=total_tokens,
+            error=f"expected tool was not called: {prompt.expected_tool}",
+        )
     return RoleCoverageResult(
         role=prompt.role,
         ok=True,
         expected_tool=prompt.expected_tool,
-        tools_called=tuple(call.name for call in run_result.tool_calls),
+        tools_called=tools_called,
         answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
         model_call_count=len(run_result.model_calls),
         total_tokens=total_tokens,
