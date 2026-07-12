@@ -19,6 +19,7 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "apt-get install -y -qq docker.io curl" in source
     assert "VLLM_HOST_CONTAINER:-rocm" in source
     assert "start_quick_start_server" in source
+    assert "[v]llm serve" in source
 
 
 def test_droplet_bootstrap_docs_keep_required_secrets_out_of_git() -> None:

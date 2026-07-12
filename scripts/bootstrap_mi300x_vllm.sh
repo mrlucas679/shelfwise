@@ -67,7 +67,7 @@ start_quick_start_server() {
   local memory_fraction="$3"
   docker start "$VLLM_HOST_CONTAINER" >/dev/null
   docker exec "$VLLM_HOST_CONTAINER" bash -lc \
-    "pkill -f 'vllm serve.*--port ${port}' >/dev/null 2>&1 || true"
+    "pkill -f '[v]llm serve.*--port ${port}' >/dev/null 2>&1 || true"
   docker exec -d \
     -e "VLLM_API_KEY=$VLLM_API_KEY" \
     "$VLLM_HOST_CONTAINER" \
