@@ -172,6 +172,15 @@ checks before resuming training. Do not resume training after a failed recovery 
   startup/latency receipt, and final merge to `main` after those proofs. Do not claim these are
   complete from local tests.
 
+### Concurrent uncommitted work requiring explicit follow-up
+
+`src/shelfwise_backend/agentic_cascade.py` currently has an uncommitted partial change adding
+expiry/price scenario imports and Critic/Executive schemas. It does not yet add the corresponding
+agentic runner functions, routes, result builders, or regression tests, and Ruff currently reports
+unused imports for those additions. Do not stage it as complete. The next implementation pass
+must either finish both agentic conditional checks end-to-end and add live-required tests, or
+intentionally revert only that partial change after confirming it is not needed.
+
 ## Active Objective — Track 3 Prescreen
 
 Track 3 requires all of the following:
