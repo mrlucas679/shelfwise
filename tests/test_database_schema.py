@@ -38,6 +38,7 @@ def test_tenant_rls_sql_is_fail_closed_and_covers_current_business_tables() -> N
     assert "shelfwise_product_state" in TENANT_SCOPED_TABLES
     assert "shelfwise_learned_patterns" in TENANT_SCOPED_TABLES
     assert "shelfwise_business_profile" in TENANT_SCOPED_TABLES
+    assert "shelfwise_chat_conversations" in TENANT_SCOPED_TABLES
     assert "force row level security" in joined
     assert "current_setting('app.tenant_id', true)" in joined
     assert "with check" in joined

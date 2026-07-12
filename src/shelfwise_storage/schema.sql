@@ -222,6 +222,19 @@ create table if not exists shelfwise_product_identifiers (
 create index if not exists idx_shelfwise_product_identifiers_variant
 on shelfwise_product_identifiers (tenant_id, variant_id);
 
+create table if not exists shelfwise_chat_conversations (
+    tenant_id text not null,
+    user_id text not null,
+    conversation_id text not null,
+    payload jsonb not null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null,
+    primary key (tenant_id, user_id, conversation_id)
+);
+
+create index if not exists idx_shelfwise_chat_conversations_user_updated
+on shelfwise_chat_conversations (tenant_id, user_id, updated_at desc);
+
 alter table shelfwise_decisions enable row level security;
 alter table shelfwise_decisions force row level security;
 drop policy if exists shelfwise_decisions_tenant_isolation on shelfwise_decisions;
@@ -349,5 +362,13 @@ alter table shelfwise_product_identifiers force row level security;
 drop policy if exists shelfwise_product_identifiers_tenant_isolation
 on shelfwise_product_identifiers;
 create policy shelfwise_product_identifiers_tenant_isolation on shelfwise_product_identifiers
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_chat_conversations enable row level security;
+alter table shelfwise_chat_conversations force row level security;
+drop policy if exists shelfwise_chat_conversations_tenant_isolation
+on shelfwise_chat_conversations;
+create policy shelfwise_chat_conversations_tenant_isolation on shelfwise_chat_conversations
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));

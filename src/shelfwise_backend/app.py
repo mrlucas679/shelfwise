@@ -78,7 +78,7 @@ from .cascade import (
     validate_recall_notice,
 )
 from .chat import ChatBody, build_chat_reply_with_meta
-from .chat_store import ChatConversationStore
+from .chat_store import create_chat_store
 from .cold_chain_demo import ColdChainDemoService
 from .detective import analyze_root_cause, root_cause_cte_sql
 from .event_bus import create_event_bus
@@ -138,7 +138,7 @@ app.add_middleware(
 )
 app.include_router(intelligence_router)
 
-chat_store = ChatConversationStore()
+chat_store = create_chat_store()
 
 try:
     from shelfwise_multimodal.router import build_scan_router, build_voice_router
@@ -672,21 +672,17 @@ def _bus_message_tenant(message: dict[str, Any]) -> str | None:
 @app.get("/trace/{correlation_id}")
 def get_trace(
     correlation_id: str,
-    _ctx: TenantContext = CURRENT_TENANT_DEP,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    # NOTE: CascadeTrace does not yet carry tenant_id, so this requires a valid
-    # authenticated caller in jwt mode but does not filter by tenant. Full per-tenant
-    # trace scoping needs tenant_id threaded through TraceRegistry - tracked as a
-    # follow-up, not silently left fully open in the meantime.
-    trace = trace_registry.get(correlation_id)
+    trace = trace_registry.get(correlation_id, tenant_id=ctx.tenant_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return {"trace": trace}
 
 
 @app.get("/traces")
-def list_traces(_ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return {"traces": trace_registry.list()}
+def list_traces(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return {"traces": trace_registry.list(tenant_id=ctx.tenant_id)}
 
 
 @app.get("/detective/root-cause/{target_id}")
@@ -805,7 +801,10 @@ def _new_chat_response(
                 learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
             ),
         },
-        "traces": [_compact_chat_trace(item) for item in trace_registry.list()[:_CHAT_TRACE_LIMIT]],
+        "traces": [
+            _compact_chat_trace(item)
+            for item in trace_registry.list(tenant_id=ctx.tenant_id)[:_CHAT_TRACE_LIMIT]
+        ],
         "store_intelligence": build_store_intelligence_demo(),
     }
     conversation = chat_store.get(
@@ -1254,19 +1253,46 @@ def process_one_worker_event() -> dict[str, object]:
 _DEMO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
+def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
+    """Create a tenant-owned trigger while retaining the seeded demo inputs."""
+    suffix = uuid4().hex[:12]
+    return Event(
+        id=f"evt_demo_{event_type.value}_{suffix}",
+        type=event_type,
+        ts=datetime.now(UTC),
+        actor=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        correlation_id=f"demo_{event_type.value}_{suffix}",
+        payload={
+            "sku": "4011",
+            "location": "store_12_soweto",
+            "supplier": "dairyco",
+            "site_id": "store_12_soweto",
+        },
+    )
+
+
 def _preview_demo_cascade(result: dict[str, Any]) -> dict[str, Any]:
     """Enrich a read-only demo preview without mutating stores or traces."""
     _attach_decision_governance(result)
     return result
 
 
+def _assign_result_tenant(result: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    decision = result.get("decision")
+    if isinstance(decision, dict):
+        decision["tenant_id"] = tenant_id
+    result["tenant_id"] = tenant_id
+    return result
+
+
 @app.post("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
-def demo_golden() -> dict[str, object]:
-    return _record_cascade(run_golden_cascade())
+def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(run_golden_cascade(_demo_event(ctx, EventType.SCAN)))
 
 
 @app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
-def demo_recall() -> dict[str, object]:
+def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a seeded supplier recall through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
     event = Event(
@@ -1274,7 +1300,7 @@ def demo_recall() -> dict[str, object]:
         type=EventType.RECALL_NOTICE,
         ts=datetime.now(UTC),
         actor="supplier_dairyco_quality",
-        tenant_id="sa_retail_demo",
+        tenant_id=ctx.tenant_id,
         correlation_id=f"demo_recall_{suffix}",
         payload={
             "recall_id": f"REC-DEMO-{suffix}",
@@ -1295,7 +1321,7 @@ def demo_recall() -> dict[str, object]:
 
 
 @app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
-def demo_inventory_exception() -> dict[str, object]:
+def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a seeded shrink count through the real event and HITL pipeline."""
     suffix = uuid4().hex[:12]
     event = Event(
@@ -1303,7 +1329,7 @@ def demo_inventory_exception() -> dict[str, object]:
         type=EventType.INVENTORY_EXCEPTION,
         ts=datetime.now(UTC),
         actor="cycle_count_team",
-        tenant_id="sa_retail_demo",
+        tenant_id=ctx.tenant_id,
         correlation_id=f"demo_inventory_exception_{suffix}",
         payload={
             "exception_id": f"EXC-DEMO-{suffix}",
@@ -1329,7 +1355,9 @@ def demo_golden_get() -> dict[str, object]:
 
 
 @app.post("/demo/golden/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_golden_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the golden scenario's Critic/Executive verdicts through a real Gemma tool loop.
 
     Unlike /demo/golden (deterministic math + hand-authored evidence), this route requires
@@ -1339,6 +1367,7 @@ def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_golden_cascade_via_agents(
+            _demo_event(ctx, EventType.SCAN),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1349,7 +1378,9 @@ def demo_golden_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/procurement/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_procurement_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
 
     Unlike /demo/procurement (deterministic math + hand-authored evidence), this route
@@ -1360,6 +1391,7 @@ def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_procurement_cascade_via_agents(
+            _demo_event(ctx, EventType.SUPPLIER_UPDATE),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1370,7 +1402,9 @@ def demo_procurement_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/sales/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_sales_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the POS price-integrity verdict through a real Gemma tool loop.
 
     Unlike /demo/sales (deterministic math + hand-authored evidence), this route requires
@@ -1381,6 +1415,7 @@ def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_sales_cascade_via_agents(
+            _demo_event(ctx, EventType.SALE),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1391,7 +1426,9 @@ def demo_sales_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/cold-chain/agentic", dependencies=_DEMO_WRITE_DEPS)
-def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
+def demo_cold_chain_agentic(
+    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
     """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
 
     Unlike /demo/cold-chain (deterministic math + hand-authored evidence), this route
@@ -1402,6 +1439,7 @@ def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
     mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
     try:
         result = run_cold_chain_cascade_via_agents(
+            _demo_event(ctx, EventType.COLD_CHAIN_ALERT),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -1412,8 +1450,10 @@ def demo_cold_chain_agentic(live_required: bool = True) -> dict[str, object]:
 
 
 @app.post("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
-def demo_critic_rejection() -> dict[str, object]:
-    return _record_cascade(run_critic_rejection_cascade())
+def demo_critic_rejection(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        _assign_result_tenant(run_critic_rejection_cascade(), ctx.tenant_id)
+    )
 
 
 @app.get("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
@@ -1422,8 +1462,10 @@ def demo_critic_rejection_get() -> dict[str, object]:
 
 
 @app.post("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
-def demo_procurement() -> dict[str, object]:
-    return _record_cascade(run_procurement_cascade())
+def demo_procurement(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE))
+    )
 
 
 @app.get("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
@@ -1432,8 +1474,8 @@ def demo_procurement_get() -> dict[str, object]:
 
 
 @app.post("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
-def demo_sales() -> dict[str, object]:
-    return _record_cascade(run_sales_cascade())
+def demo_sales(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(run_sales_cascade(_demo_event(ctx, EventType.SALE)))
 
 
 @app.get("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
@@ -1442,8 +1484,10 @@ def demo_sales_get() -> dict[str, object]:
 
 
 @app.post("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
-def demo_cold_chain() -> dict[str, object]:
-    return _record_cascade(run_cold_chain_cascade())
+def demo_cold_chain(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return _record_cascade(
+        run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT))
+    )
 
 
 @app.get("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
@@ -1965,6 +2009,7 @@ def _worldgen_cold_chain_alert(
 
 def _attach_event_causality(result: dict[str, Any], event: Event) -> None:
     result["correlation_id"] = event.correlation_id
+    result["tenant_id"] = event.tenant_id
     decision = result.get("decision")
     if isinstance(decision, dict):
         decision["caused_by"] = [event.id]
