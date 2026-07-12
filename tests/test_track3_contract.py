@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import _request_timeout_seconds, app
+from shelfwise_backend.app import (
+    _production_execution_mode,
+    _request_timeout_seconds,
+    _require_amd_inference,
+    app,
+)
 from shelfwise_backend.chat import ensure_english_response
 from shelfwise_backend.chat_store import ChatConversationStore
 from shelfwise_inference.config import _timeout_seconds
-from shelfwise_inference.orchestration import AgentOrchestrationError, _ensure_english_payload
+from shelfwise_inference.orchestration import (
+    AgentOrchestrationError,
+    ExecutionMode,
+    _ensure_english_payload,
+)
 
 
 def test_track3_english_guard_rejects_non_latin_model_output() -> None:
@@ -68,6 +78,25 @@ def test_track3_production_chat_fails_closed_without_live_endpoint(monkeypatch) 
     response = TestClient(app).post("/chat", json={"question": "What needs attention?"})
 
     assert response.status_code == 503
+
+
+def test_track3_production_rejects_non_amd_provider(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.fireworks.ai/inference/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+
+    with pytest.raises(HTTPException, match="AMD inference"):
+        _require_amd_inference()
+
+
+def test_track3_production_forces_live_mode_even_when_requested_offline(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LLM_BASE_URL", "http://amd.example:8000")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_ROUTINE_MODEL", "google/gemma-4-E4B-it")
+    monkeypatch.setenv("LLM_STRONG_MODEL", "google/gemma-4-31B-it")
+
+    assert _production_execution_mode(False) is ExecutionMode.LIVE_REQUIRED
 
 
 def test_track3_request_deadline_is_strictly_below_thirty_seconds(monkeypatch) -> None:

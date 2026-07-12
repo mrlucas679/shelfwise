@@ -133,6 +133,23 @@ def _is_production_deployment() -> bool:
     return os.getenv("APP_ENV", "local").strip().lower() in _PRODUCTION_APP_ENV_NAMES
 
 
+def _require_amd_inference() -> None:
+    """Reject non-AMD providers in named deployments before any model request."""
+    if (
+        _is_production_deployment()
+        and load_inference_config().provider is not ProviderKind.VLLM_MI300X
+    ):
+        raise HTTPException(status_code=503, detail="AMD inference is not configured")
+
+
+def _production_execution_mode(requested_live: bool) -> ExecutionMode:
+    """Force production agentic routes onto live AMD inference."""
+    if _is_production_deployment():
+        _require_amd_inference()
+        return ExecutionMode.LIVE_REQUIRED
+    return ExecutionMode.LIVE_REQUIRED if requested_live else ExecutionMode.OFFLINE_TEST
+
+
 def _reject_insecure_auth_in_named_deployments() -> None:
     """Fail fast if a real deployment is configured with auth off.
 
@@ -680,6 +697,7 @@ def submission_readiness() -> dict[str, object]:
 
 @app.get("/inference/smoke")
 def inference_smoke(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    _require_amd_inference()
     readiness_payload = inference_readiness_payload()
     system_prompt = "You are the ShelfWise critic. Reply briefly."
     prompt = prompt_registry.record_prompt(
@@ -945,6 +963,7 @@ def _new_chat_response(
     if conversation:
         state["conversation_history"] = conversation["messages"][-12:]
     client = OpenAICompatibleInferenceClient(recorder=_record_model_run)
+    _require_amd_inference()
     correlation_id = f"chat:{conversation_id}:{message_id}"
     try:
         answer, _meta = build_chat_reply_with_meta(
@@ -1511,7 +1530,7 @@ def demo_golden_agentic(
     an actual model call and tool-calling round trip. With live_required=true (default) it
     hard-fails with 503 instead of silently falling back to an offline/deterministic answer.
     """
-    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    mode = _production_execution_mode(live_required)
     try:
         result = run_golden_cascade_via_agents(
             _demo_event(ctx, EventType.SCAN),
@@ -1536,7 +1555,7 @@ def demo_procurement_agentic(
     get_supplier_ranking. With live_required=true (default) it hard-fails with 503 instead
     of silently falling back to an offline/deterministic answer.
     """
-    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    mode = _production_execution_mode(live_required)
     try:
         result = run_procurement_cascade_via_agents(
             _demo_event(ctx, EventType.SUPPLIER_UPDATE),
@@ -1561,7 +1580,7 @@ def demo_sales_agentic(
     live_required=true (default) it hard-fails with 503 instead of silently falling back
     to an offline/deterministic answer.
     """
-    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    mode = _production_execution_mode(live_required)
     try:
         result = run_sales_cascade_via_agents(
             _demo_event(ctx, EventType.SALE),
@@ -1586,7 +1605,7 @@ def demo_cold_chain_agentic(
     With live_required=true (default) it hard-fails with 503 instead of silently falling
     back to an offline/deterministic answer.
     """
-    mode = ExecutionMode.LIVE_REQUIRED if live_required else ExecutionMode.OFFLINE_TEST
+    mode = _production_execution_mode(live_required)
     try:
         result = run_cold_chain_cascade_via_agents(
             _demo_event(ctx, EventType.COLD_CHAIN_ALERT),
