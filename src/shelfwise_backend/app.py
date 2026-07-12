@@ -687,9 +687,14 @@ def submission_readiness() -> dict[str, object]:
             "hosted_url": "recommended",
             "docker_image_required": "required",
             "amd_compute_usage": "ok" if inference_ready["ready_for_amd_demo"] else "pending",
-            "response_timeout": "ok",
-            "english_responses": "ok",
-            "unseen_inputs": "supported_by_seeded_tools_and_bounded_search",
+            "response_timeout": (
+                "configured_under_30s"
+                if _request_timeout_seconds() < 30
+                else "pending"
+            ),
+            "english_responses": "enforced_in_code",
+            "unseen_inputs": "not_cached_by_question",
+            "live_cloud_measurements": "required_before_submission",
         },
         "inference": inference_ready,
     }
