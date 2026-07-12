@@ -165,8 +165,8 @@ checks before resuming training. Do not resume training after a failed recovery 
 ### Save state before credit exhaustion
 
 - Current branch is `developers`; only `main` and `developers` should remain.
-- Tracked changes still need to be reviewed, staged, committed, and pushed together with this
-  update. Do not stage existing untracked run artifacts unless intentionally packaging evidence.
+- The implementation and handoff are saved and pushed in commit `c475d5b`. Only the existing
+  untracked run artifacts remain; do not stage them unless intentionally packaging evidence.
 - Before the next cloud run, create the capsule and keep the archive off the Droplet.
 - Remaining external blockers are public `linux/amd64` image publication, actual AMD cloud
   startup/latency receipt, and final merge to `main` after those proofs. Do not claim these are
