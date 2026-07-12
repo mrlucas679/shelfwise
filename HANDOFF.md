@@ -1,4 +1,190 @@
-# HANDOFF — session state as of 2026-07-11 ~07:42 (local)
+# HANDOFF — current continuation state as of 2026-07-12
+
+> **Read this section first.** The historical notes below remain as evidence, but many of
+> their branch names, counts, and deadlines are stale. The authoritative working branch is
+> `developers`; only `main` and `developers` exist locally and on `origin`.
+
+## Active Objective — Track 3 Prescreen
+
+Track 3 requires all of the following:
+
+1. A Docker image is present in the GitHub repository.
+2. The deployed application demonstrably uses AMD compute. The production path must use
+   AMD vLLM (`provider=vllm_mi300x`), not Fireworks or offline fallback.
+3. The container is ready within 60 seconds after images are built.
+4. Every request returns within 30 seconds.
+5. Model responses are in English.
+6. Answers are generated for unseen variants; there is no question-to-answer cache or
+   hardcoded answer table.
+
+The repository-side implementation is complete and locally verified. The only remaining
+completion evidence is a live AMD cloud run proving items 2-4 against the actual deployment.
+Do not mark the objective complete until that receipt exists.
+
+## Current Git State
+
+- Current branch: `developers`
+- Remote branch: `origin/developers`
+- `main` has not been merged from the current work.
+- Latest committed change before this handoff update: `4ee1abc fix: report submission proof boundaries honestly`.
+- Existing untracked run artifacts are intentional evidence and must not be deleted or staged
+  casually: `reports/`, `full_capacity_v2.log`, `backend_verify.log`, `tmp/`, dated run folders,
+  `shelfwise-gemma-final-adapter/`, and stress-run folders.
+- This update also adds two new files that must be committed: `scripts/track3_prescreen.py`
+  and `tests/test_track3_prescreen.py`.
+
+## Implemented Track 3 Gates
+
+### Docker
+
+- Root `Dockerfile` builds the backend as a non-root `appuser` and contains a Docker
+  `HEALTHCHECK` against `/health`.
+- `frontend/Dockerfile` builds the production frontend image.
+- `docker-compose.production.yml` defines Postgres, Redis, migration, backend, and frontend;
+  only the frontend publishes a public port.
+- `/submission/readiness` now reports `docker_image_required: required`.
+- The evaluation harness enforces that same value.
+- Local image build was completed successfully:
+  - `amdactii-backend:latest` (~402 MB)
+  - `amdactii-frontend:latest` (~75.7 MB)
+- Local Compose configuration passed. Local Compose services were not left running.
+- CI builds images first, then measures `docker compose ... up --build -d --wait` and fails if
+  readiness takes 60 seconds or more.
+
+### AMD inference
+
+- Production `APP_ENV=production` rejects providers other than `vllm_mi300x` with HTTP 503.
+- Production chat requires live inference and cannot use offline fallback.
+- All four agentic demo routes force `LIVE_REQUIRED` in production even if a caller requests
+  `live_required=false`.
+- Production inference smoke also requires AMD vLLM.
+- Default production model configuration is routine `google/gemma-4-E4B-it` and strong
+  `google/gemma-4-31B-it`; distinct endpoints/model IDs are required for
+  `ready_for_amd_demo=true`.
+- The model contract is OpenAI-compatible vLLM with Gemma tool calling. The application does
+  not run local models and must not claim local GPU evidence as AMD evidence.
+
+### Latency
+
+- `LLM_TIMEOUT_SECONDS` is clamped to 29 seconds.
+- `SHELFWISE_REQUEST_TIMEOUT_SECONDS` is clamped to 29 seconds.
+- HTTP middleware returns 504 at the whole-request deadline, including multi-call agentic
+  requests.
+- CI measures post-build production topology readiness under 60 seconds.
+- No actual cloud request latency receipt exists yet; the AMD run below is mandatory.
+
+### English output
+
+- Chat prompts explicitly require English.
+- Chat output rejects clearly non-Latin responses.
+- Agentic JSON payloads are recursively checked for clearly non-English writing systems.
+- This is an enforcement guard, not a substitute for the final live response receipt.
+
+### Unseen inputs and caching
+
+- Chat persistence is keyed by `(tenant_id, user_id, conversation_id, message_id)`.
+- Replay is limited to the exact message ID for idempotent retries.
+- A different message ID does not replay an earlier answer; regression coverage is in
+  `tests/test_track3_contract.py`.
+- No question-to-answer cache exists.
+- Production responses include `X-ShelfWise-Replayed`, correlation, provider, model, and answer
+  source headers.
+- Generated-world facts are data snapshots, not cached model answers.
+
+## New Cloud Prescreen Command
+
+`scripts/track3_prescreen.py` is the authoritative end-to-end probe. It performs the following:
+
+- polls `/health` for at most 60 seconds;
+- checks `/inference/readiness` for AMD vLLM and Google Gemma 4 routine/strong models;
+- creates a session through `/auth/session`;
+- sends two fresh unseen chat questions with unique conversation/message IDs;
+- requires each chat response under 30 seconds;
+- requires `X-ShelfWise-Provider: vllm_mi300x`, `X-ShelfWise-Answer-Source: model`, and
+  `X-ShelfWise-Replayed: false`;
+- requires English-compatible output and unique correlation IDs;
+- writes a JSON receipt when `--output` is provided.
+
+Run it only after the AMD endpoint and production application are live:
+
+```powershell
+python scripts/track3_prescreen.py `
+  --base-url http://<public-app-origin> `
+  --startup-deadline 60 `
+  --request-deadline 29 `
+  --output reports/track3_prescreen_<timestamp>.json
+```
+
+Expected result is `"verdict": "PASS"`. A configuration/readiness response without this
+receipt is not proof of cloud startup or response latency.
+
+## Exact Resume Procedure
+
+1. Read this section and run `git status --short`; preserve all untracked evidence.
+2. Commit the current prescreen implementation and this handoff update on `developers`.
+3. Confirm the AMD cloud endpoint is on. For the existing MI300X vLLM droplet, first check
+   `/v1/models`; do not assume a previous IP/process is still alive.
+4. Configure production with distinct Gemma tiers, for example:
+
+```bash
+export APP_ENV=production
+export SHELFWISE_AUTH_MODE=jwt
+export LLM_ROUTINE_BASE_URL=http://<routine-amd-endpoint>:8000
+export LLM_STRONG_BASE_URL=http://<strong-amd-endpoint>:8000
+export LLM_ROUTINE_MODEL=google/gemma-4-E4B-it
+export LLM_STRONG_MODEL=google/gemma-4-31B-it
+export LLM_COMPUTE_RESOURCE="AMD Developer Cloud"
+export LLM_ACCELERATOR="AMD Instinct MI300X"
+export LLM_TIMEOUT_SECONDS=25
+```
+
+5. Build once, then measure startup separately from image build:
+
+```bash
+docker compose -f docker-compose.production.yml build
+started=$(date +%s)
+docker compose -f docker-compose.production.yml up --build -d --wait
+elapsed=$(( $(date +%s) - started ))
+test "$elapsed" -lt 60
+```
+
+6. Run `scripts/track3_prescreen.py` against the public origin and retain its JSON receipt.
+7. Run the live-required full-system harness and inspect row-level receipts. Fail on offline
+   answers, reused decision IDs, HITL mismatches, empty model answers, or zero model-backed
+   chat calls.
+8. Verify the browser frontend against the same live backend, then record the demo while the
+   AMD endpoint is warm.
+9. Before merging, run `python -m pytest -q`, `python -m ruff check src tests scripts`,
+   `npm run typecheck --if-present` from `frontend/`, and `git diff --check`.
+10. Only after the cloud receipt and demo proof are saved, merge `developers` into `main` and
+    verify both local and remote branch state. Do not delete evidence folders or force-reset
+    either branch.
+
+## Current Verification Baseline
+
+- Full Python suite: `453 passed, 3 skipped`.
+- Ruff: clean.
+- Frontend TypeScript typecheck: passed in the prior verification pass.
+- Capability manifest: regenerated and committed after route/test changes.
+- Focused Track 3 prescreen test is present in `tests/test_track3_prescreen.py`.
+- Live cloud timing and AMD response proof: **not yet run in this continuation**.
+
+## Remaining Risks / Do Not Claim As Done
+
+- The AMD cloud endpoint may be powered off or unreachable; verify it before spending credits.
+- The local Docker image build passed, but local CPU build/start is not AMD evidence.
+- Actual container readiness under 60 seconds and actual model responses under 30 seconds need
+  the cloud receipt.
+- AMD-SMI host GPU/VRAM telemetry is not available from the provider; never invent utilization.
+- The architecture benchmark is implemented and tested offline, but 1/8/32 concurrency against
+  the live AMD endpoint is not yet measured in this current proof cycle.
+- Routine/strong routing is implemented; actual deployment of two distinct serving endpoints
+  still has to be confirmed by `/inference/readiness` and the prescreen receipt.
+- Two smaller deterministic guardrail checks remain deterministic-only; do not describe every
+  internal check as a model agent unless the route receipt proves it.
+- Historical sections below may mention old branches, counts, IPs, or deadlines. Treat them as
+  archival evidence only; this current section controls the next actions.
+
 
 ## EXECUTION CHECKLIST — Postgres-backed world (2026-07-12) — goal: kill all hardcoded seed data
 
