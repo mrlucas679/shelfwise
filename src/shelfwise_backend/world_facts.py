@@ -15,10 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from shelfwise_contracts import Money
-from shelfwise_data.seed import SeededScenario
-from shelfwise_data.store_intelligence import (
+from shelfwise_decision_science import StockSourceCandidate, plan_stock_sourcing
+from shelfwise_worldgen.populate import DEMO_POLICY, WorldSnapshotStoreLike, populate_world
+
+from .retail_intelligence import (
     DecisionOutcome,
     DeliveryReceipt,
+    SeededScenario,
     StockBatch,
     SupplierCoverRequest,
     plan_supplier_cover,
@@ -26,8 +29,6 @@ from shelfwise_data.store_intelligence import (
     split_stock_by_fefo,
     summarize_outcome,
 )
-from shelfwise_decision_science import StockSourceCandidate, plan_stock_sourcing
-from shelfwise_worldgen.populate import DEMO_POLICY, WorldSnapshotStoreLike, populate_world
 
 REFERENCE_NOW = datetime(2026, 7, 6, 8, 0, tzinfo=UTC)
 

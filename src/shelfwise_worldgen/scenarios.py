@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from .catalog.sample import sample_assortment
-from .sa_ground_truth import load_shedding_schedule
 from .world import World, WorldConfig
 
 
@@ -92,7 +92,7 @@ def build(
     )
     schedule = [
         row
-        for row in load_shedding_schedule(
+        for row in _load_schedule(
             seed,
             area=scenario.area,
             start=scenario.start,
@@ -102,3 +102,33 @@ def build(
         if row["day_index"] in scenario.incident_days
     ]
     return World(cfg), schedule
+
+
+def _load_schedule(
+    seed: int,
+    *,
+    area: str,
+    start: date,
+    days: int,
+    stage: int,
+) -> list[dict[str, object]]:
+    """Generate labeled outage windows without importing legacy product fixtures."""
+    schedule: list[dict[str, object]] = []
+    for day_index in range(days):
+        current = start + timedelta(days=day_index)
+        for slot_index in range(max(0, min(6, stage))):
+            raw = f"{seed}:{area}:{current.isoformat()}:{slot_index}".encode()
+            offset = int.from_bytes(hashlib.blake2b(raw, digest_size=8).digest(), "big")
+            hour = (offset % 11) * 2
+            begins = datetime.combine(current, time(hour=hour))
+            schedule.append(
+                {
+                    "area": area,
+                    "stage": stage,
+                    "day_index": day_index,
+                    "start": begins.isoformat(),
+                    "end": (begins + timedelta(hours=2)).isoformat(),
+                    "synthetic": True,
+                }
+            )
+    return sorted(schedule, key=lambda row: str(row["start"]))
