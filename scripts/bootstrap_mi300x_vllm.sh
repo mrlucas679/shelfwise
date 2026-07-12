@@ -60,12 +60,19 @@ use_quick_start_container() {
   docker container inspect "$VLLM_HOST_CONTAINER" >/dev/null 2>&1
 }
 
+ensure_quick_start_container_running() {
+  # Docker treats starting an already-running container as an error, so inspect first.
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$VLLM_HOST_CONTAINER")" != "true" ]]; then
+    docker start "$VLLM_HOST_CONTAINER" >/dev/null
+  fi
+}
+
 start_quick_start_server() {
   # Start one server inside the provider's preinstalled vLLM container without replacing its image.
   local model="$1"
   local port="$2"
   local memory_fraction="$3"
-  docker start "$VLLM_HOST_CONTAINER" >/dev/null
+  ensure_quick_start_container_running
   docker exec "$VLLM_HOST_CONTAINER" bash -lc \
     "pkill -f '[v]llm serve.*--port ${port}' >/dev/null 2>&1 || true"
   docker exec -d \
@@ -171,7 +178,7 @@ main() {
   mkdir -p "$HF_CACHE_DIR"
   if use_quick_start_container; then
     echo "Using preinstalled AMD vLLM Quick Start container: $VLLM_HOST_CONTAINER"
-    docker start "$VLLM_HOST_CONTAINER" >/dev/null
+    ensure_quick_start_container_running
     docker exec "$VLLM_HOST_CONTAINER" vllm --version
   else
     echo "No preinstalled vLLM Quick Start container found; pulling $VLLM_IMAGE"
