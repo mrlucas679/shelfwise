@@ -27,10 +27,12 @@ class InMemoryWorldgenRunStore:
             self._runs[run_id] = payload
             return deepcopy(payload)
 
-    def get(self, run_id: str) -> dict[str, Any] | None:
+    def get(self, run_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
         with self._lock:
             run = self._runs.get(run_id)
-            return deepcopy(run) if run is not None else None
+            if run is None or (tenant_id is not None and run.get("tenant_id") != tenant_id):
+                return None
+            return deepcopy(run)
 
     def list(self, *, tenant_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         _validate_limit(limit)
@@ -91,13 +93,15 @@ class PostgresWorldgenRunStore:
                 ),
             )
             conn.commit()
-        return self.get(run_id) or payload
+        return self.get(run_id, tenant_id=tenant_id) or payload
 
-    def get(self, run_id: str) -> dict[str, Any] | None:
+    def get(self, run_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
+        where = "run_id = %s and tenant_id = %s" if tenant_id is not None else "run_id = %s"
+        params = (run_id, tenant_id) if tenant_id is not None else (run_id,)
         with self._connect() as conn:
             row = conn.execute(
-                "select payload from shelfwise_worldgen_runs where run_id = %s",
-                (run_id,),
+                f"select payload from shelfwise_worldgen_runs where {where}",
+                params,
             ).fetchone()
         return deepcopy(row["payload"]) if row else None
 

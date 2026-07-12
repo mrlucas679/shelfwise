@@ -59,8 +59,11 @@ class AuditLog:
             }
         )
 
-    def list(self) -> list[dict[str, Any]]:
-        return [deepcopy(item) for item in self._events]
+    def list(self, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        events = self._events
+        if tenant_id is not None:
+            events = [item for item in events if item.get("tenant_id") == tenant_id]
+        return [deepcopy(item) for item in events]
 
     def clear(self) -> None:
         self._events.clear()

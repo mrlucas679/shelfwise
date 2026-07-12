@@ -320,6 +320,7 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
     try {
       const res = await fetch(url, {
         ...init,
+        credentials: 'same-origin',
         headers: { Accept: 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
         signal,
       })
@@ -331,6 +332,9 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
     }
   }
   throw new Error(`Could not reach ${path}. ${lastError}`)
+}
+async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
+  await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
 }
 const fetchDemo = (path: string, signal: AbortSignal) => fetchJson<GoldenDemo>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
@@ -360,6 +364,7 @@ async function postChat(
     try {
       const res = await fetch(url, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           Accept: 'text/plain',
           'Content-Type': 'application/json',
@@ -1131,6 +1136,7 @@ const OPERATION_READ_ENDPOINTS = [
 ]
 
 const GATED_ENDPOINTS = [
+  { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
   { label: 'Chat stream', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
@@ -2918,6 +2924,7 @@ function App() {
     setError(null)
     setOps(emptyOps())
     async function load() {
+      await ensureBrowserSession(controller.signal)
       const payload = await fetchDemo(DEMO_PATH, controller.signal)
       const openApi = await fetchOptional<{ paths?: JsonObject }>('/openapi.json', controller.signal)
       const apiPaths = Object.keys(asObject(openApi?.paths)).sort()

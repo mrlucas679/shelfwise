@@ -186,3 +186,40 @@ def test_jwt_auth_mode_assigns_demo_outputs_to_authenticated_tenant(
     decision_ids = {item["id"] for item in decisions}
     assert golden.json()["decision"]["id"] in decision_ids
     assert rejection.json()["decision"]["id"] in decision_ids
+
+
+def test_public_demo_sessions_create_stable_isolated_browser_users(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    monkeypatch.setenv("SHELFWISE_PUBLIC_DEMO_SESSION", "true")
+    monkeypatch.setenv("SHELFWISE_COOKIE_SECURE", "false")
+    first = TestClient(app)
+    second = TestClient(app)
+
+    first_session = first.post("/auth/session")
+    replayed_session = first.post("/auth/session")
+    second_session = second.post("/auth/session")
+    first_user = first_session.json()["session"]["user_id"]
+    second_user = second_session.json()["session"]["user_id"]
+
+    assert first_session.status_code == 200
+    assert first_user == replayed_session.json()["session"]["user_id"]
+    assert first_user != second_user
+    assert first.post(
+        "/chat",
+        json={"question": "What needs attention?", "conversation_id": "shared"},
+    ).status_code == 200
+    assert first.get("/chat/conversations/shared").status_code == 200
+    assert second.get("/chat/conversations/shared").status_code == 404
+
+
+def test_public_demo_session_is_disabled_by_default_in_jwt_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    monkeypatch.delenv("SHELFWISE_PUBLIC_DEMO_SESSION", raising=False)
+
+    assert TestClient(app).post("/auth/session").status_code == 401

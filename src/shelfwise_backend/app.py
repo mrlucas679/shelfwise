@@ -87,7 +87,13 @@ from .intelligence_api import router as intelligence_router
 from .observability import build_observability_snapshot
 from .product_catalog import product_attention_queue, search_product_catalog
 from .security.gateway import TokenBucket, rate_limit
-from .tenant import Role, TenantContext, default_tenant_context, verify_bearer_token
+from .tenant import (
+    Role,
+    TenantContext,
+    default_tenant_context,
+    encode_hs256_token,
+    verify_bearer_token,
+)
 from .tools.mcp_surface import AuditLog, build_platform_tools
 from .trace import TraceRegistry
 from .worker import (
@@ -255,7 +261,7 @@ async def enforce_request_body_limit(request: Request, call_next: Any) -> Any:
 
 @app.middleware("http")
 async def bind_storage_tenant(request: Request, call_next: Any) -> Any:
-    tenant_id = _tenant_id_from_headers(request.headers.get("authorization"))
+    tenant_id = _tenant_id_from_request(request)
     token = bind_tenant_context(tenant_id)
     try:
         return await call_next(request)
@@ -274,12 +280,22 @@ def _auth_mode() -> str:
 _UNAUTHENTICATED_TENANT_ID = "__unauthenticated__"
 
 
-def _tenant_id_from_headers(authorization: str | None) -> str:
+SESSION_COOKIE = "shelfwise_session"
+
+
+def _request_authorization(request: Request, authorization: str | None = None) -> str | None:
+    if authorization:
+        return authorization
+    token = request.cookies.get(SESSION_COOKIE)
+    return f"Bearer {token}" if token else None
+
+
+def _tenant_id_from_request(request: Request) -> str:
     if _auth_mode() != "jwt":
         return default_tenant_context().tenant_id
     try:
         return verify_bearer_token(
-            authorization,
+            _request_authorization(request),
             secret=os.getenv("TENANT_AUTH_SECRET", ""),
         ).tenant_id
     except ValueError:
@@ -293,6 +309,7 @@ def write_path_guard(x_api_key: str | None = Header(default=None, alias="x-api-k
 
 
 def current_tenant_context(
+    request: Request,
     authorization: str | None = Header(default=None, alias="authorization"),
 ) -> TenantContext:
     mode = _auth_mode()
@@ -301,12 +318,64 @@ def current_tenant_context(
     if mode != "jwt":
         raise HTTPException(status_code=500, detail="Unsupported auth mode")
     try:
-        return verify_bearer_token(authorization, secret=os.getenv("TENANT_AUTH_SECRET", ""))
+        return verify_bearer_token(
+            _request_authorization(request, authorization),
+            secret=os.getenv("TENANT_AUTH_SECRET", ""),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Invalid tenant token") from exc
 
 
 CURRENT_TENANT_DEP = Depends(current_tenant_context)
+
+
+def _public_demo_sessions_enabled() -> bool:
+    return os.getenv("SHELFWISE_PUBLIC_DEMO_SESSION", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
+def create_public_demo_session(request: Request) -> JSONResponse:
+    """Issue one opaque browser identity for a same-origin public demonstration."""
+    if _auth_mode() != "jwt":
+        return JSONResponse({"session": default_tenant_context().to_dict(), "mode": "local"})
+    secret = os.getenv("TENANT_AUTH_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Tenant authentication is unavailable")
+    existing = _request_authorization(request)
+    if existing:
+        try:
+            ctx = verify_bearer_token(existing, secret=secret)
+            return JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+        except ValueError:
+            pass
+    if not _public_demo_sessions_enabled():
+        raise HTTPException(status_code=401, detail="Authentication is required")
+    ctx = TenantContext(
+        tenant_id=default_tenant_context().tenant_id,
+        user_id=f"demo_{uuid4().hex}",
+        role=Role.MANAGER,
+    )
+    lifetime = _env_positive_int("SHELFWISE_PUBLIC_SESSION_SECONDS", 43_200)
+    token = encode_hs256_token(
+        {**ctx.to_dict(), "exp": int(datetime.now(UTC).timestamp()) + lifetime},
+        secret=secret,
+    )
+    response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=lifetime,
+        httponly=True,
+        secure=os.getenv("SHELFWISE_COOKIE_SECURE", "true").strip().lower() != "false",
+        samesite="strict",
+        path="/",
+    )
+    return response
 
 
 def require_role(*allowed: Role):
@@ -879,8 +948,8 @@ def list_platform_tools() -> dict[str, object]:
 
 
 @app.get("/tools/platform/audit")
-def list_platform_tool_audit() -> dict[str, object]:
-    return {"events": tool_audit.list()}
+def list_platform_tool_audit(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    return {"events": tool_audit.list(tenant_id=ctx.tenant_id)}
 
 
 @app.get("/cold-chain/feed")
@@ -901,8 +970,10 @@ def list_worldgen_runs(
 
 
 @app.get("/demo/worldgen-runs/{run_id}")
-def get_worldgen_run(run_id: str) -> dict[str, object]:
-    run = worldgen_run_store.get(run_id)
+def get_worldgen_run(
+    run_id: str, ctx: TenantContext = CURRENT_TENANT_DEP
+) -> dict[str, object]:
+    run = worldgen_run_store.get(run_id, tenant_id=ctx.tenant_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Worldgen run not found")
     return {"run": run}

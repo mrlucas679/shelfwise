@@ -26,6 +26,27 @@ def test_backend_container_sandbox_is_declared_in_compose() -> None:
     assert "pids_limit: 256" in text
 
 
+def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> None:
+    text = (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
+
+    assert 'APP_ENV: production' in text
+    assert 'SHELFWISE_AUTH_MODE: jwt' in text
+    assert 'SHELFWISE_PUBLIC_DEMO_SESSION: "true"' in text
+    assert '- "80:80"' in text
+    assert '- "8000:8000"' not in text
+    assert '- "5432:5432"' not in text
+    assert '- "6379:6379"' not in text
+    assert "host.docker.internal:host-gateway" in text
+    assert "host.docker.internal:8000" in text
+    assert "host.docker.internal:8001" in text
+
+
+def test_frontend_proxy_includes_browser_session_route() -> None:
+    text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert "^/(auth|" in text
+
+
 def test_postgres_schema_is_mounted_for_compose_init() -> None:
     text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
