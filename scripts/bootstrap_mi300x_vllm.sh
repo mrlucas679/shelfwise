@@ -137,6 +137,7 @@ wait_for_model() {
   local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
   local response=""
 
+  echo "Waiting for $model on port $port; model download and ROCm warmup can take several minutes."
   until (( SECONDS >= deadline )); do
     if response="$(curl --fail --silent --show-error --max-time 10 \
       -H "Authorization: Bearer $VLLM_API_KEY" "http://127.0.0.1:$port/v1/models" 2>/dev/null)"; then
@@ -144,6 +145,12 @@ wait_for_model() {
         echo "$container ready on port $port with $model"
         return 0
       fi
+    fi
+    if use_quick_start_container; then
+      docker exec "$VLLM_HOST_CONTAINER" bash -lc \
+        "tail -3 /root/shelfwise-vllm/vllm-${port}.log 2>/dev/null || true"
+    else
+      docker logs --tail 3 "$container" 2>&1 || true
     fi
     sleep 5
   done
