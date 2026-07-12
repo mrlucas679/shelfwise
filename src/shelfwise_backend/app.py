@@ -2057,7 +2057,7 @@ def get_decision(
 # awaiting a human), but resolved history and learning events only need a recent window.
 _CHAT_PENDING_DECISION_LIMIT = 4
 _CHAT_RESOLVED_DECISION_LIMIT = 2
-_CHAT_LEARNING_EVENT_LIMIT = 4
+_CHAT_LEARNING_EVENT_LIMIT = 5
 _CHAT_THRESHOLD_LIMIT = 8
 _CHAT_TRACE_LIMIT = 2
 
