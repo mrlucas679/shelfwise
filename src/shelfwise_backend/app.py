@@ -953,9 +953,12 @@ def _new_chat_response(
                 question=body.question,
                 limit=_CHAT_THRESHOLD_LIMIT,
             ),
-            "events": _bounded_recent(
-                learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
-            ),
+            "events": [
+                _compact_chat_learning_event(item)
+                for item in _bounded_recent(
+                    learning_store.list_events(), limit=_CHAT_LEARNING_EVENT_LIMIT
+                )
+            ],
         },
         "traces": [
             _compact_chat_trace(item)
@@ -2108,6 +2111,22 @@ def _compact_chat_trace(trace: dict[str, Any]) -> dict[str, Any]:
             item.get("name") for item in spans if isinstance(item, dict) and item.get("name")
         ],
     }
+
+
+def _compact_chat_learning_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Retain chat-relevant learning evidence without injecting durable raw payloads."""
+
+    fields = (
+        "id",
+        "decision_id",
+        "metric",
+        "message",
+        "created_at",
+        "outcome",
+        "previous_value",
+        "updated_value",
+    )
+    return {key: event[key] for key in fields if key in event}
 
 
 def _bounded_recent(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
