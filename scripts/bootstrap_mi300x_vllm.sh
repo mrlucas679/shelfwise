@@ -12,6 +12,7 @@ readonly STRONG_MODEL="${STRONG_MODEL:-google/gemma-4-31B-it}"
 # The official Gemma 4 ROCm image tag is the compatibility baseline. Override only after
 # validating the replacement in a disposable environment.
 readonly VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai-rocm:gemma4}"
+readonly VLLM_HOST_CONTAINER="${VLLM_HOST_CONTAINER:-rocm}"
 readonly HF_CACHE_DIR="${HF_CACHE_DIR:-$HOME/.cache/huggingface}"
 readonly STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-900}"
 
@@ -54,12 +55,38 @@ remove_existing_container() {
   fi
 }
 
+use_quick_start_container() {
+  # AMD's vLLM 0.23 Quick Start image supplies this container with ROCm already matched to the host.
+  docker container inspect "$VLLM_HOST_CONTAINER" >/dev/null 2>&1
+}
+
+start_quick_start_server() {
+  # Start one server inside the provider's preinstalled vLLM container without replacing its image.
+  local model="$1"
+  local port="$2"
+  local memory_fraction="$3"
+  docker start "$VLLM_HOST_CONTAINER" >/dev/null
+  docker exec "$VLLM_HOST_CONTAINER" bash -lc \
+    "pkill -f 'vllm serve.*--port ${port}' >/dev/null 2>&1 || true"
+  docker exec -d \
+    -e "VLLM_API_KEY=$VLLM_API_KEY" \
+    "$VLLM_HOST_CONTAINER" \
+    bash -lc \
+    'mkdir -p /root/shelfwise-vllm; nohup vllm serve "$1" --host 0.0.0.0 --port "$2" --api-key "$VLLM_API_KEY" --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$3" --enable-auto-tool-choice --tool-call-parser gemma4 --disable-log-requests > "/root/shelfwise-vllm/vllm-$2.log" 2>&1 &' \
+    bash "$model" "$port" "$memory_fraction"
+}
+
 start_server() {
   # Launch one constrained vLLM server sharing the MI300X safely with the other tier.
   local name="$1"
   local model="$2"
   local port="$3"
   local memory_fraction="$4"
+
+  if use_quick_start_container; then
+    start_quick_start_server "$model" "$port" "$memory_fraction"
+    return 0
+  fi
 
   remove_existing_container "$name"
   docker run -d \
@@ -142,7 +169,14 @@ main() {
   # Provision both model tiers, then prove their model endpoints.
   require_prerequisites
   mkdir -p "$HF_CACHE_DIR"
-  docker pull "$VLLM_IMAGE"
+  if use_quick_start_container; then
+    echo "Using preinstalled AMD vLLM Quick Start container: $VLLM_HOST_CONTAINER"
+    docker start "$VLLM_HOST_CONTAINER" >/dev/null
+    docker exec "$VLLM_HOST_CONTAINER" vllm --version
+  else
+    echo "No preinstalled vLLM Quick Start container found; pulling $VLLM_IMAGE"
+    docker pull "$VLLM_IMAGE"
+  fi
   # A 192GB MI300X has room for both models plus bounded KV cache; do not raise these independently.
   start_server "$ROUTINE_CONTAINER" "$ROUTINE_MODEL" "$ROUTINE_PORT" "0.20"
   start_server "$STRONG_CONTAINER" "$STRONG_MODEL" "$STRONG_PORT" "0.55"

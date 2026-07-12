@@ -1,6 +1,8 @@
 # MI300X Droplet Bootstrap
 
-Create one AMD MI300X ROCm droplet with `/dev/kfd`, `/dev/dri`, at least 150 GB free disk,
+Create the single-GPU **MI300X** plan with the **vLLM 0.23.0 Quick Start** image. It has 192 GB
+VRAM, 720 GB boot disk, and avoids the unnecessary eight-GPU hourly rate. The host must expose
+`/dev/kfd`, `/dev/dri`, at least 150 GB free disk,
 and a firewall that allows only the ShelfWise application host to reach TCP `8000` and `8001`.
 Do not expose either vLLM port broadly on the internet.
 
@@ -21,10 +23,11 @@ chmod 600 /root/shelfwise-vllm-api-key
 bash scripts/bootstrap_mi300x_vllm.sh
 ```
 
-The script pulls the official Gemma 4 ROCm vLLM image, downloads the E4B routine model and 31B
-strong model into the Hugging Face cache, starts them on `8000` and `8001`, then waits for
-`/v1/models` to prove each model is loaded. It is safe to rerun; it replaces only its two named
-containers.
+The script detects the Quick Start's preinstalled `rocm` vLLM 0.23 container and starts both
+models inside it, avoiding an incompatible duplicate image. It downloads E4B routine and 31B strong
+models into the Hugging Face cache, starts them on `8000` and `8001`, then waits for `/v1/models` to
+prove each model is loaded. It is safe to rerun; it only replaces its named vLLM processes. On a
+non-Quick-Start host it falls back to the official Gemma 4 ROCm vLLM image.
 
 On the application host, set the printed URLs and the same `VLLM_API_KEY` before starting the
 production Compose stack. Then run:
