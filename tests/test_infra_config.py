@@ -64,6 +64,12 @@ def test_backend_image_runs_as_non_root_user() -> None:
     assert "USER appuser" in text
 
 
+def test_backend_image_contains_seeded_runtime_datasets() -> None:
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY data ./data" in text
+
+
 def test_make_smoke_exercises_health_trace_approval_products_and_critic() -> None:
     text = (ROOT / "Makefile").read_text(encoding="utf-8")
     smoke = (ROOT / "scripts" / "smoke.py").read_text(encoding="utf-8")
