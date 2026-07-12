@@ -119,7 +119,8 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "decisions, then call explain_decision on the first decision's id before concluding.",
         "Review the current open HITL decisions for evidence quality. Call "
         "list_open_decisions, then call explain_decision with the first decision's id, "
-        "then conclude.",
+        "then conclude. Cite the pending 20% markdown value from the open decision in "
+        "your conclusion.",
         "explain_decision",
     ),
     RolePrompt(
@@ -133,7 +134,7 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "orchestrator",
         "You are the ShelfWise Orchestrator agent. Call list_open_decisions before concluding.",
         "Summarize the current queue of open decisions across roles. Call "
-        "list_open_decisions, then conclude.",
+        "list_open_decisions, then conclude and cite the pending 20% markdown value.",
         "list_open_decisions",
     ),
 )
