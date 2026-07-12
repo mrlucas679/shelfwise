@@ -1,5 +1,71 @@
 # HANDOFF — session state as of 2026-07-11 ~07:42 (local)
 
+## EXECUTION CHECKLIST — Postgres-backed world (2026-07-12) — goal: kill all hardcoded seed data
+
+User's explicit goal: the app must genuinely pull from Postgres, not seed CSVs / hardcoded
+literals. "It doesn't matter if we have risk, make sure we test and we fix. Just implement."
+This checklist is written BEFORE implementation per instruction. Tick items as they land.
+Full research/design context: `IMPLEMENTATION_PLAN.md` TASK 4.
+
+- [x] 1. Docker Desktop started; real Postgres running standalone on `localhost:5433` (compose's
+      own 5432 was already taken by another project) with the actual `schema.sql` +
+      `init_app_role.sh` init scripts applied (not mocks — genuine `psql`-verified 19 tables +
+      `shelfwise_app` role). Gotcha hit and resolved: Git Bash/MSYS mangles any `/`-leading
+      docker arg into a Windows path — every `docker exec`/`docker run` touching container
+      paths needs `MSYS_NO_PATHCONV=1` prefixed, or the bind mount/exec silently no-ops.
+- [x] 2. New table `shelfwise_world_snapshot` (tenant_id PK, seed, policy, generated_at,
+      payload jsonb) in `src/shelfwise_storage/schema.sql`, RLS policy, added to
+      `TENANT_SCOPED_TABLES` in `src/shelfwise_storage/rls.py`. Verified live: re-applied
+      schema.sql against the running container, `tests/test_database_schema.py` passes.
+- [x] 3. New store module `src/shelfwise_worldgen/world_store.py`:
+      `InMemoryWorldSnapshotStore` / `PostgresWorldSnapshotStore` / `create_world_snapshot_store()`,
+      same shape as `shelfwise_inventory/store.py` (get/save/clear, tenant-scoped). Verified
+      live: real save+get round-trip against Postgres on :5433, confirmed missing-tenant
+      returns `None`.
+- [x] 4. New population service `src/shelfwise_worldgen/populate.py`:
+      `GenerationPolicy` dataclass (seed, catalog_scale, assortment_size, min_near_expiry,
+      min_low_stock, min_delayed_orders, min_price_anomalies) + `DEMO_POLICY` preset;
+      `populate_world(policy, tenant_id, store) -> PopulationReceipt` — generates products via
+      `shelfwise_worldgen.catalog.sample.sample_assortment`, derives stock/sales/suppliers/sites
+      deterministically from the same seed, runs a guarantee pass that SELECTS which generated
+      SKUs satisfy each constraint (never hardcodes which SKU), records the selection
+      transparently in the receipt, writes through the store interface. Verified live against
+      Postgres on :5433: 200 real generated products persisted, guarantee pass selected 2
+      near-expiry / 5 low-stock / 2 delayed-supplier / 2 price-anomaly SKUs from the generated
+      set (not hardcoded), hero SKU chosen dynamically. Determinism re-confirmed (same seed →
+      byte-identical receipt).
+- [ ] 5. New facts provider `src/shelfwise_backend/world_facts.py`: `WorldFactsProvider` with
+      `get_scenario_facts(tenant_id, sku)`, `get_store_intelligence(tenant_id)`,
+      `get_sourcing_candidates(tenant_id, sku, units_needed)`, `search_products(tenant_id, query,
+      limit)`, `get_hero_sku(tenant_id)`. Lazy-populates a tenant's snapshot on first access
+      (via `DEMO_POLICY`) if none exists yet, so zero-config flows keep working. Every method
+      round-trips through the store (real query per call, no long-lived cache) — Postgres must
+      genuinely be hit per request, not just at boot.
+- [ ] 6. Rewire call sites (test suite green between each):
+      - [ ] 6a. `src/shelfwise_backend/tools/mcp_surface.py` — 8 tools
+        (get_stock, simulate_markdown, get_demand_forecast, get_expiry_risk, get_reorder_policy,
+        get_supplier_ranking, get_stock_sourcing_options, check_price_integrity)
+      - [ ] 6b. `src/shelfwise_backend/product_catalog.py` — search + `_fefo_by_sku`
+      - [ ] 6c. `src/shelfwise_backend/cascade.py` — golden/procurement/sales/cold-chain/
+        critic-rejection (5 call sites + 3 `build_store_intelligence_demo()` calls)
+      - [ ] 6d. `src/shelfwise_backend/agentic_cascade.py` — 3 call sites
+      - [ ] 6e. `src/shelfwise_backend/app.py` — readiness check, `/data/seed/summary`, chat
+        context assembly (keep route paths unchanged to avoid frontend/README/manifest churn)
+- [ ] 7. Wire `create_world_snapshot_store()` + `WorldFactsProvider` into `app.py` startup
+      alongside the other `create_*_store()` calls.
+- [ ] 8. Update tests: `tests/test_seed_data.py` and any cascade test asserting exact planted-
+      story literals now assert against a population receipt instead. Add new tests for
+      `populate_world` (determinism, constraint satisfaction) and the facts provider.
+- [ ] 9. Real Postgres verification (not skippable): populate against live Postgres, boot
+      backend with `SHELFWISE_STORE_BACKEND=postgres`, exercise chat report question, one
+      agentic cascade, `/products/search`, `/inventory/positions`. Fix whatever breaks.
+- [ ] 10. Add one real integration test gated by `SHELFWISE_TEST_DATABASE_URL` so this doesn't
+      silently regress; note in CI as a follow-up if a CI postgres service isn't added now.
+- [ ] 11. Full suite + ruff clean; capability manifest regenerated; README/DEMO_RUNBOOK updated
+      to describe the generated-world data model (no more "seeded CSV" framing).
+- [ ] 12. Commit incrementally per phase; update this checklist as items land; final commit
+      updates HANDOFF with a summary of what shipped vs. what's left.
+
 ## Coordination note (2026-07-11 ~12:00) — judge-readiness pass on main, doc-only
 
 While the public-demo/dual-model branch (`codex/public-demo-dual-model-readiness`, PR #2)

@@ -252,6 +252,14 @@ create table if not exists shelfwise_inventory_positions (
 create index if not exists idx_shelfwise_inventory_positions_tenant_sku
 on shelfwise_inventory_positions (tenant_id, sku, location_type);
 
+create table if not exists shelfwise_world_snapshot (
+    tenant_id text primary key,
+    seed integer not null,
+    policy text not null,
+    generated_at timestamptz not null,
+    payload jsonb not null
+);
+
 alter table shelfwise_decisions enable row level security;
 alter table shelfwise_decisions force row level security;
 drop policy if exists shelfwise_decisions_tenant_isolation on shelfwise_decisions;
@@ -395,5 +403,13 @@ alter table shelfwise_inventory_positions force row level security;
 drop policy if exists shelfwise_inventory_positions_tenant_isolation
 on shelfwise_inventory_positions;
 create policy shelfwise_inventory_positions_tenant_isolation on shelfwise_inventory_positions
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_world_snapshot enable row level security;
+alter table shelfwise_world_snapshot force row level security;
+drop policy if exists shelfwise_world_snapshot_tenant_isolation
+on shelfwise_world_snapshot;
+create policy shelfwise_world_snapshot_tenant_isolation on shelfwise_world_snapshot
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));

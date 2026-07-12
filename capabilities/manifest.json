@@ -3241,6 +3241,7 @@
         "create_prompt_registry",
         "create_tenant_fact_store",
         "create_tenant_profile_store",
+        "create_world_snapshot_store",
         "create_worldgen_run_store",
         "create_writeback_sink"
       ],
@@ -3319,6 +3320,11 @@
           "line": 143,
           "path": "src/shelfwise_worldgen/store.py",
           "symbol": "create_worldgen_run_store"
+        },
+        {
+          "line": 112,
+          "path": "src/shelfwise_worldgen/world_store.py",
+          "symbol": "create_world_snapshot_store"
         }
       ],
       "status": "verified",
@@ -3342,6 +3348,7 @@
         "create_prompt_registry",
         "create_tenant_fact_store",
         "create_tenant_profile_store",
+        "create_world_snapshot_store",
         "create_worldgen_run_store",
         "create_writeback_sink"
       ],
@@ -3420,6 +3427,11 @@
           "line": 145,
           "path": "src/shelfwise_worldgen/store.py",
           "symbol": "create_worldgen_run_store"
+        },
+        {
+          "line": 114,
+          "path": "src/shelfwise_worldgen/world_store.py",
+          "symbol": "create_world_snapshot_store"
         }
       ],
       "status": "verified",
@@ -4259,7 +4271,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:305d16caffea3f3048ca801877fa7e54abd9b547fa0c9f00c68a5920407c1712",
+  "fingerprint": "sha256:74597037deaa732cd4f3c083e36548488ed92127ddd309c59356aa62d0239ac1",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }
