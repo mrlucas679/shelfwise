@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -36,9 +37,14 @@ class PowerScenario:
     gen_start_delay_min: int = 2
 
 
+def _asset_id(index: int) -> str:
+    """Resolve an optional deployment asset id without embedding a tenant asset name."""
+    return os.getenv(f"SHELFWISE_COLD_ASSET_{index}") or f"cold_chain_asset_{index}"
+
+
 DEMO_FRIDGES = [
     FridgeSpec(
-        "fridge_dairy_1",
+        _asset_id(1),
         "chilled",
         setpoint_c=3.0,
         ambient_c=24.0,
@@ -46,7 +52,7 @@ DEMO_FRIDGES = [
         contents_value_c=850_000,
     ),
     FridgeSpec(
-        "fridge_meat_1",
+        _asset_id(2),
         "chilled",
         setpoint_c=2.0,
         ambient_c=24.0,
@@ -54,7 +60,7 @@ DEMO_FRIDGES = [
         contents_value_c=620_000,
     ),
     FridgeSpec(
-        "freezer_1",
+        _asset_id(3),
         "frozen",
         setpoint_c=-20.0,
         ambient_c=24.0,

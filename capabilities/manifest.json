@@ -297,7 +297,7 @@
           "symbol": "_CATALOG"
         },
         {
-          "line": 23,
+          "line": 24,
           "path": "src/shelfwise_data/csv_connector.py",
           "symbol": "CsvConnector"
         }
@@ -3841,7 +3841,7 @@
       "runtime_verified": true,
       "sources": [
         {
-          "line": 120,
+          "line": 131,
           "path": "src/shelfwise/training/simulation.py",
           "symbol": "build_shakedown_datasets"
         }
@@ -4271,7 +4271,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:71f47ebe5bf50252400a4ea192700ec20f495e58ecb221c316890f5daf945e35",
+  "fingerprint": "sha256:81acb3093c25e8d01d88d7ddf51736088f16bf458e3d2b3a0b8fdb629bf11904",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

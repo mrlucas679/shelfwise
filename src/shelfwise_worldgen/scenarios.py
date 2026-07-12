@@ -92,7 +92,7 @@ def build(
     )
     schedule = [
         row
-        for row in _load_schedule(
+        for row in load_shedding_schedule(
             seed,
             area=scenario.area,
             start=scenario.start,
@@ -104,7 +104,7 @@ def build(
     return World(cfg), schedule
 
 
-def _load_schedule(
+def load_shedding_schedule(
     seed: int,
     *,
     area: str,

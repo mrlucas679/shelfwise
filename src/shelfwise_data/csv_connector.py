@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 from datetime import datetime
@@ -17,7 +18,7 @@ from .seed import (
     load_suppliers,
 )
 
-TENANT_ID = "sa_retail_demo"
+TENANT_ID = os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "local"
 
 
 class CsvConnector:

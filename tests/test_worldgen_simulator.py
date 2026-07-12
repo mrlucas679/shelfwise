@@ -10,8 +10,7 @@ from shelfwise_worldgen.catalog.sample import sample_assortment
 from shelfwise_worldgen.drills import run_drill
 from shelfwise_worldgen.narrate import narrate
 from shelfwise_worldgen.play import direct
-from shelfwise_worldgen.sa_ground_truth import demand_multiplier, load_shedding_schedule
-from shelfwise_worldgen.scenarios import SCENARIOS, build
+from shelfwise_worldgen.scenarios import SCENARIOS, build, load_shedding_schedule
 from shelfwise_worldgen.seed import build_memory_seed
 from shelfwise_worldgen.store import InMemoryWorldgenRunStore
 from shelfwise_worldgen.world import (
@@ -19,6 +18,7 @@ from shelfwise_worldgen.world import (
     World,
     WorldConfig,
     assert_world_event_contract,
+    demand_multiplier,
     span_event_stream,
 )
 

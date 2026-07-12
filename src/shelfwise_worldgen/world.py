@@ -21,7 +21,10 @@ def seed_int(seed: int, value: str) -> int:
 
 def demand_multiplier(current: date) -> float:
     """Apply a small calendar effect without relying on a planted product story."""
-    return 1.15 if current.weekday() in {4, 5} else 1.0
+    multiplier = 1.28 if current.day >= 25 or current.day <= 3 else 1.0
+    if current.weekday() in {4, 5}:
+        multiplier += 0.15
+    return multiplier
 
 
 @dataclass(frozen=True, slots=True)
