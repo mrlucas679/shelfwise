@@ -2055,11 +2055,11 @@ def get_decision(
 # past LLM_TIMEOUT_SECONDS and every later call silently fell back to the offline reply.
 # Pending decisions still need to stay in full (the assistant must see everything still
 # awaiting a human), but resolved history and learning events only need a recent window.
-_CHAT_PENDING_DECISION_LIMIT = 12
-_CHAT_RESOLVED_DECISION_LIMIT = 8
-_CHAT_LEARNING_EVENT_LIMIT = 12
-_CHAT_THRESHOLD_LIMIT = 20
-_CHAT_TRACE_LIMIT = 5
+_CHAT_PENDING_DECISION_LIMIT = 4
+_CHAT_RESOLVED_DECISION_LIMIT = 2
+_CHAT_LEARNING_EVENT_LIMIT = 4
+_CHAT_THRESHOLD_LIMIT = 8
+_CHAT_TRACE_LIMIT = 2
 
 
 def _bounded_chat_decisions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
