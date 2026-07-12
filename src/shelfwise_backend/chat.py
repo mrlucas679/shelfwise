@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import unicodedata
 from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
@@ -48,6 +49,9 @@ _CHAT_SCHEMA: dict[str, Any] = {
 _CHAT_SYSTEM_PROMPT = (
     "You are ShelfWise, an AI operations assistant for a real supermarket. Speak like a "
     "knowledgeable colleague, not a database readout.\n\n"
+    "All user-facing text must be written in English. Do not translate into another "
+    "language, even if the user asks; if needed, explain that this service responds in "
+    "English.\n\n"
     "Format for readability: use short headings for multi-part answers, bullet or "
     "numbered lists when there is more than one item, and **bold** for the one or two "
     "figures that matter most. Keep single-fact answers to a short paragraph - only add "
@@ -75,6 +79,21 @@ _CHAT_SYSTEM_PROMPT = (
     "transfer quantity with no source attached. If the tool reports no source can cover "
     "it, say so plainly and recommend a purchase order instead of a transfer."
 )
+
+
+def ensure_english_response(answer: str) -> str:
+    """Reject model output whose script is clearly not English-compatible."""
+    text = answer.strip()
+    if not text:
+        raise InferenceError("model returned an empty response")
+    letters = [char for char in text if char.isalpha()]
+    if letters:
+        latin_letters = sum(
+            "LATIN" in unicodedata.name(char, "") or char.isascii() for char in letters
+        )
+        if latin_letters / len(letters) < 0.8:
+            raise InferenceError("model returned a non-English response")
+    return text
 
 
 class ChatBody(BaseModel):
@@ -248,7 +267,7 @@ def build_chat_reply_with_meta(
         )
     if live_required and not result.used_network:
         raise InferenceError("live chat rejected a non-network inference result")
-    answer = result.content.strip()[:2_000]
+    answer = ensure_english_response(result.content)[:2_000]
     if not answer:
         if live_required:
             raise InferenceError("live chat received an empty inference result")
@@ -295,7 +314,7 @@ async def _run_agentic_chat(
         temperature=0.2,
         max_tokens=900,
     )
-    answer = str(run.answer["answer"]).strip()
+    answer = ensure_english_response(str(run.answer["answer"]))
     assert_conclusion_grounded_in_tool_results(answer, run.tool_calls)
     if not answer:
         raise AgentOrchestrationError("agentic chat produced an empty answer")

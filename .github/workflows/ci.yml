@@ -59,7 +59,13 @@ jobs:
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
           SHELFWISE_COOKIE_SECURE: "false"
-        run: docker compose -f docker-compose.production.yml up --build -d --wait
+        run: |
+          docker compose -f docker-compose.production.yml build
+          started=$(date +%s)
+          docker compose -f docker-compose.production.yml up --build -d --wait
+          elapsed=$(( $(date +%s) - started ))
+          echo "Track 3 container readiness: ${elapsed}s"
+          test "$elapsed" -lt 60
 
       - name: Smoke production public origin
         env:
@@ -85,6 +91,47 @@ jobs:
           assert session['session']['user_id'].startswith('demo_')
           assert golden['decision']['status'] == 'pending'
           assert golden['decision']['tenant_id'] == session['session']['tenant_id']
+          PY
+
+      - name: Track 3 response and language gate
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          session_request = urllib.request.Request(
+              'http://127.0.0.1/auth/session', method='POST'
+          )
+          with urllib.request.urlopen(session_request, timeout=5) as response:
+              session = json.load(response)
+              cookie = response.headers.get('Set-Cookie', '').split(';', 1)[0]
+          questions = [
+              'What is the current stock position for a generated product?',
+              'How should a manager handle an unseen cold-chain question?',
+          ]
+          responses = []
+          for question in questions:
+              request = urllib.request.Request(
+                  'http://127.0.0.1/chat',
+                  data=json.dumps({'question': question}).encode(),
+                  headers={'Content-Type': 'application/json', 'Cookie': cookie},
+                  method='POST',
+              )
+              started = time.perf_counter()
+              with urllib.request.urlopen(request, timeout=29) as response:
+                  body = response.read().decode()
+              elapsed = time.perf_counter() - started
+              assert elapsed < 30, elapsed
+              assert body.strip(), 'empty response'
+              assert all(ord(char) < 128 or char.isalpha() for char in body)
+              responses.append(body)
+          assert responses[0] != responses[1], 'distinct inputs produced identical answers'
+          print('Track 3 request/language/unseen-input gate: PASS')
           PY
 
       - name: Stop production topology

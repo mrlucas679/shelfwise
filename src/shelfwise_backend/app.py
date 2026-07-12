@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -107,6 +108,7 @@ from .world_facts import WorldFactsProvider
 
 DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 _INSECURE_APP_ENV_NAMES = {"production", "prod", "staging", "stage"}
+_PRODUCTION_APP_ENV_NAMES = _INSECURE_APP_ENV_NAMES
 
 
 def cors_allowed_origins() -> list[str]:
@@ -114,6 +116,21 @@ def cors_allowed_origins() -> list[str]:
     raw = os.getenv("SHELFWISE_CORS_ORIGINS", "")
     origins = [item.strip() for item in raw.split(",") if item.strip()]
     return origins or list(DEFAULT_CORS_ORIGINS)
+
+
+def _request_timeout_seconds() -> float:
+    """Return the deployment request deadline, always below the Track 3 limit."""
+    raw = os.getenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "29")
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 29.0
+    return min(max(value, 1.0), 29.0)
+
+
+def _is_production_deployment() -> bool:
+    """Identify named deployments where live AMD inference is mandatory."""
+    return os.getenv("APP_ENV", "local").strip().lower() in _PRODUCTION_APP_ENV_NAMES
 
 
 def _reject_insecure_auth_in_named_deployments() -> None:
@@ -261,6 +278,18 @@ async def enforce_request_body_limit(request: Request, call_next: Any) -> Any:
     # streaming-aware middleware that must observe body bytes as they arrive.
     request._receive = _wrap_receive_with_limit(request.receive, max_bytes=max_bytes)
     return await call_next(request)
+
+
+@app.middleware("http")
+async def enforce_request_deadline(request: Request, call_next: Any) -> Any:
+    """Return a bounded failure instead of allowing multi-call inference to exceed 30s."""
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=_request_timeout_seconds())
+    except TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "Request exceeded the inference response-time limit"},
+        )
 
 
 @app.middleware("http")
@@ -924,7 +953,7 @@ def _new_chat_response(
             client=client,
             tenant_id=ctx.tenant_id,
             correlation_id=correlation_id,
-            live_required=body.live_required,
+            live_required=body.live_required or _is_production_deployment(),
             decisions=decision_store,
             memory=learning_store,
             facts=world_facts,
