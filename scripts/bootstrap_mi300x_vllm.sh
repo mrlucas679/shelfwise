@@ -15,6 +15,7 @@ readonly VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai-rocm:gemma4}"
 readonly VLLM_HOST_CONTAINER="${VLLM_HOST_CONTAINER:-rocm}"
 readonly HF_CACHE_DIR="${HF_CACHE_DIR:-$HOME/.cache/huggingface}"
 readonly STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-900}"
+readonly APP_VENV_DIR="${APP_VENV_DIR:-/opt/shelfwise/.venv}"
 
 require_prerequisites() {
   # Fail before downloading model weights when host or secret prerequisites are missing.
@@ -45,6 +46,32 @@ ensure_container_runtime() {
     systemctl enable --now docker
   fi
   docker info >/dev/null || { echo "Docker daemon is not ready" >&2; exit 1; }
+}
+
+ensure_application_runtime() {
+  # The model container serves inference only; install ShelfWise control-plane tools on the host.
+  command -v python3 >/dev/null 2>&1 || {
+    command -v apt-get >/dev/null || {
+      echo "python3 is required to install ShelfWise host tooling" >&2
+      exit 1
+    }
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-venv python3-pip
+  }
+  if [[ ! -x "$APP_VENV_DIR/bin/python" ]]; then
+    python3 -m venv "$APP_VENV_DIR" || {
+      command -v apt-get >/dev/null || {
+        echo "python3-venv is required to create the ShelfWise host environment" >&2
+        exit 1
+      }
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y -qq python3-venv python3-pip
+      python3 -m venv "$APP_VENV_DIR"
+    }
+  fi
+  "$APP_VENV_DIR/bin/python" -m pip install --quiet --editable ".[benchmark]"
 }
 
 remove_existing_container() {
@@ -96,6 +123,8 @@ start_quick_start_server() {
     "pkill -f '[v]llm serve.*--port ${port}' >/dev/null 2>&1 || true"
   docker exec -d \
     -e "VLLM_API_KEY=$VLLM_API_KEY" \
+    -e "HF_TOKEN=$HF_TOKEN" \
+    -e "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
     "$VLLM_HOST_CONTAINER" \
     bash -lc \
     'mkdir -p /root/shelfwise-vllm; nohup vllm serve "$1" --host 0.0.0.0 --port "$2" --api-key "$VLLM_API_KEY" --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$3" --enforce-eager --enable-auto-tool-choice --tool-call-parser gemma4 > "/root/shelfwise-vllm/vllm-$2.log" 2>&1 &' \
@@ -211,6 +240,7 @@ EOF
 main() {
   # Provision both model tiers, then prove their model endpoints.
   require_prerequisites
+  ensure_application_runtime
   mkdir -p "$HF_CACHE_DIR"
   if use_quick_start_container; then
     echo "Using preinstalled AMD vLLM Quick Start container: $VLLM_HOST_CONTAINER"
