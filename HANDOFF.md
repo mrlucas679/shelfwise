@@ -4,6 +4,174 @@
 > their branch names, counts, and deadlines are stale. The authoritative working branch is
 > `developers`; only `main` and `developers` exist locally and on `origin`.
 
+## Frontend/system bug audit pass (2026-07-12, this session)
+
+Goal: act as a debugger, find and fix real bugs across frontend + backend, no redesign,
+no hardcoded/cached answers (evaluation uses unseen variants).
+
+Confirmed and fixed:
+
+1. **Duplicate approval-queue notifications (the reported symptom).** `src/shelfwise_backend/app.py`
+   `_demo_event` / `demo_recall` / `demo_inventory_exception` minted a fresh random `uuid4()` suffix
+   on every call, so every click of a demo trigger (or every reload that replays it) created a brand
+   new pending decision for the identical underlying scenario - the approval queue filled up with
+   near-identical "Apply 20% markdown ... Selati Flour Low Fat" cards (verified live: 3 repeated
+   `POST /demo/golden` calls produced 4 separate pending decisions before the fix). Fixed by deriving
+   the event id deterministically from `(tenant, event_type, sku, day)` via a new
+   `_demo_occurrence_suffix()` helper that reuses a still-pending decision's id (dedupe) but advances
+   to a new occurrence once the prior one is resolved (approved/rejected) - so a new day's scan or a
+   fresh incident after resolution is still a genuinely new decision, matching
+   `tests/test_golden_cascade.py::test_demo_golden_read_does_not_reset_resolved_decision`. Verified
+   live: repeated calls now collapse to exactly one decision per demo trigger type.
+2. **Stale field names in the Products search receipt.** `frontend/src/App.tsx`'s "Search receipt"
+   panel read `source_counts.synthetic_scanned` / `synthetic_scan_budget` / `synthetic_total_estimate`
+   / `seed` / `synthetic_catalog` - all left over from the old CSV-seed + synthetic-catalog-blend
+   design. The real `/products/search` response only ever returns `source_counts.generated_world`
+   (the generated world is the whole catalogue now, no separate synthetic layer), so the panel always
+   showed "0 rows scanned" / "0 seed matches · 0 catalogue matches" even when real results came back.
+   Fixed to read the real field and reworded the two receipt rows honestly ("Generated-world scan" /
+   "Query"). Updated `tests/test_frontend_attention_contracts.py` and
+   `tests/test_frontend_product_contracts.py` to match the corrected copy/field name.
+3. **"To order" workspace only ever showed 0-1 products despite the sidebar badge saying "16
+   products".** `renderToOrder` in `frontend/src/App.tsx` built its list solely from
+   `intel.store_intelligence.supplier_cover` (the single hero-SKU object), never from the real
+   per-tenant `ops.productAttention.to_order` array the backend already returns (confirmed via
+   `GET /products/attention`: `to_order` has 16 real rows, matching `totals.to_order_products`).
+   Fixed to render `apiToOrderItems` (the real list) first, falling back to the single
+   supplier-cover line only when that list is empty - mirroring the working pattern already used
+   by "Sell first" (`apiSellFirstItems` over the single `batch` object). Verified live: "To order"
+   now lists all 16 real products instead of one stale line.
+4. **One store's catalogue mixed six competing SA retail chains' own private labels together.**
+   `src/shelfwise_worldgen/catalog/brands.py`'s `PRIVATE_LABEL` pool appended *every* major SA
+   supermarket chain's house brand (PnP, Checkers Housebrand, Shoprite, Woolworths, SPAR, Boxer) to
+   every category's brand pool - so one store's shelf showed products from six competing retailers'
+   own labels simultaneously (reported as "products from different shops... we didn't give the data
+   much focus"). No real store stocks a competitor's private label. Fixed by splitting the pool into
+   chain-neutral generics ("No Name", "Ritebrand") plus exactly one retail-chain house brand chosen
+   deterministically per world seed (`house_brand_name(seed)` / `private_label_pool(seed)`), threaded
+   through `pool()`, `generate_catalog()`, and `count_estimate()`. Verified: for the demo seed
+   (20_260_710) the house brand is "Boxer"; a live `/products/attention` scan now shows only
+   `Boxer SA (Pty) Ltd` as the chain-brand supplier, alongside real manufacturer brands (Clover,
+   Tastic, Ace, etc.) and chain-neutral generics (No Name, House, Select, Ritebrand, Premium
+   Choice) - never a mix of Woolworths+Shoprite+SPAR+PnP+Checkers at once. Updated
+   `tests/test_catalog_worldgen.py`'s `count_estimate` calls for the new `(seed, scale)` signature.
+5. **Deliveries workspace had no drill-down** - the one delivery-exception row showed only
+   ordered/received/accepted/short-dated units and a "short" count, with no way to see ASN quantity,
+   over-delivery, rejected units, or the supplier fill rate (all already computed by the backend's
+   `delivery_reconciliation`, just never surfaced). Reported as "when there is an issue with delivery
+   you can't click the thing you're supposed to click to see what is really happening... that last
+   information you need to see." Fixed by making the row clickable (same `active`/`onSelect`
+   pattern the Products workspace already uses) to reveal a "Reconciliation detail" panel with the
+   remaining fields. Verified live: clicking the delivery row now expands ASN vs. receiving detail
+   and the supplier fill rate (67% in the running demo).
+6. Regenerated `capabilities/manifest.json` after each frontend/backend change (no route/tool shape
+   changed - just the id-generation helper, workspace rendering, and worldgen brand-pool logic).
+
+Verified: 454 tests passed, 3 skipped (Postgres integration tests, no `SHELFWISE_TEST_DATABASE_URL`
+set locally); `ruff check` clean; `tsc --noEmit` clean; manually drove the running dev app in-browser
+(products search, approval queue open/approve/reject, chat send, sidebar workspaces, settings panel)
+with no console errors.
+
+Not yet done / lower priority: full line-by-line review of the rest of `App.tsx` (3300+ lines) beyond
+the workspaces actually exercised above; a wider audit could still turn up more latent issues if asked
+to continue.
+
+## CURRENT UPDATE — disposable-droplet recovery and frontend pass — 2026-07-12
+
+Read this section before continuing. The worktree contained active application/frontend changes
+when this recovery pass began. They were preserved, tested, and are intended to be saved on
+`developers`; do not reset or discard them.
+
+### Recovery setup now implemented
+
+- `scripts/session_capsule.py` creates a safe recovery capsule and archive. It captures Git HEAD,
+  status, staged/unstaged binary diffs, untracked files, redacted environment metadata,
+  Python/pip, Docker, ROCm/GPU, apt, and systemd diagnostics, PostgreSQL/Redis exports when
+  configured, the complete `SHELFWISE_PERSIST_ROOT` contents except the capsule itself, training
+  runs/adapters, harness runs, generated data, uploads, logs, reports, and SHA-256 checksums.
+- The command has `create`, `verify`, and guarded `restore` subcommands. It never destroys a
+  Droplet or deletes an existing restore target. `--strict` fails when configured DB exports fail.
+- `src/shelfwise_runtime/paths.py` centralizes durable paths. Training, evaluation, benchmark
+  reports, and full-system harness artifacts honor the persistence root when configured.
+- Both Compose files bind Postgres, Redis, and `/app/persist` below
+  `${SHELFWISE_PERSIST_ROOT:-./persist}` instead of relying only on anonymous Docker volumes.
+  Redis AOF is enabled in the local Compose profile too.
+- Accepted voice/image uploads are content-addressed into `UPLOAD_DIR` when configured; the API
+  returns a safe `upload_ref`, never a machine path.
+- `.env.example` documents `/workspace/persist` for durable state and `/scratch` for rebuildable
+  Hugging Face, Torch, Triton, and temporary caches.
+
+### Exact capsule commands on the Droplet
+
+Run these before destroying or powering down the disposable environment. Do not run a destroy
+command from the application; destruction remains a manual, separately approved operation.
+
+```bash
+export SHELFWISE_PERSIST_ROOT=/workspace/persist
+export TRAINING_OUTPUT_DIR=/workspace/persist/training
+export HARNESS_RUN_DIR=/workspace/persist/harness/runs
+export TRACE_DIR=/workspace/persist/runtime/agent-traces
+export EVENT_STORE_DIR=/workspace/persist/runtime/events
+export UPLOAD_DIR=/workspace/persist/application-data/uploads
+export LOG_DIR=/workspace/persist/logs
+export HF_HOME=/scratch/huggingface
+export TORCH_HOME=/scratch/torch
+export TRITON_CACHE_DIR=/scratch/triton
+export TMPDIR=/scratch/tmp
+
+python scripts/session_capsule.py create \
+  --repo /workspace/shelfwise \
+  --root /workspace/persist \
+  --strict \
+  --archive /workspace/persist/capsules/shelfwise-session-$(date -u +%Y%m%dT%H%M%SZ).tar.zst
+```
+
+The command must exit successfully and print an empty `failures` list. Verify the capsule before
+downloading it:
+
+```bash
+python scripts/session_capsule.py verify /workspace/persist/capsules/shelfwise-session-<timestamp>
+sha256sum /workspace/persist/capsules/shelfwise-session-<timestamp>.tar.zst
+```
+
+Only after API/training shutdown, database dumps, Redis persistence, capsule creation, checksum
+verification, download, and local checksum verification have succeeded may the Droplet be
+destroyed. Restore into a new MI300X with:
+
+```bash
+python scripts/session_capsule.py restore shelfwise-session-<timestamp>.tar.zst \
+  --target /workspace/recovery
+```
+
+Then restore Postgres from `databases/postgres.dump` with `pg_restore` and restore Redis by
+placing `databases/redis.rdb` in the configured Redis data directory before starting Redis.
+Inspect the restored manifest and rerun application health, database row-count, latest decision/
+event ID, checkpoint readability, harness receipt, frontend connectivity, and AMD inference
+checks before resuming training. Do not resume training after a failed recovery check.
+
+### Frontend/application fixes in the current worktree
+
+- Operations lists now use generated product names and per-product delivery reconciliation,
+  rather than displaying only a hero SKU or a single delivery exception.
+- The attachment control advertises only implemented image and voice endpoints. PDF is no longer
+  offered as if it were supported.
+- Attachment failures show a safe user-facing message instead of raw exception text.
+- The backend persists accepted media when `UPLOAD_DIR` is configured.
+- Demo trigger IDs deduplicate repeated pending clicks but create a new occurrence after a prior
+  decision is resolved.
+- Chat offline delivery answers and the live delivery tool use the same generated-world data.
+- Current verification: `454 passed, 3 skipped`; Ruff clean; frontend typecheck and build pass.
+
+### Save state before credit exhaustion
+
+- Current branch is `developers`; only `main` and `developers` should remain.
+- Tracked changes still need to be reviewed, staged, committed, and pushed together with this
+  update. Do not stage existing untracked run artifacts unless intentionally packaging evidence.
+- Before the next cloud run, create the capsule and keep the archive off the Droplet.
+- Remaining external blockers are public `linux/amd64` image publication, actual AMD cloud
+  startup/latency receipt, and final merge to `main` after those proofs. Do not claim these are
+  complete from local tests.
+
 ## Active Objective — Track 3 Prescreen
 
 Track 3 requires all of the following:

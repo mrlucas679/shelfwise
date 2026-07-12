@@ -157,6 +157,23 @@ input {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .ui-icon {
   position: relative;
   display: block;
@@ -174,7 +191,9 @@ input {
 .ui-icon-stop::before,
 .ui-icon-sun::before,
 .ui-icon-moon::before,
-.ui-icon-moon::after {
+.ui-icon-moon::after,
+.ui-icon-attach::before,
+.ui-icon-attach::after {
   content: "";
   position: absolute;
   display: block;
@@ -242,6 +261,24 @@ input {
   left: 4px;
   width: 8px;
   height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ui-icon-attach::before {
+  top: 3px;
+  left: 7px;
+  width: 2px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ui-icon-attach::after {
+  top: 7px;
+  left: 3px;
+  width: 10px;
+  height: 2px;
   border-radius: 2px;
   background: currentColor;
 }

@@ -69,9 +69,9 @@ def test_taxonomy_integrity_and_breadth():
 
 
 def test_scale_profiles_grow_monotonically():
-    assert count_estimate("convenience") < count_estimate("supermarket")
-    assert count_estimate("supermarket") < count_estimate("hypermarket")
-    assert count_estimate("hypermarket") > 5_000
+    assert count_estimate(1, "convenience") < count_estimate(1, "supermarket")
+    assert count_estimate(1, "supermarket") < count_estimate(1, "hypermarket")
+    assert count_estimate(1, "hypermarket") > 5_000
 
 
 def test_assortment_spans_departments_and_is_deterministic():

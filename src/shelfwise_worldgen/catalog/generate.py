@@ -25,7 +25,7 @@ def generate_catalog(seed: int, *, scale: str = "supermarket") -> Iterator[Catal
     counter = 0
     for department, category, subcat in iter_subcats():
         rng = Random(_seed_int(seed, department.name, category.name, subcat.name))
-        brands = list(pool(subcat.brand_pool))
+        brands = list(pool(subcat.brand_pool, seed))
         rng.shuffle(brands)
         variants = rng.sample(_FLAVOURS, k=min(n_variant, len(_FLAVOURS)))
         loose = subcat.pack == "produce_wt"
@@ -62,7 +62,7 @@ def generate_catalog(seed: int, *, scale: str = "supermarket") -> Iterator[Catal
                     )
 
 
-def count_estimate(scale: str = "supermarket") -> int:
+def count_estimate(seed: int, scale: str = "supermarket") -> int:
     """Estimate how many products a scale profile will generate."""
     if scale not in SCALE:
         raise ValueError(f"unknown catalog scale: {scale}")
@@ -70,7 +70,7 @@ def count_estimate(scale: str = "supermarket") -> int:
     total = 0
     for _department, _category, subcat in iter_subcats():
         total += (
-            min(n_brand, len(pool(subcat.brand_pool)))
+            min(n_brand, len(pool(subcat.brand_pool, seed)))
             * n_variant
             * min(n_pack, len(PACKS[subcat.pack]))
         )

@@ -4,6 +4,7 @@ import hashlib
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -97,11 +98,15 @@ def build_voice_router(*, api_key: str | None = None) -> APIRouter:
             filename=file.filename or "speech.webm",
         )
         candidate = to_event_candidate(transcript)
-        return {
+        result = {
             "text": transcript.text,
             "intent": candidate.intent.value,
             "requires_human_review": candidate.requires_human_review,
         }
+        upload_ref = _persist_upload(audio, file.filename or "speech.webm")
+        if upload_ref:
+            result["upload_ref"] = upload_ref
+        return result
 
     @router.post("/out")
     async def voice_out(body: VoiceOutBody) -> Response:
@@ -160,7 +165,11 @@ def build_scan_router(*, api_key: str | None = None) -> APIRouter:
             image,
             image_ref=SourceRef.dataset("image", file.filename or "upload"),
         )
-        return evidence.model_dump(mode="json")
+        result = evidence.model_dump(mode="json")
+        upload_ref = _persist_upload(image, file.filename or "upload")
+        if upload_ref:
+            result["upload_ref"] = upload_ref
+        return result
 
     return router
 
@@ -173,6 +182,25 @@ def _looks_like_audio(head: bytes) -> bool:
 def _looks_like_image(head: bytes) -> bool:
     """Sniff known image containers instead of trusting MIME or filename."""
     return head[8:12] == b"WEBP" or any(head.startswith(magic) for magic in _IMAGE_MAGIC)
+
+
+def _persist_upload(content: bytes, filename: str) -> str | None:
+    """Persist accepted media under UPLOAD_DIR using a content-addressed safe filename."""
+    raw_dir = os.getenv("UPLOAD_DIR", "").strip()
+    if not raw_dir:
+        return None
+    suffix = Path(filename).suffix.lower()
+    suffix = (
+        suffix
+        if suffix.startswith(".") and suffix[1:].isalnum() and len(suffix) <= 8
+        else ".bin"
+    )
+    digest = hashlib.sha256(content).hexdigest()
+    target = Path(raw_dir).expanduser() / f"{digest}{suffix}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.write_bytes(content)
+    return target.name
 
 
 def _scan_event_candidate(body: BarcodeScanBody, *, tenant_id: str) -> dict[str, object]:

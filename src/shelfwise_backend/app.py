@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -1416,11 +1417,37 @@ def process_one_worker_event() -> dict[str, object]:
 _DEMO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
+def _demo_occurrence_suffix(key: str, *, id_prefix: str) -> str:
+    """Resolve a stable-but-not-stuck suffix for a demo trigger keyed by (tenant, type, sku, day).
+
+    Repeated clicks against a still-pending decision for this key must reuse its id (upsert in
+    place) so the approval queue does not grow one identical duplicate card per click. But once
+    that decision is resolved (approved/rejected), a further trigger for the same key is a
+    genuinely new occurrence and must get a new id, not resurrect the resolved one. We walk an
+    occurrence counter and stop at the first slot that is either free or still pending.
+    """
+    occurrence = 0
+    while True:
+        suffix = hashlib.sha256(f"{key}:{occurrence}".encode()).hexdigest()[:12]
+        decision_id = f"dec_{id_prefix}_{suffix}"
+        existing = decision_store.get(decision_id)
+        if existing is None or (existing.get("status") or "pending").lower() == "pending":
+            return suffix
+        occurrence += 1
+
+
 def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
-    """Create a tenant-owned trigger from the tenant's generated world facts."""
-    suffix = uuid4().hex[:12]
+    """Create a tenant-owned trigger from the tenant's generated world facts.
+
+    The id is derived deterministically from (tenant, event type, sku, day) rather than a
+    random uuid - see `_demo_occurrence_suffix` for why repeated clicks dedupe while a new
+    occurrence after resolution still gets a fresh id.
+    """
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
     supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
+    today = datetime.now(UTC).date().isoformat()
+    key = f"{ctx.tenant_id}:{event_type.value}:{scenario.sku}:{today}"
+    suffix = _demo_occurrence_suffix(key, id_prefix=f"evt_demo_{event_type.value}")
     return Event(
         id=f"evt_demo_{event_type.value}_{suffix}",
         type=event_type,
@@ -1461,9 +1488,11 @@ def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
 @app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
 def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a generated-world supplier recall through the real event and HITL pipeline."""
-    suffix = uuid4().hex[:12]
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
     supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
+    today = datetime.now(UTC).date().isoformat()
+    key = f"{ctx.tenant_id}:recall:{scenario.sku}:{today}"
+    suffix = _demo_occurrence_suffix(key, id_prefix="evt_demo_recall")
     event = Event(
         id=f"evt_demo_recall_{suffix}",
         type=EventType.RECALL_NOTICE,
@@ -1492,8 +1521,10 @@ def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
 @app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
 def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     """Drive a generated-world shrink count through the real event and HITL pipeline."""
-    suffix = uuid4().hex[:12]
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
+    today = datetime.now(UTC).date().isoformat()
+    key = f"{ctx.tenant_id}:inventory_exception:{scenario.sku}:{today}"
+    suffix = _demo_occurrence_suffix(key, id_prefix="evt_demo_inventory_exception")
     counted_units = max(0, scenario.units_on_hand - max(1, scenario.units_on_hand // 10))
     event = Event(
         id=f"evt_demo_inventory_exception_{suffix}",

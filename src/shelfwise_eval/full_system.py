@@ -25,6 +25,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from shelfwise_contracts import Event, EventType
+from shelfwise_runtime import durable_dir
 from shelfwise_worldgen.scenarios import SCENARIOS, build
 from shelfwise_worldgen.world import (
     EVENT_TYPE_ROUTES,
@@ -353,7 +354,12 @@ class _FullSystemDriver:
         self.event_contract: dict[str, Any] = {}
         self._request_index = 0
         self._processed_decisions: set[str] = set()
-        self._artifact_dir = Path(config.artifact_dir) if config.artifact_dir else None
+        if config.artifact_dir:
+            self._artifact_dir = Path(config.artifact_dir)
+        elif os.getenv("SHELFWISE_PERSIST_ROOT", "").strip():
+            self._artifact_dir = durable_dir("HARNESS_RUN_DIR", "harness/runs") / self.run_id
+        else:
+            self._artifact_dir = None
         self._trail_path = self._artifact_path("decision_trail.jsonl")
         self._cycles_path = self._artifact_path("cycles.jsonl")
         self._prepare_artifacts()

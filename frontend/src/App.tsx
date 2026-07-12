@@ -70,6 +70,7 @@ type FefoBatch = {
 type StoreIntelligence = {
   batch_split?: {
     sku?: string
+    product_name?: string
     total_units?: number
     priority_sell_units?: number
     normal_units?: number
@@ -79,6 +80,7 @@ type StoreIntelligence = {
   }
   delivery_reconciliation?: {
     sku?: string
+    product_name?: string
     ordered_units?: number
     asn_units?: number
     received_units?: number
@@ -93,6 +95,7 @@ type StoreIntelligence = {
   }
   supplier_cover?: {
     sku?: string
+    product_name?: string
     units_on_hand?: number
     forecast_daily_units?: string
     supplier_lead_time_days?: string
@@ -151,6 +154,24 @@ type ProductCatalogItem = {
   shelf_location?: string
   storage_requirements?: string
 }
+/** One individual delivery's receiving record - by real product name, never just a SKU code. */
+type DeliveryException = {
+  sku?: string
+  product_name?: string
+  category?: string
+  supplier?: string
+  ordered_units?: number
+  asn_units?: number
+  received_units?: number
+  accepted_units?: number
+  rejected_units?: number
+  missing_units?: number
+  over_units?: number
+  short_dated_units?: number
+  supplier_fill_rate?: string
+  status?: string
+  conclusion?: string
+}
 type ProductAttentionPayload = {
   limit?: number
   truncated?: boolean
@@ -159,6 +180,7 @@ type ProductAttentionPayload = {
   sell_first?: ProductCatalogItem[]
   to_order?: ProductCatalogItem[]
   expiring?: ProductCatalogItem[]
+  deliveries?: DeliveryException[]
 }
 type ProductSearchPayload = {
   query?: string
@@ -265,7 +287,7 @@ type WorkspaceOpenOptions = { query?: string }
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
 type ChatReply = { answer: string; conversationId: string; messageId: string }
 type AgenticRunStatus = { state: 'running' | 'ok' | 'error'; detail: string }
-type UiIconName = 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
+type UiIconName = 'attach' | 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
 declare global {
   interface Window {
@@ -385,6 +407,30 @@ async function postChat(
     }
   }
   throw new Error(`Could not reach /chat. ${lastError}`)
+}
+/** Upload one attachment (image or audio) to its real scan/voice endpoint - no Content-Type
+ * header, so the browser sets the multipart boundary itself. */
+async function postAttachment(path: string, file: File, signal: AbortSignal): Promise<JsonObject> {
+  const formData = new FormData()
+  formData.append('file', file)
+  let lastError = 'Unknown error'
+  for (const url of requestUrls(path)) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json', ...authHeaders() },
+        body: formData,
+        signal,
+      })
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'HTTP error'}`.trim())
+      return (await res.json()) as JsonObject
+    } catch (error) {
+      if (signal.aborted) throw error
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  throw new Error(`Could not reach ${path}. ${lastError}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,7 +1404,7 @@ function Sidebar({
   if (cover?.sku) {
     fallbackAttentionProducts.push({
       sku: cover.sku,
-      name: humanizeOperationalText(cover.sku),
+      name: cover.product_name ?? humanizeOperationalText(cover.sku),
       category: 'Replenishment risk',
       on_hand: cover.units_on_hand,
       requires_attention: true,
@@ -1890,6 +1936,7 @@ function WorkspaceScreen({
   const [catalogSearchReceipt, setCatalogSearchReceipt] = useState<ProductSearchPayload | null>(null)
   const [catalogSearchState, setCatalogSearchState] = useState<LoadState>('idle')
   const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null)
+  const [selectedDeliverySku, setSelectedDeliverySku] = useState<string | null>(null)
   const intel = data?.store_intelligence
   const cover = intel?.supplier_cover
   const coverDays = daysNumber(cover?.days_of_supply)
@@ -1902,8 +1949,21 @@ function WorkspaceScreen({
   const sellFirstUnits = apiSellFirstUnits || Number(batch?.priority_sell_units ?? 0)
   const sellFirstProducts = apiSellFirstItems.length || (batch && sellFirstUnits > 0 ? 1 : 0)
   const blockedUnits = apiBlockedUnits || Number(batch?.blocked_units ?? 0)
+  // The full replenishment queue (matches the sidebar's "N products" badge). Falls back to the
+  // single hero-SKU supplier-cover line only when the real list hasn't loaded, mirroring how
+  // "Sell first" prefers apiSellFirstItems over the single `batch` object below.
+  const apiToOrderItems = asArray<ProductCatalogItem>(ops.productAttention.to_order)
+  const toOrderProducts = apiToOrderItems.length || (cover?.transfer_units_recommended ? 1 : 0)
   const orderLines = cover?.transfer_units_recommended ? [cover] : []
-  const deliveryIssues = Number(delivery?.missing_units ?? 0) > 0 ? 1 : 0
+  // Every individual delivery exception (matches the real per-tenant receiving records), not
+  // just the one hero-SKU reconciliation - falls back to that single line only when empty.
+  const apiDeliveries = asArray<DeliveryException>(ops.productAttention.deliveries)
+  const deliveryIssues = apiDeliveries.length
+    ? apiDeliveries.filter((item) => Number(item.missing_units ?? 0) > 0).length
+    : Number(delivery?.missing_units ?? 0) > 0
+      ? 1
+      : 0
+  const selectedDelivery = apiDeliveries.find((item) => item.sku === selectedDeliverySku) ?? null
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true
   const coldChainValue = data?.scenario === 'cold_chain' || ops.coldChainEvents.length ? 'review' : coldRunning ? 'live' : coldEnabled ? 'armed' : 'clear'
@@ -1978,7 +2038,7 @@ function WorkspaceScreen({
   if (!apiAttentionItems.length && cover?.sku) {
     attentionProductItems.push({
       sku: cover.sku,
-      name: humanizeOperationalText(cover.sku),
+      name: cover.product_name ?? humanizeOperationalText(cover.sku),
       category: 'Replenishment risk',
       on_hand: cover.units_on_hand,
       requires_attention: true,
@@ -1989,7 +2049,7 @@ function WorkspaceScreen({
   if (!apiAttentionItems.length && batch?.sku && sellFirstProducts) {
     attentionProductItems.push({
       sku: batch.sku,
-      name: humanizeOperationalText(batch.sku),
+      name: batch.product_name ?? humanizeOperationalText(batch.sku),
       category: 'FEFO exception',
       requires_attention: true,
       attention_reasons: ['sell_first'],
@@ -2016,12 +2076,12 @@ function WorkspaceScreen({
   const selectedProductBatches = selectedProduct ? asArray<FefoBatch>(selectedProduct.fefo_batches) : []
   const productResultTitle = productQuery.trim() ? 'Catalogue results' : 'Attention products'
   const productResultCount = catalogSearchState === 'loading' ? 'searching' : pluralLabel(productResultRows.length, 'shown', 'shown')
+  // The backend now serves the whole generated world directly - no separate seed/synthetic
+  // split or scan-budget layer, so the receipt reports the real counts it actually returns:
+  // how many matches came back and whether the result set was capped by `limit`.
   const catalogSourceCounts = asObject(catalogSearchReceipt?.source_counts)
-  const catalogScanned = fieldNumber(catalogSourceCounts, 'synthetic_scanned')
-  const catalogScanBudget = fieldNumber(catalogSourceCounts, 'synthetic_scan_budget')
-  const catalogTotalEstimate = fieldNumber(catalogSourceCounts, 'synthetic_total_estimate')
-  const catalogSeedMatches = fieldNumber(catalogSourceCounts, 'seed')
-  const catalogSyntheticMatches = fieldNumber(catalogSourceCounts, 'synthetic_catalog')
+  const catalogMatches = fieldNumber(catalogSourceCounts, 'generated_world')
+  const catalogScanned = catalogMatches || catalogResults.length
   const searchReceiptVisible = Boolean(productQuery.trim() && catalogSearchReceipt)
   const connectorRows: ConnectorSystemRow[] = ops.tenantConnectors.length
     ? ops.tenantConnectors
@@ -2060,7 +2120,7 @@ function WorkspaceScreen({
         <WorkspaceMetric label="Catalogue results" value={catalogSearchState === 'loading' ? 'loading' : String(productResultRows.length)} tone={catalogSearchState === 'error' ? 'warn' : undefined} />
         <WorkspaceMetric
           label="Scan window"
-          value={catalogScanBudget ? `${catalogScanned}/${catalogScanBudget}` : 'attention'}
+          value={catalogSearchReceipt ? String(catalogScanned) : 'attention'}
           tone={catalogSearchReceipt?.truncated ? 'info' : undefined}
         />
       </div>
@@ -2107,16 +2167,16 @@ function WorkspaceScreen({
         <WorkspaceSection title="Search receipt">
           <div className="workspace-list">
             <WorkspaceRow
-              label="Bounded catalogue scan"
-              meta={catalogTotalEstimate ? `${catalogScanned} of ${catalogTotalEstimate} generated rows scanned` : `${catalogScanned} rows scanned`}
-              detail="Attention products are ranked first, then ShelfWise caps the demo catalogue scan so product lookup stays fast at large catalogue sizes."
+              label="Generated-world scan"
+              meta={`${pluralLabel(catalogScanned, 'match', 'matches')} returned`}
+              detail="Attention products are ranked first; the generated world is the whole catalogue, so this is a live query against it, not a synthetic sample."
               value={catalogSearchReceipt?.truncated ? 'truncated' : 'complete'}
               tone={catalogSearchReceipt?.truncated ? 'info' : 'ok'}
             />
             <WorkspaceRow
-              label="Source mix"
-              meta={`${catalogSeedMatches} seed matches · ${catalogSyntheticMatches} catalogue matches`}
-              detail={`Result limit ${formatValue(catalogSearchReceipt?.limit ?? 20)}`}
+              label="Query"
+              meta={`Result limit ${formatValue(catalogSearchReceipt?.limit ?? 20)}`}
+              detail="Every row comes from the tenant's generated world - no seed or synthetic-catalogue blend."
               value={formatLabel(catalogSearchReceipt?.query ?? productQuery)}
             />
           </div>
@@ -2178,13 +2238,26 @@ function WorkspaceScreen({
   )
 
   const renderToOrder = () => (
-    <WorkspaceSection title="Worst first" count={orderLines.length ? pluralLabel(orderLines.length, 'product') : 'clear'}>
-      {orderLines.length ? (
+    <WorkspaceSection title="Worst first" count={toOrderProducts ? pluralLabel(toOrderProducts, 'product') : 'clear'}>
+      {apiToOrderItems.length ? (
+        <div className="workspace-list">
+          {apiToOrderItems.map((item, index) => (
+            <WorkspaceRow
+              key={productKey(item, index)}
+              label={productTitle(item)}
+              meta={productMeta(item)}
+              detail={productDetail(item)}
+              value={productValue(item)}
+              tone={productTone(item) ?? 'warn'}
+            />
+          ))}
+        </div>
+      ) : orderLines.length ? (
         <div className="workspace-list">
           {orderLines.map((line) => (
             <WorkspaceRow
               key={line.sku}
-              label={humanizeOperationalText(line.sku ?? 'Product')}
+              label={line.product_name ?? humanizeOperationalText(line.sku ?? 'Product')}
               meta={line.conclusion}
               detail={[
                 line.units_on_hand != null ? `${formatValue(line.units_on_hand)} on hand` : null,
@@ -2227,7 +2300,7 @@ function WorkspaceScreen({
           </div>
         ) : batch ? (
           <WorkspaceRow
-            label={humanizeOperationalText(batch.sku ?? 'Product')}
+            label={batch.product_name ?? humanizeOperationalText(batch.sku ?? 'Product')}
             meta={batch.conclusion}
             detail={`${formatValue(batch.normal_units)} normal · ${formatValue(batch.blocked_units)} blocked · ${formatValue(batch.total_units)} total`}
             value={`${formatValue(batch.priority_sell_units)} sell first`}
@@ -2292,26 +2365,76 @@ function WorkspaceScreen({
   )
 
   const renderDeliveries = () => (
-    <WorkspaceSection title="Problem purchase orders" count={deliveryIssues ? pluralLabel(deliveryIssues, 'issue') : 'clear'}>
-      {delivery ? (
-        <div className="workspace-list">
-          <WorkspaceRow
-            label={humanizeOperationalText(delivery.sku ?? 'Purchase order')}
-            meta={delivery.conclusion}
-            detail={[
-              `${formatValue(delivery.ordered_units)} ordered`,
-              `${formatValue(delivery.received_units)} received`,
-              `${formatValue(delivery.accepted_units)} accepted`,
-              `${formatValue(delivery.short_dated_units)} short dated`,
-            ].join(' · ')}
-            value={deliveryIssues ? `${formatValue(delivery.missing_units)} short` : formatLabel(delivery.status ?? 'clear')}
-            tone={deliveryIssues ? 'warn' : 'ok'}
-          />
-        </div>
-      ) : (
-        <WorkspaceEmpty>No delivery exception is active.</WorkspaceEmpty>
-      )}
-    </WorkspaceSection>
+    <>
+      <WorkspaceSection title="Problem purchase orders" count={deliveryIssues ? pluralLabel(deliveryIssues, 'issue') : 'clear'}>
+        {apiDeliveries.length ? (
+          <div className="workspace-list">
+            {apiDeliveries.map((item, index) => {
+              const issue = Number(item.missing_units ?? 0) > 0
+              return (
+                <WorkspaceRow
+                  key={item.sku ?? index}
+                  label={item.product_name ?? humanizeOperationalText(item.sku ?? 'Purchase order')}
+                  meta={item.conclusion}
+                  detail={[
+                    `SKU ${item.sku ?? '-'}`,
+                    `${formatValue(item.ordered_units)} ordered`,
+                    `${formatValue(item.received_units)} received`,
+                    `${formatValue(item.accepted_units)} accepted`,
+                  ].join(' · ')}
+                  value={issue ? `${formatValue(item.missing_units)} short` : formatLabel(item.status ?? 'clear')}
+                  tone={issue ? 'warn' : 'ok'}
+                  active={selectedDeliverySku === item.sku}
+                  onSelect={() => setSelectedDeliverySku((v) => (v === item.sku ? null : item.sku ?? null))}
+                />
+              )
+            })}
+          </div>
+        ) : delivery ? (
+          <div className="workspace-list">
+            <WorkspaceRow
+              label={delivery.product_name ?? humanizeOperationalText(delivery.sku ?? 'Purchase order')}
+              meta={delivery.conclusion}
+              detail={[
+                `${formatValue(delivery.ordered_units)} ordered`,
+                `${formatValue(delivery.received_units)} received`,
+                `${formatValue(delivery.accepted_units)} accepted`,
+                `${formatValue(delivery.short_dated_units)} short dated`,
+              ].join(' · ')}
+              value={deliveryIssues ? `${formatValue(delivery.missing_units)} short` : formatLabel(delivery.status ?? 'clear')}
+              tone={deliveryIssues ? 'warn' : 'ok'}
+            />
+          </div>
+        ) : (
+          <WorkspaceEmpty>No delivery exception is active.</WorkspaceEmpty>
+        )}
+      </WorkspaceSection>
+      {selectedDelivery ? (
+        <WorkspaceSection title={`${selectedDelivery.product_name ?? 'Delivery'} - reconciliation detail`}>
+          <div className="workspace-list">
+            <WorkspaceRow
+              label="ASN vs receiving"
+              meta={`${formatValue(selectedDelivery.asn_units)} on the advance shipping notice`}
+              detail={[
+                `${formatValue(selectedDelivery.received_units)} physically received`,
+                `${formatValue(selectedDelivery.over_units)} over-delivered`,
+                `${formatValue(selectedDelivery.rejected_units)} rejected`,
+                `${formatValue(selectedDelivery.short_dated_units)} short dated`,
+              ].join(' · ')}
+              value={formatLabel(selectedDelivery.status ?? 'clear')}
+              tone={Number(selectedDelivery.missing_units ?? 0) > 0 ? 'warn' : 'ok'}
+            />
+            <WorkspaceRow
+              label="Supplier fill rate"
+              meta="Accepted units versus units ordered, this delivery"
+              detail={selectedDelivery.conclusion}
+              value={selectedDelivery.supplier_fill_rate ? `${formatValue(Number(selectedDelivery.supplier_fill_rate) * 100)}%` : '-'}
+              tone={Number(selectedDelivery.missing_units ?? 0) > 0 ? 'warn' : 'ok'}
+            />
+          </div>
+        </WorkspaceSection>
+      ) : null}
+    </>
   )
 
   const renderColdChain = () => (
@@ -2807,9 +2930,20 @@ const QUICK_ACTIONS: QuickAction[] = [
   { label: "What's at risk today?", run: ({ send }) => send("What's at risk today?") },
 ]
 
-function Composer({ onSend, onOpenApprovals }: { onSend: (text: string) => void; onOpenApprovals: () => void }) {
+function Composer({
+  onSend,
+  onOpenApprovals,
+  onAttach,
+  attaching,
+}: {
+  onSend: (text: string) => void
+  onOpenApprovals: () => void
+  onAttach: (file: File) => void
+  attaching: boolean
+}) {
   const [text, setText] = useState('')
   const voice = useVoiceInput((t) => setText((prev) => (prev ? `${prev} ${t}` : t)))
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const send = (value: string) => {
     const trimmed = value.trim()
     if (!trimmed) return
@@ -2831,6 +2965,29 @@ function Composer({ onSend, onOpenApprovals }: { onSend: (text: string) => void;
         ))}
       </div>
       <div className="composer-row">
+        {/* One button covers the two media types currently wired to backend endpoints. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="visually-hidden"
+          accept="image/*,audio/*"
+          aria-hidden
+          tabIndex={-1}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''
+            if (file) onAttach(file)
+          }}
+        />
+        <button
+          className="icon-btn attach"
+          type="button"
+          aria-label="Attach a picture or voice recording"
+          disabled={attaching}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <UiIcon name="attach" />
+        </button>
         {voice.supported ? (
           <button
             className={`icon-btn mic ${voice.listening ? 'is-live' : ''}`}
@@ -2845,7 +3002,7 @@ function Composer({ onSend, onOpenApprovals }: { onSend: (text: string) => void;
         <input
           className="composer-input"
           value={text}
-          placeholder={voice.listening ? 'Listening...' : 'Ask ShelfWise...'}
+          placeholder={voice.listening ? 'Listening...' : attaching ? 'Reading attachment...' : 'Ask ShelfWise...'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') send(text)
@@ -2891,8 +3048,10 @@ function App() {
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [activeWorkspace, setActiveWorkspace] = useState<{ surface: WorkspaceSurface; query?: string } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [attaching, setAttaching] = useState(false)
   const transitionCtrl = useRef<AbortController | null>(null)
   const chatCtrl = useRef<AbortController | null>(null)
+  const attachCtrl = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const queue = useMemo(() => pendingQueue(decisions, data?.decision), [decisions, data])
@@ -3041,6 +3200,7 @@ function App() {
   useEffect(() => () => {
     transitionCtrl.current?.abort()
     chatCtrl.current?.abort()
+    attachCtrl.current?.abort()
   }, [])
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -3102,6 +3262,50 @@ function App() {
         setMessages((prev) => prev.map((message) => (
           message.id === assistantId ? { ...message, text: fallback } : message
         )))
+      })
+  }
+
+  // Attachments are routed only to endpoints that are implemented and validated by the backend.
+  const handleAttach = (file: File) => {
+    const assistantId = newMsgId()
+    setMessages((prev) => [
+      ...prev,
+      { id: newMsgId(), role: 'user', text: `Attached: ${file.name || 'file'}` },
+      { id: assistantId, role: 'assistant', text: 'Reading the attachment...' },
+    ])
+    const finish = (text: string) => {
+      setMessages((prev) => prev.map((message) => (message.id === assistantId ? { ...message, text } : message)))
+      setAttaching(false)
+    }
+    const path = file.type.startsWith('image/') ? '/scan/image' : file.type.startsWith('audio/') ? '/voice/in' : ''
+    if (!path) {
+      finish(`I don't recognise "${file.type || 'that file type'}" - try a picture or a voice recording.`)
+      return
+    }
+    attachCtrl.current?.abort()
+    const controller = new AbortController()
+    attachCtrl.current = controller
+    setAttaching(true)
+    postAttachment(path, file, controller.signal)
+      .then((result) => {
+        if (path === '/voice/in') {
+          const heard = typeof result.text === 'string' ? result.text : ''
+          finish(heard ? `I heard: "${heard}". Intent: ${formatLabel(result.intent)}.` : 'I could not make out any speech in that recording.')
+          return
+        }
+        const skuCandidate = typeof result.sku_candidate === 'string' ? result.sku_candidate : null
+        const ocrText = typeof result.ocr_text === 'string' ? result.ocr_text : ''
+        const expiry = typeof result.expiry_date === 'string' ? result.expiry_date : null
+        const parts = [
+          skuCandidate ? `possible SKU ${skuCandidate}` : 'no SKU match',
+          ocrText ? `text read: "${ocrText}"` : null,
+          expiry ? `expiry read: ${expiry}` : null,
+        ].filter(Boolean)
+        finish(`Scanned the image - ${parts.join(', ')}. This needs a human check before it's used.`)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        finish('I could not process that attachment. Check the file type and try again.')
       })
   }
 
@@ -3309,7 +3513,7 @@ function App() {
                 </div>
               </main>
 
-              <Composer onSend={send} onOpenApprovals={openApprovals} />
+              <Composer onSend={send} onOpenApprovals={openApprovals} onAttach={handleAttach} attaching={attaching} />
 
               {approvalOpen ? (
                 <div className="approval-scrim is-open" onClick={() => setApprovalOpen(false)}>

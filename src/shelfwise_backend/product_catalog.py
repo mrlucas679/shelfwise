@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from typing import Any
 
+from .retail_intelligence import DeliveryReceipt, reconcile_delivery
 from .world_facts import WorldFactsProvider
 
 DEFAULT_PRODUCT_LIMIT = 20
@@ -29,6 +30,7 @@ def product_attention_queue(
     sell_first = [item for item in ordered if "sell_first" in item["attention_reasons"]]
     to_order = [item for item in ordered if "low_stock" in item["attention_reasons"]]
     expiring = [item for item in ordered if "expiring" in item["attention_reasons"]]
+    deliveries = [_delivery_exception(item) for item in to_order]
 
     return {
         "limit": bounded_limit,
@@ -38,12 +40,47 @@ def product_attention_queue(
             "sell_first_products": len(sell_first),
             "to_order_products": len(to_order),
             "expiring_products": len(expiring),
+            "delivery_issues": sum(1 for d in deliveries if d["missing_units"] > 0),
         },
         "items": ordered[:bounded_limit],
         "sell_first": sell_first[:bounded_limit],
         "to_order": to_order[:bounded_limit],
         "expiring": expiring[:bounded_limit],
+        "deliveries": deliveries[:bounded_limit],
     }
+
+
+def get_delivery_exception(
+    *, facts: WorldFactsProvider, tenant_id: str, sku: str, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """The individual delivery reconciliation for one SKU, by real name - not just a code."""
+    for item in _world_product_items(facts, tenant_id=tenant_id, now=now):
+        if item["sku"] == sku:
+            return _delivery_exception(item) if "low_stock" in item["attention_reasons"] else None
+    return None
+
+
+def _delivery_exception(item: dict[str, Any]) -> dict[str, Any]:
+    """A real, per-product delivery reconciliation - every under-stocked product gets its own
+    receiving record instead of the whole store sharing one hero SKU's delivery status."""
+    reorder_point = int(item["reorder_point"])
+    ordered_units = max(reorder_point * 3, 1)
+    received_units = max(0, ordered_units - reorder_point)
+    reconciliation = reconcile_delivery(
+        DeliveryReceipt(
+            sku=item["sku"],
+            ordered_units=ordered_units,
+            asn_units=ordered_units,
+            received_units=received_units,
+            accepted_units=received_units,
+            short_dated_units=0,
+        )
+    )
+    payload = reconciliation.to_dict()
+    payload["product_name"] = item["name"]
+    payload["category"] = item["category"]
+    payload["supplier"] = item["supplier"]
+    return payload
 
 
 def search_product_catalog(

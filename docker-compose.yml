@@ -14,7 +14,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}/runtime-volumes/postgres:/var/lib/postgresql/data
       - ./src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro
     healthcheck:
@@ -26,6 +26,9 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}/runtime-volumes/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -58,6 +61,15 @@ services:
       REDIS_URL: redis://redis:6379/0
       MULTIMODAL_ENABLED: "false"
       WORKER_ENABLED: "false"
+      SHELFWISE_PERSIST_ROOT: /app/persist
+      TRAINING_OUTPUT_DIR: /app/persist/training
+      HARNESS_RUN_DIR: /app/persist/harness/runs
+      TRACE_DIR: /app/persist/runtime/agent-traces
+      EVENT_STORE_DIR: /app/persist/runtime/events
+      UPLOAD_DIR: /app/persist/application-data/uploads
+      LOG_DIR: /app/persist/logs
+    volumes:
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}:/app/persist
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,6 +93,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-volumes:
-  postgres-data:

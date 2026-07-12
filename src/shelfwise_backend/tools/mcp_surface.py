@@ -22,6 +22,7 @@ from shelfwise_decision_science import (
     simulate_markdown,
 )
 
+from ..product_catalog import get_delivery_exception
 from ..world_facts import WorldFactsProvider
 
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
@@ -176,9 +177,20 @@ def build_platform_tools(
             "method": result.method,
         }
 
-    async def get_expiry_risk(sku: str | None = None) -> dict[str, Any]:
-        audit_log.record(tool="get_expiry_risk", tenant_id=tenant_id, args={"sku": sku})
+    async def get_expiry_risk(
+        sku: str | None = None, days_to_expiry: int | None = None
+    ) -> dict[str, Any]:
+        audit_log.record(
+            tool="get_expiry_risk",
+            tenant_id=tenant_id,
+            args={"sku": sku, "days_to_expiry": days_to_expiry},
+        )
         scenario = facts.get_scenario_facts(tenant_id, sku)
+        expiry_days = (
+            Decimal(str(days_to_expiry))
+            if days_to_expiry is not None
+            else Decimal(scenario.days_to_expiry)
+        )
         demand = forecast_demand(
             sku=scenario.sku,
             recent_daily_units=list(scenario.recent_daily_units),
@@ -192,7 +204,7 @@ def build_platform_tools(
         result = score_expiry_risk(
             sku=scenario.sku,
             units_on_hand=Decimal(scenario.units_on_hand),
-            days_to_expiry=Decimal(scenario.days_to_expiry),
+            days_to_expiry=expiry_days,
             forecast_daily_units=demand.daily_units,
             unit_cost=scenario.unit_cost,
             cold_chain_risk=cold.risk,
@@ -200,9 +212,11 @@ def build_platform_tools(
         )
         return {
             "sku": scenario.sku,
+            "days_to_expiry": str(expiry_days),
             "risk": str(result.risk),
             "waste_units": str(result.waste_units),
             "zar_at_risk": result.zar_at_risk.to_dict(),
+            "forecast_daily_units": str(demand.daily_units),
             "method": result.method,
         }
 
@@ -343,6 +357,24 @@ def build_platform_tools(
             "method": "catalog_price_integrity",
         }
 
+    async def get_delivery_status(sku: str | None = None) -> dict[str, Any]:
+        """What a specific delivery for one SKU actually looks like: ordered vs. received vs.
+        accepted, short/over/rejected units, and the resulting supplier fill rate - by real
+        product name, not just a code, so an operator asking "what's expected from this
+        delivery" gets the same individual receiving record the Deliveries workspace shows."""
+        audit_log.record(tool="get_delivery_status", tenant_id=tenant_id, args={"sku": sku})
+        resolved_sku = sku or facts.get_hero_sku(tenant_id)
+        exception = get_delivery_exception(facts=facts, tenant_id=tenant_id, sku=resolved_sku)
+        if exception is not None:
+            return exception
+        scenario = facts.get_scenario_facts(tenant_id, resolved_sku)
+        return {
+            "sku": scenario.sku,
+            "product_name": scenario.product_name,
+            "status": "no_exception",
+            "conclusion": f"{scenario.product_name} has no open delivery exception right now.",
+        }
+
     return [
         PlatformTool("get_stock", "Read current stock context for one SKU.", True, get_stock),
         PlatformTool("get_thresholds", "Read learned threshold memory.", True, get_thresholds),
@@ -406,6 +438,12 @@ def build_platform_tools(
             "Check an observed till price against the catalogue price for one SKU.",
             True,
             check_price_integrity,
+        ),
+        PlatformTool(
+            "get_delivery_status",
+            "Read the individual delivery reconciliation for one SKU, by real product name.",
+            True,
+            get_delivery_status,
         ),
     ]
 

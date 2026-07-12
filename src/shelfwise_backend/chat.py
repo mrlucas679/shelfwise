@@ -21,7 +21,7 @@ from shelfwise_inference.tool_calling import (
 )
 from shelfwise_worldgen import create_world_snapshot_store
 
-from .product_catalog import search_product_catalog
+from .product_catalog import get_delivery_exception, search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
 from .tools.mcp_surface import AuditLog, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
@@ -204,7 +204,14 @@ def build_chat_reply_with_meta(
         if live_required:
             raise InferenceError("live chat requires configured inference credentials")
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     prompt = (
@@ -232,7 +239,14 @@ def build_chat_reply_with_meta(
             if live_required:
                 raise InferenceError(f"live agentic chat failed: {exc}") from exc
             return (
-                _offline_reply(question=question, state=state, subject=subject, product=product),
+                _offline_reply(
+                    question=question,
+                    state=state,
+                    subject=subject,
+                    product=product,
+                    facts=resolved_facts,
+                    tenant_id=tenant_id,
+                ),
                 meta,
             )
         meta["answer_source"] = "model"
@@ -262,7 +276,14 @@ def build_chat_reply_with_meta(
         if live_required:
             raise
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     if live_required and not result.used_network:
@@ -272,7 +293,14 @@ def build_chat_reply_with_meta(
         if live_required:
             raise InferenceError("live chat received an empty inference result")
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     meta["answer_source"] = "model"
@@ -374,6 +402,8 @@ def _offline_reply(
     state: dict[str, Any],
     subject: str = "",
     product: dict[str, Any] | None = None,
+    facts: WorldFactsProvider | None = None,
+    tenant_id: str = "",
 ) -> str:
     """Deterministic local answer for offline-safe development and tests."""
     grounding = ""
@@ -385,6 +415,18 @@ def _offline_reply(
             f" Catalogue match: {product.get('name')} ({product.get('category')}), "
             f"on hand {product.get('on_hand')}, price R{price.get('amount', '?')}."
         )
+    lower_question = question.lower()
+    if "deliver" in lower_question and product and facts is not None and tenant_id:
+        exception = get_delivery_exception(
+            facts=facts, tenant_id=tenant_id, sku=product.get("sku", "")
+        )
+        if exception is not None:
+            return (
+                f"{exception['product_name']}'s delivery is {exception['status']}: "
+                f"{exception['ordered_units']} ordered, {exception['received_units']} received, "
+                f"{exception['accepted_units']} accepted, {exception['missing_units']} short. "
+                f"{exception['conclusion']}{grounding}"
+            )
     decisions = state.get("decisions") if isinstance(state.get("decisions"), list) else []
     open_decisions = [
         item for item in decisions if isinstance(item, dict) and item.get("status") == "pending"

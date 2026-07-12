@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from random import Random
 
 
 @dataclass(frozen=True, slots=True)
@@ -9,19 +10,34 @@ class Brand:
     tier: str
 
 
-PRIVATE_LABEL: tuple[Brand, ...] = tuple(
-    Brand(name, "value")
-    for name in (
-        "No Name",
-        "Ritebrand",
-        "PnP",
-        "Checkers Housebrand",
-        "Shoprite",
-        "Woolworths",
-        "SPAR",
-        "Boxer",
-    )
+# Chain-neutral value names any single store can plausibly stock as its own house brand.
+GENERIC_PRIVATE_LABEL: tuple[Brand, ...] = tuple(
+    Brand(name, "value") for name in ("No Name", "Ritebrand")
 )
+# Real SA retail-chain private labels are mutually exclusive per store: a Pick n Pay does not
+# also stock Woolworths-, Shoprite-, SPAR-, Boxer-, and Checkers-branded private label lines on
+# the same shelf. Exactly one is picked deterministically per world seed in `house_brand_name`
+# and used as this tenant's single in-house label, instead of blending every competitor's brand
+# into one store's catalogue (a real data-quality bug: it read as "products from different
+# shops").
+_CHAIN_PRIVATE_LABEL_NAMES: tuple[str, ...] = (
+    "PnP",
+    "Checkers Housebrand",
+    "Shoprite",
+    "Woolworths",
+    "SPAR",
+    "Boxer",
+)
+
+
+def house_brand_name(seed: int) -> str:
+    """Pick this world's single in-house retail-chain label, deterministically from the seed."""
+    return Random(seed).choice(_CHAIN_PRIVATE_LABEL_NAMES)
+
+
+def private_label_pool(seed: int) -> tuple[Brand, ...]:
+    """This tenant's private-label pool: chain-neutral names plus its one house brand."""
+    return (*GENERIC_PRIVATE_LABEL, Brand(house_brand_name(seed), "value"))
 BRANDS: dict[str, tuple[Brand, ...]] = {
     "dairy": (
         Brand("Clover", "mainstream"),
@@ -81,6 +97,6 @@ BRANDS: dict[str, tuple[Brand, ...]] = {
 }
 
 
-def pool(key: str) -> tuple[Brand, ...]:
-    """Return a category brand pool plus private labels."""
-    return BRANDS.get(key, BRANDS["generic"]) + PRIVATE_LABEL
+def pool(key: str, seed: int) -> tuple[Brand, ...]:
+    """Return a category brand pool plus this world's own private labels."""
+    return BRANDS.get(key, BRANDS["generic"]) + private_label_pool(seed)

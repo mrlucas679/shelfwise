@@ -210,10 +210,18 @@ class WorldFactsProvider:
             )
         )
 
+        hero_product = self._product_row(payload, hero_sku)
+        batch_split_dict = batch_split.to_dict()
+        batch_split_dict["product_name"] = hero_product["name"]
+        delivery_dict = delivery.to_dict()
+        delivery_dict["product_name"] = delivery_product["name"]
+        supplier_cover_dict = supplier_cover.to_dict()
+        supplier_cover_dict["product_name"] = delivery_product["name"]
+
         return {
-            "batch_split": batch_split.to_dict(),
-            "delivery_reconciliation": delivery.to_dict(),
-            "supplier_cover": supplier_cover.to_dict(),
+            "batch_split": batch_split_dict,
+            "delivery_reconciliation": delivery_dict,
+            "supplier_cover": supplier_cover_dict,
             "stock_sourcing": stock_sourcing,
             "learning_summary": learning.to_dict(),
         }

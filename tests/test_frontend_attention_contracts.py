@@ -81,9 +81,9 @@ def test_product_workspace_explains_bounded_search_receipt() -> None:
     workspace = _between(source, "function WorkspaceScreen(", "function App()")
 
     assert "catalogSearchReceipt" in workspace
-    assert "synthetic_scan_budget" in workspace
+    assert "generated_world" in workspace
     assert 'WorkspaceSection title="Search receipt"' in workspace
-    assert "Bounded catalogue scan" in workspace
+    assert "Generated-world scan" in workspace
     assert "Attention products are ranked first" in workspace
 
 
