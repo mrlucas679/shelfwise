@@ -62,7 +62,12 @@ jobs:
         run: docker compose -f docker-compose.production.yml up --build -d --wait
 
       - name: Smoke production public origin
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
         run: |
+          trap 'docker compose -f docker-compose.production.yml logs --no-color backend postgres migrate frontend' ERR
           curl --fail --silent --show-error http://127.0.0.1/ > /dev/null
           curl --fail --silent --show-error \
             --cookie-jar /tmp/shelfwise.cookies \

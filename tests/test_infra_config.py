@@ -97,6 +97,7 @@ def test_ci_boots_and_smokes_production_public_origin() -> None:
     assert "docker-compose.production.yml up --build -d --wait" in workflow
     assert "--request POST http://127.0.0.1/auth/session" in workflow
     assert "--request POST http://127.0.0.1/demo/golden" in workflow
+    assert "logs --no-color backend postgres migrate frontend" in workflow
     assert "docker-compose.production.yml down --volumes" in workflow
 
 
