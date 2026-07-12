@@ -1,8 +1,11 @@
 # MI300X Droplet Bootstrap
 
-Create one AMD MI300X ROCm droplet with Docker, `/dev/kfd`, `/dev/dri`, at least 150 GB free disk,
+Create one AMD MI300X ROCm droplet with `/dev/kfd`, `/dev/dri`, at least 150 GB free disk,
 and a firewall that allows only the ShelfWise application host to reach TCP `8000` and `8001`.
 Do not expose either vLLM port broadly on the internet.
+
+The bootstrap installs Docker and `curl` itself on a root apt-based Ubuntu image when they are
+absent. It still fails fast if the chosen droplet does not expose the AMD ROCm devices.
 
 On the droplet, clone the pushed `developers` branch and run the bootstrap. `HF_TOKEN` must belong
 to an account that has accepted both Gemma model licences. `VLLM_API_KEY` is the non-empty secret

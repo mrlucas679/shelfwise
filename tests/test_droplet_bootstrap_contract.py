@@ -16,6 +16,7 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "STRONG_PORT:-8001" in source
     assert "/v1/models" in source
     assert "--device=/dev/kfd" in source
+    assert "apt-get install -y -qq docker.io curl" in source
 
 
 def test_droplet_bootstrap_docs_keep_required_secrets_out_of_git() -> None:

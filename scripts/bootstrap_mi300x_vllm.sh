@@ -17,7 +17,7 @@ readonly STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-900}"
 
 require_prerequisites() {
   # Fail before downloading model weights when host or secret prerequisites are missing.
-  command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
+  ensure_container_runtime
   [[ -n "${HF_TOKEN:-}" ]] || { echo "HF_TOKEN is required for gated Gemma model download" >&2; exit 1; }
   [[ -n "${VLLM_API_KEY:-}" ]] || { echo "VLLM_API_KEY is required; do not expose an unauthenticated vLLM API" >&2; exit 1; }
   [[ -e /dev/kfd && -d /dev/dri ]] || {
@@ -25,6 +25,25 @@ require_prerequisites() {
     exit 1
   }
   [[ "$ROUTINE_PORT" != "$STRONG_PORT" ]] || { echo "routine and strong ports must differ" >&2; exit 1; }
+}
+
+ensure_container_runtime() {
+  # Install the small host runtime dependency set on a standard root Ubuntu droplet if needed.
+  if ! command -v docker >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    command -v apt-get >/dev/null || {
+      echo "docker and curl are required; automatic installation supports apt-based hosts only" >&2
+      exit 1
+    }
+    [[ "$(id -u)" == "0" ]] || {
+      echo "run as root so the bootstrap can install Docker when the base image lacks it" >&2
+      exit 1
+    }
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq docker.io curl
+    systemctl enable --now docker
+  fi
+  docker info >/dev/null || { echo "Docker daemon is not ready" >&2; exit 1; }
 }
 
 remove_existing_container() {
