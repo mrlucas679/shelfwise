@@ -1240,8 +1240,7 @@ def resolve_product_identifier(
     """Resolve a single source-system code (GTIN/barcode/SKU/PLU/source id) to a variant.
 
     This is the identity-resolution seam every downstream reasoning path (expiry,
-    reorder, demand) needs before it can safely trust "which physical item is this" -
-    see AUDIT_AND_IMPLEMENTATION_BACKLOG.md P0 item 13 (product master + identity model).
+    reorder, demand) needs before it can safely trust "which physical item is this".
     """
     variant = product_catalog_store.resolve_identifier(
         tenant_id=ctx.tenant_id, kind=kind, value=value
