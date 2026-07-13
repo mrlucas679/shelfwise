@@ -22,6 +22,12 @@ data/harness_runs/
 CLAUDE.md
 CODEX.md
 IMPLEMENTATION_STATUS.md
+HANDOFF.md
+IMPLEMENTATION_PLAN.md
+AUDIT_AND_IMPLEMENTATION_BACKLOG.md
+Things that needs to be implemented.md
+FINE_TUNING_JUPYTER_AUDIT.md
+shelfwise-web-screenshot.png
 files/
 plot/
 research/

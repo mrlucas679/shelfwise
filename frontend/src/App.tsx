@@ -1108,7 +1108,7 @@ function UserBubble({ text }: { text: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar - the chat-first access surface. Modeled on ChatGPT/Claude/Codex:
+// Sidebar - the chat-first access surface. Modeled on modern AI chat consoles:
 // three zones (create+find · continuity+surfaces · identity). Nothing here is a
 // data display; every row is an ENTRY POINT that never blocks the chat. Persistent
 // on desktop, an overlay on mobile. High-scale product/lot surfaces open in the
@@ -1700,7 +1700,7 @@ function Sidebar({
             ) : null}
           </div>
 
-          {/* IDENTITY - pinned bottom, opens Settings (the ChatGPT/Codex profile-chip pattern) */}
+          {/* IDENTITY - pinned bottom, opens Settings (the standard profile-chip pattern) */}
           {page == null ? (
             <div className="sidebar-foot">
               <button className="profile-chip" type="button" onClick={() => push('settings')}>
