@@ -6,7 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from shelfwise_data import (
+from .retail_intelligence import (
     DecisionOutcome,
     DeliveryReceipt,
     StockBatch,

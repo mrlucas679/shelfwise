@@ -62,8 +62,12 @@ def test_submission_readiness_exposes_track_three_prescreen(monkeypatch) -> None
     body = response.json()
     assert body["track"] == "Track 3: Unicorn"
     assert body["ready_for_submission_prescreen"] is True
-    assert body["checks"]["docker_image_required"] == "no"
+    assert body["checks"]["docker_image_required"] == "required"
     assert body["checks"]["amd_compute_usage"] == "ok"
+    assert body["checks"]["response_timeout"] == "configured_under_30s"
+    assert body["checks"]["english_responses"] == "enforced_in_code"
+    assert body["checks"]["unseen_inputs"] == "not_cached_by_question"
+    assert body["checks"]["live_cloud_measurements"] == "required_before_submission"
 
 
 def test_single_model_is_not_claimed_as_dual_model_submission_ready(monkeypatch) -> None:

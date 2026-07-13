@@ -8,7 +8,7 @@ services:
       POSTGRES_DB: shelfwise
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}/runtime-volumes/postgres:/var/lib/postgresql/data
       - ./src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro
     healthcheck:
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - redis-data:/data
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}/runtime-volumes/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -76,6 +76,15 @@ services:
       LLM_ROUTINE_MODEL: ${LLM_ROUTINE_MODEL:-google/gemma-4-E4B-it}
       LLM_STRONG_MODEL: ${LLM_STRONG_MODEL:-google/gemma-4-31B-it}
       WORKER_ENABLED: "true"
+      SHELFWISE_PERSIST_ROOT: /app/persist
+      TRAINING_OUTPUT_DIR: /app/persist/training
+      HARNESS_RUN_DIR: /app/persist/harness/runs
+      TRACE_DIR: /app/persist/runtime/agent-traces
+      EVENT_STORE_DIR: /app/persist/runtime/events
+      UPLOAD_DIR: /app/persist/application-data/uploads
+      LOG_DIR: /app/persist/logs
+    volumes:
+      - ${SHELFWISE_PERSIST_ROOT:-./persist}:/app/persist
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -105,7 +114,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-volumes:
-  postgres-data:
-  redis-data:

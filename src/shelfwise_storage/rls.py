@@ -22,6 +22,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_product_identifiers": "tenant_id",
     "shelfwise_chat_conversations": "tenant_id",
     "shelfwise_inventory_positions": "tenant_id",
+    "shelfwise_world_snapshot": "tenant_id",
 }
 
 

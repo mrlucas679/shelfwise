@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from shelfwise_runtime import durable_dir
+
 from .collator import apply_chat_template, messages_for_prompt
 from .compatibility import validate_adapter_compatibility
 from .config import TrainingConfig, load_training_config
@@ -235,7 +237,11 @@ def run_evaluation(
         repo_root=repo_root,
         strict=config.data.strict_evidence,
     )
-    base_output_dir = Path(output_dir) if output_dir is not None else repo_root / config.output_dir
+    base_output_dir = (
+        Path(output_dir)
+        if output_dir is not None
+        else durable_dir("TRAINING_OUTPUT_DIR", str(config.output_dir))
+    )
     run_dir = timestamped_run_dir(base_output_dir, "eval", timestamp=True)
     jsonl_path = run_dir / "eval_results.jsonl"
     markdown_path = run_dir / "eval_results.md"

@@ -9,6 +9,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
+from shelfwise_worldgen.catalog.sample import sample_assortment
+
 from .config import DEFAULT_MIXTURE_WEIGHTS
 from .dataset import load_training_rows, summarize_rows
 
@@ -26,16 +28,25 @@ class SimProduct:
     base_daily_units: int
 
 
-PRODUCTS = (
-    SimProduct("4011", "Plain Yoghurt 1L", "dairy", "Cape Fresh Dairies", 2000, 1200, True, 10, 40),
-    SimProduct("4020", "Amasi 2L", "dairy", "Cape Fresh Dairies", 3900, 2500, True, 10, 32),
-    SimProduct(
-        "5100", "Frozen Chicken 1kg", "frozen", "Karoo Cold Foods", 6900, 5200, True, 180, 16
-    ),
-    SimProduct("6100", "Brown Bread", "bakery", "Jozi Bakery", 1699, 1100, False, 4, 60),
-    SimProduct("7100", "Bananas per kg", "produce", "Limpopo Produce Co", 1899, 1200, False, 5, 48),
-    SimProduct("8100", "Maize Meal 5kg", "ambient", "Highveld Staples", 8499, 6200, False, 540, 30),
-)
+def _generated_products() -> tuple[SimProduct, ...]:
+    """Build training products from the same generated catalog used by the app."""
+    return tuple(
+        SimProduct(
+            sku=product.sku,
+            name=product.name,
+            category=product.category,
+            supplier=product.supplier,
+            price_cents=product.price_cents,
+            cost_cents=round(product.price_cents * 0.65),
+            refrigerated=product.cat.refrigerated,
+            shelf_life_days=product.cat.shelf_life_days,
+            base_daily_units=product.cat.base_daily_units,
+        )
+        for product in sample_assortment(20_260_712, size=24)
+    )
+
+
+PRODUCTS = _generated_products()
 
 CASE_TYPES = (
     "damaged goods during transport",

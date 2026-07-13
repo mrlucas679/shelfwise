@@ -6,8 +6,6 @@ from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
 from typing import Any
 
-from shelfwise_decision_science import StockSourceCandidate, plan_stock_sourcing
-
 
 def _decimal(value: object) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
@@ -396,100 +394,11 @@ def summarize_outcome(outcome: DecisionOutcome) -> OutcomeSummary:
 
 
 def build_store_intelligence_demo() -> dict[str, Any]:
-    as_of = date(2026, 7, 6)
-    batch_split = split_stock_by_fefo(
-        sku="4011",
-        as_of=as_of,
-        batches=(
-            StockBatch(
-                sku="4011",
-                lot="AMASI-OLD-0707",
-                units=10,
-                expiry_date=date(2026, 7, 7),
-                received_date=date(2026, 7, 3),
-                location="fridge_a",
-            ),
-            StockBatch(
-                sku="4011",
-                lot="AMASI-NEW-0713",
-                units=20,
-                expiry_date=date(2026, 7, 13),
-                received_date=date(2026, 7, 6),
-                location="fridge_a",
-            ),
-        ),
-    )
-    delivery = reconcile_delivery(
-        DeliveryReceipt(
-            sku="4011",
-            ordered_units=50,
-            asn_units=50,
-            received_units=38,
-            accepted_units=32,
-            short_dated_units=6,
-        )
-    )
-    supplier_cover = plan_supplier_cover(
-        SupplierCoverRequest(
-            sku="4011",
-            units_on_hand=12,
-            forecast_daily_units=Decimal("10"),
-            supplier_lead_time_days=Decimal("3"),
-            transfer_available_units=18,
-        )
-    )
-    stock_sourcing = None
-    if supplier_cover.gap_before_delivery_units > 0:
-        stock_sourcing = plan_stock_sourcing(
-            sku="4011",
-            units_needed=supplier_cover.gap_before_delivery_units,
-            candidates=(
-                StockSourceCandidate(
-                    source_type="branch",
-                    source_id="store_02_sandton",
-                    available_units=6,
-                    distance_km=Decimal("5"),
-                    lead_time_hours=Decimal("2"),
-                ),
-                StockSourceCandidate(
-                    source_type="branch",
-                    source_id="store_09_midrand",
-                    available_units=14,
-                    distance_km=Decimal("22"),
-                    lead_time_hours=Decimal("4"),
-                ),
-                StockSourceCandidate(
-                    source_type="distribution_center",
-                    source_id="dc_gauteng_central",
-                    available_units=400,
-                    distance_km=Decimal("65"),
-                    lead_time_hours=Decimal("18"),
-                    unit_cost=Decimal("18.00"),
-                ),
-                StockSourceCandidate(
-                    source_type="supplier",
-                    source_id="supplier:dairyco",
-                    available_units=200,
-                    distance_km=Decimal("140"),
-                    lead_time_hours=Decimal("72"),
-                    unit_cost=Decimal("18.00"),
-                ),
-            ),
-        )
-    learning = summarize_outcome(
-        DecisionOutcome(
-            sku="yoghurt_1l",
-            action="markdown",
-            predicted_sell_through_units=24,
-            actual_sell_through_units=30,
-            predicted_waste_units=8,
-            actual_waste_units=5,
-        )
-    )
-    return {
-        "batch_split": batch_split.to_dict(),
-        "delivery_reconciliation": delivery.to_dict(),
-        "supplier_cover": supplier_cover.to_dict(),
-        "stock_sourcing": stock_sourcing.to_dict() if stock_sourcing is not None else None,
-        "learning_summary": learning.to_dict(),
-    }
+    """Compatibility wrapper that reads the generated tenant world."""
+    import os
+
+    from shelfwise_backend.world_facts import WorldFactsProvider
+    from shelfwise_worldgen import create_world_snapshot_store
+
+    tenant_id = os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "local"
+    return WorldFactsProvider(create_world_snapshot_store()).get_store_intelligence(tenant_id)

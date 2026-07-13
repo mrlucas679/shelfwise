@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from _world_test_support import demo_sku
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
@@ -54,7 +55,7 @@ def test_detective_endpoint_reports_ingested_scan_root_cause() -> None:
             "actor": "store_12",
             "source": "scanner",
             "tenant_id": "sa_retail_demo",
-            "payload": {"sku": "4011", "location": "store_12"},
+            "payload": {"sku": demo_sku(), "location": "store_12"},
         },
     )
     decision_id = ingest.json()["cascade"]["decision"]["id"]

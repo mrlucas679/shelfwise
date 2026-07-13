@@ -41,8 +41,8 @@ Open `http://127.0.0.1:5173`.
    reconciliation, sourcing) and can only cite numbers a tool actually returned - the grounding
    check rejects anything else. The answer renders as structured markdown: headings, bullets,
    bolded figures.
-3. Ask the sourcing question:
-   `We are short on SKU 4011. Where should the replacement stock come from?`
+3. Open the Products or To order workspace, use one visible generated-world SKU, then ask the sourcing question:
+   `We are short on SKU <visible-sku>. Where should the replacement stock come from?`
    Narrate: it does not just say "transfer stock" - it ranks nearby branches, the regional DC,
    and suppliers by availability, distance, and lead time, names the winner and why, and
    recommends a purchase order for whatever the winner cannot cover.
@@ -83,6 +83,20 @@ Verify any chat answer is genuinely live: response headers carry
 `x-shelfwise-provider: vllm_mi300x`, `x-shelfwise-model: google/gemma-4-E4B-it`, and
 `x-shelfwise-answer-source: model`. Agentic demo endpoints default to `live_required` and
 return 503 rather than fake an offline success.
+
+## Generated-World Data Proof
+
+The current live request path uses generated-world facts through `WorldFactsProvider`, not the
+superseded fixture blend. With `SHELFWISE_STORE_BACKEND=postgres`, the first tenant request lazy-populates
+`shelfwise_world_snapshot`; every product search, attention row, cascade, and sourcing decision
+then reads that tenant snapshot instead of hardcoded SKU literals.
+
+Optional local Postgres proof:
+
+```powershell
+$env:SHELFWISE_TEST_DATABASE_URL="postgresql://shelfwise_app:<password>@127.0.0.1:5433/shelfwise"
+python -m pytest -q tests/test_postgres_world_integration.py
+```
 
 ## GPU Pod Access (notebooks.amd.com/hackathon)
 

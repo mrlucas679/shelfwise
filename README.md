@@ -59,7 +59,7 @@ happens.
   learning loop that adjusts thresholds from real outcomes.
 - **Governed exception workflows.** Recall quarantine, returns, damage, shrink investigation,
   and misplaced-stock relocation each carry required evidence, distinct actions, Critic
-  review, and HITL — runnable as seeded drills from the Operations workspace.
+  review, and HITL — runnable as generated-world drills from the Operations workspace.
 - **Receipts, not promises.** A 15-minute live soak harness, committed run artifacts, a
   machine-verified capability manifest that fails CI on drift, and honest evidence reports
   that separate measured behavior from configured behavior.
@@ -136,6 +136,8 @@ $env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
 ```
 
 See [Inference Strategy](#inference-strategy) for independent routine/strong tier variables.
+For a new AMD MI300X host that pulls both required Gemma models and starts the two vLLM tiers,
+follow [DROPLET_BOOTSTRAP.md](DROPLET_BOOTSTRAP.md) rather than the historical restart-only notes.
 
 ### Run
 
@@ -164,7 +166,7 @@ Ask the chat anything about the store — it picks its own tools per question:
 > stock should come from."*
 > → 4+ live tool calls in one turn; structured report with headings, bullets, and bolded figures.
 
-> *"We are short on SKU 4011. Where should the replacement stock come from?"*
+> *"We are short on SKU `<visible-sku>`. Where should the replacement stock come from?"*
 > → ranks branches/DC/suppliers, names the winner and why, flags a purchase order for the rest.
 
 Fire a full agentic cascade directly (`live_required` — 503s rather than faking success):
@@ -203,7 +205,7 @@ python -m shelfwise_eval.full_system --duration-seconds 900 --live-required --ou
 
 [`notebooks/01_shelfwise_full_test_harness.ipynb`](notebooks/01_shelfwise_full_test_harness.ipynb)
 is a self-contained test harness — clone the repo, open the notebook, **Run All**, done. No
-extra setup, no data to add: the seed CSVs, dependency lists, and full `src/` tree are all
+extra setup, no data to add: the generated-world policy, dependency lists, and full `src/` tree are all
 already in this repo. It installs the project, runs lint, the full test suite, the golden-
 scenario eval gate, an in-process API smoke test, and a real `uvicorn` server smoke test on an
 actual port — and ends with one summary table so a failure anywhere is impossible to miss. An
@@ -232,6 +234,8 @@ Connected API endpoints:
 - `POST http://localhost:8000/demo/golden/agentic`
 - `POST http://localhost:8000/demo/procurement/agentic`
 - `POST http://localhost:8000/demo/sales/agentic`
+- `POST http://localhost:8000/demo/catalog-price/agentic`
+- `POST http://localhost:8000/demo/expiry-risk/agentic`
 - `POST http://localhost:8000/demo/cold-chain/agentic`
 - `GET http://localhost:8000/demo/worldgen-runs/{run_id}`
 - `GET http://localhost:8000/demo/worldgen-runs`
@@ -323,7 +327,7 @@ src/
   shelfwise_inference/         OpenAI-compatible client, agent orchestrator, grounding checks
   shelfwise_decision_science/  Reorder policy, forecasting, risk scoring, sourcing, simulation
   shelfwise_contracts/         Money/evidence/decision/event contracts
-  shelfwise_data/              Seeded SA retail datasets + store intelligence
+  shelfwise_data/              Legacy dataset primitives retained for tests and migration checks
   shelfwise_eval/              Eval gates, agent-role coverage, full-system world soak
   shelfwise_benchmark/         Inference architecture benchmark harness
   shelfwise_worldgen/          World simulation and scenario generation
@@ -332,7 +336,7 @@ frontend/                      React/Vite chat-first operations console
 tests/                         400+ tests: contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
-data/datasets/                 CSV seed data (products, stock, sales, suppliers)
+data/datasets/                 Legacy source CSV fixtures retained for regression coverage
 ```
 
 ## Current Scope
@@ -346,20 +350,20 @@ Built now:
 - Product attention and search endpoints that keep the sidebar bounded while allowing product and
   lot drill-down in the app.
 - Runnable local eval harness via `python -m shelfwise_eval`.
-- CSV-backed SA retail seed data under `data/datasets`, with validation and a loaded golden
-  scenario consumed by the cascade.
+- Generated-world SA retail data persisted through the world snapshot store, with validation
+  and a dynamically selected golden scenario consumed by the cascade.
 - Golden cascade runner.
 - Visible Critic rejection cascade that downgrades an unsupported supplier-switch claim to monitor.
 - Procurement, sales, and cold-chain cascades with math-backed evidence and HITL policy.
 - Supplier recall notices routed through lot-specific stop-sale/quarantine evidence, Critic review,
-  HITL approval, and task-only write-back; the seeded drill is runnable from Operations.
+  HITL approval, and task-only write-back; the generated-world drill is runnable from Operations.
 - Type-specific inventory exception workflows for returns, damaged stock, shrink discrepancies, and
   misplaced stock, each with required evidence, distinct actions, HITL, world-sim receipts, and UI.
 - FastAPI health and demo endpoints.
 - Event ingest, event log, trace log, detective root-cause, and worker processing endpoints.
 - Product attention and search-first catalogue endpoints that keep the sidebar bounded, use a
-  bounded synthetic scan budget for demo catalogue search, and push product/lot exploration into
-  the workspace.
+  generated-world search receipt for catalogue queries, and push product/lot exploration into the
+  workspace.
 - HITL approve/reject endpoints.
 - Memory and Postgres store backends with tenant-scoped RLS schema for business tables.
 - Learning store that records approved outcomes, task-style write-back receipts, visible threshold
@@ -369,7 +373,7 @@ Built now:
 - MLOps run/prompt registries, accountability reporting, observability snapshot, eval gate, and
   dormant fine-tune export path.
 - Worker journal, plan validation, schedule overlap protection, and queue-backed cascade processing.
-- Synthetic/worldgen and cold-chain resilience backends.
+- Generated-world simulation and cold-chain resilience backends.
 - Voice and scan backend routes with review-required candidates and upload sniffing.
 - Security gateway for prompt fencing, rate limiting, API-key/JWT role gates, and app-level request
   body limits.
@@ -402,8 +406,9 @@ Next (honest roadmap, not yet built):
   not just in tested routing code.
 - Concurrent 1/8/32-user MI300X inference benchmark with ROCm/vLLM resource telemetry.
 - Live multi-branch inventory feeds behind the sourcing decision (the decision logic is general
-  and unit-tested; today's demo network is seeded fixture data).
-- Batch/lot-level expiry tracking and fleet-scale (500k+ SKU) scoring.
+  and unit-tested; today's demo network is generated-world snapshot data, not live branch feeds).
+- Persist score history and candidate deltas in a production database rather than the current
+  repeatable synthetic fleet-evaluation receipt.
 
 ## Inference Strategy
 

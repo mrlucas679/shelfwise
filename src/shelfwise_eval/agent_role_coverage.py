@@ -10,6 +10,7 @@ from shelfwise_backend.tools.model_runtime import (
     OpenAIModelRuntime,
     architecture_from_inference_config,
 )
+from shelfwise_backend.world_facts import WorldFactsProvider
 from shelfwise_inference.config import load_inference_config
 from shelfwise_inference.orchestration import (
     AgentOrchestrationError,
@@ -22,6 +23,7 @@ from shelfwise_inference.tool_calling import (
     assert_conclusion_grounded_in_tool_results,
 )
 from shelfwise_memory import create_learning_store
+from shelfwise_worldgen import create_world_snapshot_store
 
 # The provider can, intermittently, stall producing the final JSON object even after a
 # genuine tool-calling round trip completed (a decoding-loop failure mode observed live
@@ -52,19 +54,20 @@ class RolePrompt:
     system: str
     user: str
     expected_tool: str | None
+    required_tools: tuple[str, ...] = ()
 
 
 _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
     RolePrompt(
         "inventory",
         "You are the ShelfWise Inventory agent. Call get_stock for the SKU before concluding.",
-        "Assess the stock position for SKU 4011. Call get_stock, then conclude.",
+        "Assess the stock position for SKU {sku}. Call get_stock, then conclude.",
         "get_stock",
     ),
     RolePrompt(
         "sales",
         "You are the ShelfWise Sales agent. Call check_price_integrity before concluding.",
-        "Check whether SKU 4011's till price matches catalogue. Call check_price_integrity, "
+        "Check whether SKU {sku}'s till price matches catalogue. Call check_price_integrity, "
         "then conclude.",
         "check_price_integrity",
     ),
@@ -79,13 +82,13 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
     RolePrompt(
         "expiry",
         "You are the ShelfWise Expiry agent. Call get_expiry_risk before concluding.",
-        "Assess expiry/waste risk for SKU 4011. Call get_expiry_risk, then conclude.",
+        "Assess expiry/waste risk for SKU {sku}. Call get_expiry_risk, then conclude.",
         "get_expiry_risk",
     ),
     RolePrompt(
         "demand",
         "You are the ShelfWise Demand agent. Call get_demand_forecast before concluding.",
-        "Forecast demand for SKU 4011 over the next 3 days. Call get_demand_forecast, "
+        "Forecast demand for SKU {sku} over the next 3 days. Call get_demand_forecast, "
         "then conclude.",
         "get_demand_forecast",
     ),
@@ -93,21 +96,21 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "procurement",
         "You are the ShelfWise Procurement agent. Call get_reorder_policy and "
         "get_supplier_ranking before concluding.",
-        "Decide whether to reorder SKU 4011 and from which supplier. Call "
+        "Decide whether to reorder SKU {sku} and from which supplier. Call "
         "get_reorder_policy, then get_supplier_ranking, then conclude.",
         "get_reorder_policy",
     ),
     RolePrompt(
         "opportunity",
         "You are the ShelfWise Opportunity agent. Call simulate_markdown before concluding.",
-        "Evaluate whether a 20% markdown on SKU 4011 recovers more value than holding stock. "
+        "Evaluate whether a 20% markdown on SKU {sku} recovers more value than holding stock. "
         "Call simulate_markdown with discount_pct=0.2, then conclude.",
         "simulate_markdown",
     ),
     RolePrompt(
         "simulation",
         "You are the ShelfWise Simulation agent. Call simulate_markdown before concluding.",
-        "Simulate the sell-through and waste outcome of a 20% markdown on SKU 4011. Call "
+        "Simulate the sell-through and waste outcome of a 20% markdown on SKU {sku}. Call "
         "simulate_markdown with discount_pct=0.2, then conclude.",
         "simulate_markdown",
     ),
@@ -117,8 +120,10 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "decisions, then call explain_decision on the first decision's id before concluding.",
         "Review the current open HITL decisions for evidence quality. Call "
         "list_open_decisions, then call explain_decision with the first decision's id, "
-        "then conclude.",
+        "then conclude. Cite the pending 20% markdown value from the open decision in "
+        "your conclusion.",
         "explain_decision",
+        ("list_open_decisions", "explain_decision"),
     ),
     RolePrompt(
         "executive",
@@ -131,7 +136,7 @@ _ROLE_PROMPTS: tuple[RolePrompt, ...] = (
         "orchestrator",
         "You are the ShelfWise Orchestrator agent. Call list_open_decisions before concluding.",
         "Summarize the current queue of open decisions across roles. Call "
-        "list_open_decisions, then conclude.",
+        "list_open_decisions, then conclude and cite the pending 20% markdown value.",
         "list_open_decisions",
     ),
 )
@@ -175,6 +180,10 @@ async def _run(*, execution_mode: ExecutionMode) -> list[RoleCoverageResult]:
     decisions = create_decision_store()
     memory = create_learning_store()
     audit = AuditLog()
+    facts = WorldFactsProvider(create_world_snapshot_store())
+    tenant_id = "eval_tenant"
+    hero_sku = facts.get_hero_sku(tenant_id)
+    hero = facts.get_scenario_facts(tenant_id, hero_sku)
     # One real pending decision so list_open_decisions returns a non-empty queue and
     # explain_decision has a genuine id to resolve - without it the critic's
     # explain_decision coverage would be untestable against an empty store.
@@ -184,17 +193,24 @@ async def _run(*, execution_mode: ExecutionMode) -> list[RoleCoverageResult]:
             "status": "pending",
             "action": {
                 "type": "apply_markdown",
-                "params": {"sku": "4011", "discount_pct": "0.20"},
+                "params": {"sku": hero_sku, "discount_pct": "0.20"},
                 "risk_tier": "high",
             },
             "caused_by": ["role_coverage_seed"],
-            "summary": "Pending manager approval: 20% markdown for Amasi 2L at store_12.",
-            "tenant_id": "sa_retail_demo",
+            "summary": (
+                f"Pending manager approval: 20% markdown for {hero.product_name} "
+                f"at {hero.location}."
+            ),
+            "tenant_id": tenant_id,
             "critic_verdict": "approved",
         }
     )
     tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions, memory=memory, audit=audit
+        decisions=decisions,
+        memory=memory,
+        audit=audit,
+        facts=facts,
+        tenant_id=tenant_id,
     )
     config = load_inference_config()
     architecture = architecture_from_inference_config(config)
@@ -203,23 +219,30 @@ async def _run(*, execution_mode: ExecutionMode) -> list[RoleCoverageResult]:
 
     results: list[RoleCoverageResult] = []
     for prompt in _ROLE_PROMPTS:
-        results.append(await _run_one(orchestrator, prompt))
+        results.append(await _run_one(orchestrator, prompt, tenant_id=tenant_id, sku=hero_sku))
     return results
 
 
-async def _run_one(orchestrator: AgentOrchestrator, prompt: RolePrompt) -> RoleCoverageResult:
+async def _run_one(
+    orchestrator: AgentOrchestrator,
+    prompt: RolePrompt,
+    *,
+    tenant_id: str,
+    sku: str,
+) -> RoleCoverageResult:
     try:
         run_result: AgentRunResult = await orchestrator.run(
             role=prompt.role,
             system=prompt.system,
-            user=prompt.user,
+            user=prompt.user.format(sku=sku),
             final_schema=_ROLE_SCHEMA,
             final_schema_name=f"{prompt.role}_role_coverage",
             temperature=0.0,
             # The orchestrator's trusted tenant override wins over model-invented tenant
             # arguments, so this must match the tenant the seed decision was written under.
-            tenant_id="sa_retail_demo",
+            tenant_id=tenant_id,
             require_tool_call_first=prompt.expected_tool is not None,
+            required_tool_names=prompt.required_tools,
         )
         if isinstance(run_result.answer, dict):
             assert_conclusion_grounded_in_tool_results(
@@ -237,11 +260,23 @@ async def _run_one(orchestrator: AgentOrchestrator, prompt: RolePrompt) -> RoleC
             error=str(exc),
         )
     total_tokens = sum(call.input_tokens + call.output_tokens for call in run_result.model_calls)
+    tools_called = tuple(call.name for call in run_result.tool_calls)
+    if prompt.expected_tool is not None and prompt.expected_tool not in tools_called:
+        return RoleCoverageResult(
+            role=prompt.role,
+            ok=False,
+            expected_tool=prompt.expected_tool,
+            tools_called=tools_called,
+            answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
+            model_call_count=len(run_result.model_calls),
+            total_tokens=total_tokens,
+            error=f"expected tool was not called: {prompt.expected_tool}",
+        )
     return RoleCoverageResult(
         role=prompt.role,
         ok=True,
         expected_tool=prompt.expected_tool,
-        tools_called=tuple(call.name for call in run_result.tool_calls),
+        tools_called=tools_called,
         answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
         model_call_count=len(run_result.model_calls),
         total_tokens=total_tokens,

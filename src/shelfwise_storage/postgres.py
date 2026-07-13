@@ -105,7 +105,7 @@ def jsonb(value: dict[str, Any]) -> Any:
 
 def _default_tenant_id() -> str:
     return _clean_tenant_id(
-        os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "sa_retail_demo"
+        os.getenv("SHELFWISE_TENANT_ID") or os.getenv("TENANT_ID") or "local"
     )
 
 

@@ -143,7 +143,8 @@ def assert_conclusion_grounded_in_tool_results(
     """Require the conclusion to cite at least one real *computed* number per tool call.
 
     Numbers that merely echo a call argument (e.g. the SKU the caller already passed in,
-    like `get_supplier_ranking(sku="4011")` echoing "4011" back) are excluded - citing an
+    like `get_supplier_ranking(sku="generated-sku")` echoing the same identifier back) are
+    excluded - citing an
     identifier the caller already knew isn't evidence of real calculation, only citing a
     value the tool actually computed is. Found live: Gemma correctly grounded its verdict
     in genuine outputs (reorder quantities, profit figures) but was rejected for not also

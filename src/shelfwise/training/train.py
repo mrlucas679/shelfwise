@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from shelfwise_runtime import durable_dir
+
 from .collator import ShelfWiseDataCollator, build_tokenized_example, preview_batch
 from .compatibility import validate_adapter_compatibility, write_adapter_manifest
 from .config import load_training_config
@@ -45,7 +47,11 @@ def run_training(
             resume_path = repo_root / resume_path
         validate_adapter_compatibility(resume_path, config)
     effective_run_name = run_name or config.run_name
-    base_output_dir = Path(output_dir) if output_dir is not None else repo_root / config.output_dir
+    base_output_dir = (
+        Path(output_dir)
+        if output_dir is not None
+        else durable_dir("TRAINING_OUTPUT_DIR", str(config.output_dir))
+    )
     output_dir = timestamped_run_dir(
         base_output_dir,
         effective_run_name,

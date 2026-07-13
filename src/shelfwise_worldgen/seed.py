@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .catalog.sample import sample_assortment
 from .world import WorldConfig
 
 
@@ -7,9 +8,7 @@ def build_memory_seed(cfg: WorldConfig) -> dict[str, dict]:
     """Build product-master memory rows for the simulator catalog."""
     products = tuple(cfg.products or ())
     if not products:
-        from .sa_ground_truth import PRODUCTS
-
-        products = PRODUCTS
+        products = tuple(sample_assortment(cfg.seed, size=24))
     rows: dict[str, dict] = {}
     for product in products:
         category = product.cat

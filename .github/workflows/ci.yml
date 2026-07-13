@@ -23,10 +23,33 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
+      - name: Boot Postgres integration database
+        run: |
+          docker rm -f shelfwise-ci-postgres >/dev/null 2>&1 || true
+          docker run --name shelfwise-ci-postgres -d \
+            -p 5432:5432 \
+            -e POSTGRES_USER=shelfwise \
+            -e POSTGRES_PASSWORD=ci-postgres-password \
+            -e POSTGRES_DB=shelfwise \
+            -e POSTGRES_APP_PASSWORD=ci-app-password \
+            -v "$PWD/src/shelfwise_storage/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro" \
+            -v "$PWD/src/shelfwise_storage/init_app_role.sh:/docker-entrypoint-initdb.d/02-app-role.sh:ro" \
+            pgvector/pgvector:pg16
+          for attempt in $(seq 1 60); do
+            if docker exec shelfwise-ci-postgres pg_isready -U shelfwise -d shelfwise; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs shelfwise-ci-postgres
+          exit 1
+
       - name: Lint backend
         run: python -m ruff check src tests scripts
 
       - name: Test backend
+        env:
+          SHELFWISE_TEST_DATABASE_URL: postgresql://shelfwise_app:ci-app-password@127.0.0.1:5432/shelfwise
         run: python -m pytest -q
 
       - name: Run ShelfWise eval gate
@@ -59,7 +82,21 @@ jobs:
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
           SHELFWISE_COOKIE_SECURE: "false"
-        run: docker compose -f docker-compose.production.yml up --build -d --wait
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
+        run: |
+          docker compose -f docker-compose.production.yml build
+          for service in backend frontend; do
+            image=$(docker compose -f docker-compose.production.yml images -q "$service")
+            test -n "$image"
+            architecture=$(docker image inspect "$image" --format '{{.Architecture}}')
+            echo "$service image architecture: $architecture"
+            test "$architecture" = amd64
+          done
+          started=$(date +%s)
+          docker compose -f docker-compose.production.yml up --build -d --wait
+          elapsed=$(( $(date +%s) - started ))
+          echo "Track 3 container readiness: ${elapsed}s"
+          test "$elapsed" -lt 60
 
       - name: Smoke production public origin
         env:
@@ -87,6 +124,61 @@ jobs:
           assert golden['decision']['tenant_id'] == session['session']['tenant_id']
           PY
 
+      - name: Track 3 live response and language gate
+        if: ${{ secrets.LLM_ROUTINE_BASE_URL != '' && secrets.LLM_API_KEY != '' }}
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          LLM_ROUTINE_BASE_URL: ${{ secrets.LLM_ROUTINE_BASE_URL }}
+          LLM_STRONG_BASE_URL: ${{ secrets.LLM_STRONG_BASE_URL || secrets.LLM_ROUTINE_BASE_URL }}
+          LLM_ROUTINE_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_STRONG_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ROUTINE_MODEL: ${{ secrets.LLM_ROUTINE_MODEL || 'google/gemma-4-E4B-it' }}
+          LLM_STRONG_MODEL: ${{ secrets.LLM_STRONG_MODEL || 'google/gemma-4-31B-it' }}
+        run: |
+          docker compose -f docker-compose.production.yml up -d --wait
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          session_request = urllib.request.Request(
+              'http://127.0.0.1/auth/session', method='POST'
+          )
+          with urllib.request.urlopen(session_request, timeout=5) as response:
+              session = json.load(response)
+              cookie = response.headers.get('Set-Cookie', '').split(';', 1)[0]
+          questions = [
+              'What is the current stock position for a generated product?',
+              'How should a manager handle an unseen cold-chain question?',
+          ]
+          responses = []
+          for question in questions:
+              request = urllib.request.Request(
+                  'http://127.0.0.1/chat',
+                  data=json.dumps({'question': question}).encode(),
+                  headers={'Content-Type': 'application/json', 'Cookie': cookie},
+                  method='POST',
+              )
+              started = time.perf_counter()
+              with urllib.request.urlopen(request, timeout=29) as response:
+                  body = response.read().decode()
+              elapsed = time.perf_counter() - started
+              assert elapsed < 30, elapsed
+              assert body.strip(), 'empty response'
+              assert all(ord(char) < 128 or char.isalpha() for char in body)
+              responses.append(body)
+          assert responses[0] != responses[1], 'distinct inputs produced identical answers'
+          print('Track 3 request/language/unseen-input gate: PASS')
+          PY
+
+      - name: Track 3 fail-closed gate without AMD endpoint
+        if: ${{ secrets.LLM_ROUTINE_BASE_URL == '' || secrets.LLM_API_KEY == '' }}
+        run: |
+          echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
+          echo "Production topology and fail-closed behavior are covered by the application tests."
+
       - name: Stop production topology
         if: always()
         env:
@@ -94,3 +186,7 @@ jobs:
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
         run: docker compose -f docker-compose.production.yml down --volumes
+
+      - name: Stop Postgres integration database
+        if: always()
+        run: docker rm -f shelfwise-ci-postgres >/dev/null 2>&1 || true

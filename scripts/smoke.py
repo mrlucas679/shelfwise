@@ -45,12 +45,18 @@ def main() -> None:
     assert len(attention_body["items"]) <= 2
     assert attention_body["totals"]["sell_first_products"] >= 1
 
-    product_search = client.get("/products/search?q=amasi&limit=3")
+    summary = client.get("/data/seed/summary")
+    assert summary.status_code == 200, summary.text
+    seed = summary.json()["seed_data"]
+    product_search = client.get(
+        "/products/search", params={"q": seed["product_name"], "limit": 3}
+    )
     assert product_search.status_code == 200, product_search.text
     product_body = product_search.json()
-    assert product_body["products"][0]["name"] == "Amasi 2L"
-    assert product_body["products"][0]["sell_first_units"] == 10
-    assert product_body["products"][0]["fefo_batches"][0]["lot"] == "AMASI-OLD-0707"
+    assert product_body["products"]
+    assert product_body["products"][0]["name"] == seed["product_name"]
+    assert product_body["products"][0]["sku"] == seed["sku"]
+    assert product_body["products"][0]["source"] == "generated_world"
 
     fefo = client.post(
         "/intelligence/stock/fefo-split",

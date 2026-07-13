@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import unicodedata
 from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
@@ -18,11 +19,23 @@ from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
 )
+from shelfwise_worldgen import create_world_snapshot_store
 
-from .product_catalog import search_product_catalog
+from .product_catalog import get_delivery_exception, search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
 from .tools.mcp_surface import AuditLog, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
+from .world_facts import WorldFactsProvider
+
+_default_facts_store: Any = None
+
+
+def _default_facts() -> WorldFactsProvider:
+    global _default_facts_store
+    if _default_facts_store is None:
+        _default_facts_store = create_world_snapshot_store()
+    return WorldFactsProvider(_default_facts_store)
+
 
 _CHAT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -36,11 +49,14 @@ _CHAT_SCHEMA: dict[str, Any] = {
 _CHAT_SYSTEM_PROMPT = (
     "You are ShelfWise, an AI operations assistant for a real supermarket. Speak like a "
     "knowledgeable colleague, not a database readout.\n\n"
+    "All user-facing text must be written in English. Do not translate into another "
+    "language, even if the user asks; if needed, explain that this service responds in "
+    "English.\n\n"
     "Format for readability: use short headings for multi-part answers, bullet or "
     "numbered lists when there is more than one item, and **bold** for the one or two "
     "figures that matter most. Keep single-fact answers to a short paragraph - only add "
     "structure when there is genuinely more than one point to make. Never describe the "
-    "shape of tool_results/state_json to the user (no \"the tool result is `null`\", no "
+    'shape of tool_results/state_json to the user (no "the tool result is `null`", no '
     "field names, no backticks around raw internal values, no mention of JSON) - speak in "
     "plain retail-operations language.\n\n"
     "You have real, live tools covering every part of the store - call the one that "
@@ -63,6 +79,21 @@ _CHAT_SYSTEM_PROMPT = (
     "transfer quantity with no source attached. If the tool reports no source can cover "
     "it, say so plainly and recommend a purchase order instead of a transfer."
 )
+
+
+def ensure_english_response(answer: str) -> str:
+    """Reject model output whose script is clearly not English-compatible."""
+    text = answer.strip()
+    if not text:
+        raise InferenceError("model returned an empty response")
+    letters = [char for char in text if char.isalpha()]
+    if letters:
+        latin_letters = sum(
+            "LATIN" in unicodedata.name(char, "") or char.isascii() for char in letters
+        )
+        if latin_letters / len(letters) < 0.8:
+            raise InferenceError("model returned a non-English response")
+    return text
 
 
 class ChatBody(BaseModel):
@@ -111,6 +142,7 @@ def build_chat_reply(
     live_required: bool = False,
     decisions: Any = None,
     memory: Any = None,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> str:
     """Build a chat answer from current backend state."""
@@ -123,6 +155,7 @@ def build_chat_reply(
         live_required=live_required,
         decisions=decisions,
         memory=memory,
+        facts=facts,
         orchestrator_factory=orchestrator_factory,
     )
     return answer
@@ -138,6 +171,7 @@ def build_chat_reply_with_meta(
     live_required: bool = False,
     decisions: Any = None,
     memory: Any = None,
+    facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Answer using a real agentic tool-calling loop when a decision/memory store is
@@ -153,7 +187,10 @@ def build_chat_reply_with_meta(
     the agentic cascades are.
     """
     inference = client or OpenAICompatibleInferenceClient()
-    subject, product, tool_calls = _tool_context(question)
+    resolved_facts = facts or _default_facts()
+    subject, product, tool_calls = _tool_context(
+        question, facts=resolved_facts, tenant_id=tenant_id
+    )
     meta: dict[str, Any] = {
         "tools_used": [call["tool"] for call in tool_calls],
         "subject": subject,
@@ -167,7 +204,14 @@ def build_chat_reply_with_meta(
         if live_required:
             raise InferenceError("live chat requires configured inference credentials")
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     prompt = (
@@ -178,35 +222,50 @@ def build_chat_reply_with_meta(
         f"<user_question>{spotlight(question, max_len=2_000)}</user_question>"
     )
     if decisions is not None and memory is not None:
-        try:
-            answer, run_tool_calls = asyncio.run(
-                _run_agentic_chat(
-                    prompt=prompt,
-                    inference=inference,
-                    decisions=decisions,
-                    memory=memory,
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                    orchestrator_factory=orchestrator_factory,
+        last_error: AgentOrchestrationError | ToolCallingError | None = None
+        for attempt in range(2):
+            try:
+                answer, run_tool_calls = asyncio.run(
+                    _run_agentic_chat(
+                        prompt=prompt,
+                        inference=inference,
+                        decisions=decisions,
+                        memory=memory,
+                        facts=resolved_facts,
+                        tenant_id=tenant_id,
+                        correlation_id=(
+                            correlation_id if attempt == 0 else f"{correlation_id}:retry-{attempt}"
+                        ),
+                        orchestrator_factory=orchestrator_factory,
+                    )
                 )
-            )
-        except (AgentOrchestrationError, ToolCallingError) as exc:
+                meta["answer_source"] = "model"
+                meta["tools_used"] = [call.name for call in run_tool_calls]
+                return answer, meta
+            except (AgentOrchestrationError, ToolCallingError) as exc:
+                last_error = exc
+        assert last_error is not None
+        if last_error is not None:
             if live_required:
-                raise InferenceError(f"live agentic chat failed: {exc}") from exc
+                raise InferenceError(f"live agentic chat failed: {last_error}") from last_error
             return (
-                _offline_reply(question=question, state=state, subject=subject, product=product),
+                _offline_reply(
+                    question=question,
+                    state=state,
+                    subject=subject,
+                    product=product,
+                    facts=resolved_facts,
+                    tenant_id=tenant_id,
+                ),
                 meta,
             )
-        meta["answer_source"] = "model"
-        meta["tools_used"] = [call.name for call in run_tool_calls]
-        return answer, meta
     try:
         result = inference.complete(
             agent="executive",
             system=(
                 "You are ShelfWise Executive chat. Be concise and evidence-grounded. "
                 "Never describe the shape of tool_results/state_json to the user (no "
-                "\"the tool result is `null`\", no field names, no backticks around raw "
+                '"the tool result is `null`", no field names, no backticks around raw '
                 "values) - speak in plain retail-operations language, the way a store "
                 "manager would talk to a colleague. If the question's subject has no "
                 "catalogue match or no dedicated data (tool_results.catalog_search is "
@@ -224,17 +283,31 @@ def build_chat_reply_with_meta(
         if live_required:
             raise
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     if live_required and not result.used_network:
         raise InferenceError("live chat rejected a non-network inference result")
-    answer = result.content.strip()[:2_000]
+    answer = ensure_english_response(result.content)[:2_000]
     if not answer:
         if live_required:
             raise InferenceError("live chat received an empty inference result")
         return (
-            _offline_reply(question=question, state=state, subject=subject, product=product),
+            _offline_reply(
+                question=question,
+                state=state,
+                subject=subject,
+                product=product,
+                facts=resolved_facts,
+                tenant_id=tenant_id,
+            ),
             meta,
         )
     meta["answer_source"] = "model"
@@ -247,12 +320,19 @@ async def _run_agentic_chat(
     inference: OpenAICompatibleInferenceClient,
     decisions: Any,
     memory: Any,
+    facts: WorldFactsProvider,
     tenant_id: str,
     correlation_id: str | None,
     orchestrator_factory: Any,
 ) -> tuple[str, tuple[Any, ...]]:
     """Run chat through the real platform-tool registry and return a grounded answer."""
-    tools = build_platform_tools(decisions=decisions, memory=memory, audit=AuditLog())
+    tools = build_platform_tools(
+        decisions=decisions,
+        memory=memory,
+        audit=AuditLog(),
+        facts=facts,
+        tenant_id=tenant_id,
+    )
     orchestrator: AgentOrchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
@@ -269,7 +349,7 @@ async def _run_agentic_chat(
         temperature=0.2,
         max_tokens=900,
     )
-    answer = str(run.answer["answer"]).strip()
+    answer = ensure_english_response(str(run.answer["answer"]))
     assert_conclusion_grounded_in_tool_results(answer, run.tool_calls)
     if not answer:
         raise AgentOrchestrationError("agentic chat produced an empty answer")
@@ -308,11 +388,13 @@ def _extract_product_query(question: str) -> str:
     return " ".join(best) if len(best) >= 2 else question[:80]
 
 
-def _tool_context(question: str) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+def _tool_context(
+    question: str, *, facts: WorldFactsProvider, tenant_id: str
+) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
     subject = _extract_product_query(question)
     tool_calls: list[dict[str, Any]] = [{"tool": "products.search", "query": subject}]
     try:
-        result = search_product_catalog(query=subject, limit=3, synthetic_scan_budget=25_000)
+        result = search_product_catalog(facts=facts, query=subject, limit=3, tenant_id=tenant_id)
         products = result.get("products") or []
     except (TypeError, ValueError):
         products = []
@@ -327,6 +409,8 @@ def _offline_reply(
     state: dict[str, Any],
     subject: str = "",
     product: dict[str, Any] | None = None,
+    facts: WorldFactsProvider | None = None,
+    tenant_id: str = "",
 ) -> str:
     """Deterministic local answer for offline-safe development and tests."""
     grounding = ""
@@ -338,6 +422,18 @@ def _offline_reply(
             f" Catalogue match: {product.get('name')} ({product.get('category')}), "
             f"on hand {product.get('on_hand')}, price R{price.get('amount', '?')}."
         )
+    lower_question = question.lower()
+    if "deliver" in lower_question and product and facts is not None and tenant_id:
+        exception = get_delivery_exception(
+            facts=facts, tenant_id=tenant_id, sku=product.get("sku", "")
+        )
+        if exception is not None:
+            return (
+                f"{exception['product_name']}'s delivery is {exception['status']}: "
+                f"{exception['ordered_units']} ordered, {exception['received_units']} received, "
+                f"{exception['accepted_units']} accepted, {exception['missing_units']} short. "
+                f"{exception['conclusion']}{grounding}"
+            )
     decisions = state.get("decisions") if isinstance(state.get("decisions"), list) else []
     open_decisions = [
         item for item in decisions if isinstance(item, dict) and item.get("status") == "pending"

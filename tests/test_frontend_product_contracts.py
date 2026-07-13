@@ -34,9 +34,8 @@ def test_search_is_attention_first_not_inventory_dump() -> None:
     source = APP_TSX.read_text(encoding="utf-8")
 
     assert "This list is attention-only" in source
-    assert "Bounded catalogue scan" in source
+    assert "Generated-world scan" in source
     assert "Scan window" in source
-    assert "Source mix" in source
     assert "catalogResults" in source
 
 

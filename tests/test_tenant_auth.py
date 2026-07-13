@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from _world_test_support import demo_sku
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
@@ -33,7 +34,7 @@ def _scan_event(tenant_id: str = "sa_retail_demo") -> dict[str, object]:
         "actor": "store_12",
         "source": "scanner",
         "tenant_id": tenant_id,
-        "payload": {"sku": "4011", "location": "store_12"},
+        "payload": {"sku": demo_sku(), "location": "store_12"},
     }
 
 
@@ -53,7 +54,7 @@ def test_default_tenant_context_matches_demo_tenant(
     monkeypatch.delenv("SHELFWISE_TENANT_ID", raising=False)
     monkeypatch.delenv("TENANT_ID", raising=False)
 
-    assert default_tenant_context().tenant_id == "sa_retail_demo"
+    assert default_tenant_context().tenant_id == "local"
 
 
 def test_tenant_jwt_rejects_bad_signature_and_expired_token() -> None:

@@ -13,6 +13,7 @@ from shelfwise_backend.agentic_cascade import (
     run_cold_chain_cascade_via_agents,
 )
 from shelfwise_backend.tools.mcp_surface import AuditLog, build_platform_tools
+from shelfwise_backend.world_facts import WorldFactsProvider
 from shelfwise_inference.orchestration import (
     AgentArchitecture,
     AgentOrchestrator,
@@ -22,6 +23,7 @@ from shelfwise_inference.orchestration import (
     RoleModelTarget,
 )
 from shelfwise_memory import create_learning_store
+from shelfwise_worldgen.world_store import InMemoryWorldSnapshotStore
 
 
 @dataclass
@@ -85,7 +87,11 @@ def _build_tools():
     decisions = create_decision_store()
     memory = create_learning_store()
     audit = AuditLog()
-    return build_platform_tools(decisions=decisions, memory=memory, audit=audit), decisions, memory
+    facts = WorldFactsProvider(InMemoryWorldSnapshotStore())
+    tools = build_platform_tools(
+        decisions=decisions, memory=memory, audit=audit, facts=facts, tenant_id="sa_retail_demo"
+    )
+    return tools, decisions, memory, facts
 
 
 def _scripted_messages() -> list[dict[str, Any]]:
@@ -118,7 +124,7 @@ def _scripted_messages() -> list[dict[str, Any]]:
 
 
 def test_agentic_cold_chain_cascade_drives_real_tool_calls_and_produces_decision() -> None:
-    tools, decisions, memory = _build_tools()
+    tools, decisions, memory, facts = _build_tools()
     runtime = _FakeRuntime(_scripted_messages())
 
     def factory() -> AgentOrchestrator:
@@ -129,6 +135,7 @@ def test_agentic_cold_chain_cascade_drives_real_tool_calls_and_produces_decision
         execution_mode=ExecutionMode.OFFLINE_TEST,
         decisions=decisions,
         memory=memory,
+        facts=facts,
         orchestrator_factory=factory,
     )
 
@@ -150,7 +157,7 @@ def test_agentic_cold_chain_cascade_drives_real_tool_calls_and_produces_decision
 
 
 def test_agentic_cold_chain_cascade_hard_fails_when_live_required_sees_offline_provider() -> None:
-    tools, decisions, memory = _build_tools()
+    tools, decisions, memory, facts = _build_tools()
     runtime = _FakeRuntime(
         _scripted_messages(),
         mode=ExecutionMode.LIVE_REQUIRED,
@@ -167,12 +174,13 @@ def test_agentic_cold_chain_cascade_hard_fails_when_live_required_sees_offline_p
             execution_mode=ExecutionMode.LIVE_REQUIRED,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=factory,
         )
 
 
 def test_agentic_cold_chain_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
-    tools, decisions, memory = _build_tools()
+    tools, decisions, memory, facts = _build_tools()
     ungrounded_messages = [
         _tool_call_message(
             "call_1",
@@ -199,5 +207,6 @@ def test_agentic_cold_chain_cascade_rejects_a_conclusion_that_cites_no_real_numb
             execution_mode=ExecutionMode.OFFLINE_TEST,
             decisions=decisions,
             memory=memory,
+            facts=facts,
             orchestrator_factory=factory,
         )

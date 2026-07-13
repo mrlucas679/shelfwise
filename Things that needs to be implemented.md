@@ -51,7 +51,7 @@ Track 3 is the Unicorn/Open Innovation track. The participant guide says Track 3
 - demo video
 - slide deck
 - live demo or hosted URL optional but recommended
-- no Docker image required for Track 3
+- Docker image required for Track 3
 
 Track 3 is pre-screened automatically for:
 
@@ -905,7 +905,7 @@ Artifacts:
 Contradictions:
 
 - Some older docs frame scaling/connectors as post-hackathon, while current instructions say full MVP capability is the target.
-- Some older planning docs say Track 3 needs a container/live URL, while the participant guide says no Docker image is required and hosted URL is optional.
+- Some older planning docs conflict on Track 3 packaging; the current submission requirement is a Docker image, while a hosted URL remains optional.
 - Some docs say the catalog generator targets 50k-500k SKUs, while the current running generator falls short.
 - Some docs call domain files code-complete, but not every domain is fully represented in running `src/` code.
 - Some docs say MI300X when the attached pod evidence shows 48GB gfx1100 hardware. Use "AMD Developer Cloud ROCm/vLLM" unless MI300X is confirmed.

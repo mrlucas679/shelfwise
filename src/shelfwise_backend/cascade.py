@@ -18,7 +18,6 @@ from shelfwise_contracts import (
     TraceSpan,
     new_id,
 )
-from shelfwise_data import build_store_intelligence_demo, load_seeded_scenario
 from shelfwise_decision_science import (
     InventoryPolicyInput,
     Relation,
@@ -33,6 +32,24 @@ from shelfwise_decision_science import (
     simulate_markdown,
 )
 from shelfwise_inference import load_inference_config
+from shelfwise_worldgen import create_world_snapshot_store
+
+from .tenant import default_tenant_context
+from .world_facts import WorldFactsProvider
+
+_default_facts_store: Any = None
+
+
+def _default_facts() -> WorldFactsProvider:
+    """Lazily-shared facts provider for callers that don't inject their own."""
+    global _default_facts_store
+    if _default_facts_store is None:
+        _default_facts_store = create_world_snapshot_store()
+    return WorldFactsProvider(_default_facts_store)
+
+
+def _event_tenant_id(event: Event | None) -> str:
+    return event.tenant_id if event is not None else default_tenant_context().tenant_id
 
 # Scenario slugs classify workloads; they are not decision identities. Event-driven decisions use
 # the immutable event id so retries remain idempotent, while explicit demo runs mint a new decision.
@@ -55,18 +72,20 @@ def _span(name: str, start: float, detail: dict[str, Any] | None = None) -> Trac
     return TraceSpan(name=name, status="ok", ms=elapsed_ms, detail=detail or {})
 
 
-def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
-    """Run the seeded Stage-4 load-shedding x payday yoghurt scenario.
+def run_golden_cascade(
+    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+) -> dict[str, Any]:
+    """Run the golden expiry-markdown scenario against the generated world.
 
     This is the first real vertical slice: deterministic math produces facts; product agents wrap
     those facts into evidence; the critic checks them; the executive emits one pending HITL action.
     """
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = load_seeded_scenario()
+    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("seed_stock", f"stock.csv:sku:{sku}")
-    source_sales = SourceRef.dataset("seed_sales", f"sales.csv:sku:{sku}")
+    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
     source_outage = SourceRef.dataset("load_shedding", f"{scenario.location}:fridge_a")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
@@ -143,7 +162,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
                     "units_on_hand",
                     scenario.units_on_hand,
                     str(source_stock),
-                    "seed_stock_csv",
+                    "generated_world_stock",
                 )
             ],
             confidence=Decimal("0.92"),
@@ -288,7 +307,7 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         summary=f"Pending manager approval: 20% markdown for {product} at {scenario.location}.",
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _GOLDEN_SCENARIO_ID
     decision_payload["role"] = "store_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
@@ -308,7 +327,9 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
         "trace": [span.to_dict() for span in spans],
         "inference": inference.to_public_dict(),
         "seed_data": scenario.to_dict(),
-        "store_intelligence": build_store_intelligence_demo(),
+        "store_intelligence": (facts or _default_facts()).get_store_intelligence(
+            _event_tenant_id(event)
+        ),
         "learning": {
             "status": "armed",
             "message": "After approval, compare actual sell-through with simulated sell-through.",
@@ -316,28 +337,38 @@ def run_golden_cascade(event: Event | None = None) -> dict[str, Any]:
     }
 
 
-def run_procurement_cascade(event: Event | None = None) -> dict[str, Any]:
+def run_procurement_cascade(
+    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+) -> dict[str, Any]:
     """Run the procurement role path: reorder policy plus measured supplier choice."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = load_seeded_scenario()
+    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("seed_stock", f"stock.csv:sku:{sku}")
-    source_sales = SourceRef.dataset("seed_sales", f"sales.csv:sku:{sku}")
-    source_suppliers = SourceRef.dataset("seed_suppliers", "suppliers.csv")
+    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
+    source_suppliers = SourceRef.dataset("generated_world", "suppliers")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
 
     started = perf_counter()
+    recent = tuple(Decimal(value) for value in scenario.recent_daily_units)
+    avg_daily_demand = sum(recent) / Decimal(len(recent)) if recent else Decimal("1")
+    variance = (
+        sum((value - avg_daily_demand) ** 2 for value in recent) / Decimal(len(recent))
+        if recent
+        else Decimal("0")
+    )
+    demand_std = variance.sqrt() if variance > 0 else Decimal("0")
     policy = compute_reorder_policy(
         InventoryPolicyInput(
             sku=sku,
-            on_hand=Decimal("20"),
-            committed_units=Decimal("8"),
-            avg_daily_demand=Decimal("10"),
-            demand_std=Decimal("2"),
-            lead_time_days=Decimal("3"),
+            on_hand=Decimal(scenario.units_on_hand),
+            committed_units=Decimal("0"),
+            avg_daily_demand=avg_daily_demand,
+            demand_std=demand_std,
+            lead_time_days=scenario.supplier_lead_time_days,
             unit_cost=scenario.unit_cost,
         )
     )
@@ -353,26 +384,31 @@ def run_procurement_cascade(event: Event | None = None) -> dict[str, Any]:
     )
 
     graph = RelationStore()
-    current_supplier = f"supplier:{scenario.supplier.lower()}"
-    backup_supplier = "supplier:gauteng_chilled_dairy"
-    unprofiled_supplier = "supplier:unknown_backup"
+    current = (facts or _default_facts()).get_supplier_for_sku(
+        _event_tenant_id(event), sku
+    )
+    alternate = (facts or _default_facts()).get_alternate_supplier(
+        _event_tenant_id(event), exclude=current["supplier_id"]
+    )
+    current_supplier = str(current["supplier_id"])
     graph.add(Relation(f"sku:{sku}", "supplied_by", current_supplier))
-    graph.add(Relation(f"sku:{sku}", "supplied_by", backup_supplier))
-    graph.add(Relation(f"sku:{sku}", "supplied_by", unprofiled_supplier))
     profiles = {
         current_supplier: SupplierProfile(
             supplier_id=current_supplier,
-            lead_time_days=Decimal("3"),
-            fill_rate=Decimal("0.76"),
+            lead_time_days=Decimal(str(current["lead_time_days"])),
+            fill_rate=Decimal(str(current["fill_rate"])),
             unit_cost=scenario.unit_cost,
         ),
-        backup_supplier: SupplierProfile(
-            supplier_id=backup_supplier,
-            lead_time_days=Decimal("1"),
-            fill_rate=Decimal("0.94"),
-            unit_cost=Money.zar("12.80"),
-        ),
     }
+    if alternate is not None:
+        backup_supplier = str(alternate["supplier_id"])
+        graph.add(Relation(f"sku:{sku}", "supplied_by", backup_supplier))
+        profiles[backup_supplier] = SupplierProfile(
+            supplier_id=backup_supplier,
+            lead_time_days=Decimal(str(alternate["lead_time_days"])),
+            fill_rate=Decimal(str(alternate["fill_rate"])),
+            unit_cost=scenario.unit_cost,
+        )
 
     started = perf_counter()
     ranking = recommend_suppliers(sku, graph, profiles)
@@ -452,10 +488,10 @@ def run_procurement_cascade(event: Event | None = None) -> dict[str, Any]:
                     ranking.method,
                 ),
                 _supporting_fact(
-                    "excluded_unprofiled_supplier",
-                    unprofiled_supplier,
+                    "profiled_supplier_count",
+                    len(profiles),
                     str(source_suppliers),
-                    "missing_measured_profile",
+                    "generated_world_supplier_profiles",
                 ),
             ],
             confidence=ranking.coverage,
@@ -517,7 +553,7 @@ def run_procurement_cascade(event: Event | None = None) -> dict[str, Any]:
         summary=f"Pending procurement approval: reorder {product} from {top_supplier.supplier_id}.",
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _PROCUREMENT_SCENARIO_ID
     decision_payload["role"] = "procurement_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
@@ -547,11 +583,13 @@ def run_procurement_cascade(event: Event | None = None) -> dict[str, Any]:
     }
 
 
-def run_sales_cascade(event: Event | None = None) -> dict[str, Any]:
+def run_sales_cascade(
+    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+) -> dict[str, Any]:
     """Run the Sales/POS role path over a sale event and catalogue price reference."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = load_seeded_scenario()
+    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
     sku = _payload_value(event, "sku", scenario.sku)
     location = _payload_value(event, "location", scenario.location)
     quantity = Decimal(str(_payload_value(event, "quantity", scenario.recent_daily_units[-1])))
@@ -560,8 +598,8 @@ def run_sales_cascade(event: Event | None = None) -> dict[str, Any]:
     line_revenue = Money.zar(unit_price * quantity)
     expected_revenue = scenario.unit_price * quantity
     price_delta = unit_price - expected_price
-    source_pos = SourceRef.dataset("seed_sales", f"sales.csv:sku:{sku}")
-    source_product = SourceRef.dataset("seed_products", f"products.csv:sku:{sku}")
+    source_pos = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
+    source_product = SourceRef.dataset("generated_world", f"products:sku:{sku}")
     spans: list[TraceSpan] = []
 
     started = perf_counter()
@@ -692,7 +730,7 @@ def run_sales_cascade(event: Event | None = None) -> dict[str, Any]:
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _SALES_SCENARIO_ID
     decision_payload["role"] = "sales_manager"
     decision_payload["critic_verdict"] = "approved" if price_matches else "review_required"
@@ -828,7 +866,7 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = str(event.tenant_id or "sa_retail_demo")
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _PRICE_OUTLIER_SCENARIO_ID
     decision_payload["role"] = "sales_manager"
     decision_payload["critic_verdict"] = "review_required"
@@ -929,7 +967,7 @@ def run_expiry_risk_check(event: Event) -> dict[str, Any] | None:
         summary=f"Pending expiry markdown review for SKU {sku}: {days} day(s) to expiry.",
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = str(event.tenant_id or "sa_retail_demo")
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _EXPIRY_SCENARIO_ID
     decision_payload["role"] = "inventory_manager"
     decision_payload["critic_verdict"] = "review_required"
@@ -949,15 +987,19 @@ def run_expiry_risk_check(event: Event) -> dict[str, Any] | None:
     }
 
 
-def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
+def run_cold_chain_cascade(
+    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+) -> dict[str, Any]:
     """Run the measured cold-chain alert path into facilities HITL review."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = load_seeded_scenario()
+    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
     payload = event.payload if event is not None else {}
     site_id = str(payload.get("site_id") or _payload_value(event, "location", scenario.location))
-    asset_id = str(payload.get("asset_id") or "fridge_dairy_1")
-    category = str(payload.get("category") or "dairy")
+    asset_id = str(
+        payload.get("asset_id") or f"cold-chain:{scenario.location}:{scenario.category}"
+    )
+    category = str(payload.get("category") or scenario.category)
     diagnosis = str(payload.get("diagnosis") or "generator_failed")
     severity = _int_payload(payload, "severity", 2)
     predicted_minutes = _decimal_payload(payload, "predicted_minutes_to_unsafe", Decimal("18"))
@@ -965,7 +1007,7 @@ def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
     average_temp_c = _decimal_payload(payload, "temp_c", Decimal("8.2"))
     stock_at_risk = _money_payload(
         payload.get("stock_at_risk"),
-        default=Money(minor_units=643_500, currency="ZAR"),
+        default=scenario.unit_price * scenario.units_on_hand,
     )
     source_alert = SourceRef.dataset("cold_chain_alert", asset_id)
     spans: list[TraceSpan] = []
@@ -1154,7 +1196,7 @@ def run_cold_chain_cascade(event: Event | None = None) -> dict[str, Any]:
         ),
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = event.tenant_id if event is not None else "sa_retail_demo"
+    decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _COLD_CHAIN_SCENARIO_ID
     decision_payload["role"] = "facilities_manager"
     decision_payload["critic_verdict"] = "approved" if alert_is_actionable else "rejected"
@@ -1526,13 +1568,14 @@ def run_inventory_exception_cascade(event: Event) -> dict[str, Any]:
     }
 
 
-def run_critic_rejection_cascade() -> dict[str, Any]:
+def run_critic_rejection_cascade(*, facts: WorldFactsProvider | None = None) -> dict[str, Any]:
     """Run the planted thin-evidence case the Critic must reject."""
 
     correlation_id = new_id("cor")
-    scenario = load_seeded_scenario()
+    tenant_id = _event_tenant_id(None)
+    scenario = (facts or _default_facts()).get_scenario_facts(tenant_id)
     sku = scenario.sku
-    source_supplier = SourceRef.dataset("seed_suppliers", f"suppliers.csv:{scenario.supplier}")
+    source_supplier = SourceRef.dataset("generated_world", f"suppliers:{scenario.supplier}")
     monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
     supplier_switch = RecommendedAction(
         "supplier_switch",
@@ -1556,7 +1599,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
                     "recent_delay",
                     scenario.supplier_recent_delay,
                     str(source_supplier),
-                    "seed_supplier_csv",
+                    "generated_world_supplier",
                 ),
                 _supporting_fact(
                     "backup_supplier_fill_rate",
@@ -1636,7 +1679,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
         summary="Critic rejected supplier switch; monitor and request sourced supplier evidence.",
     )
     decision_payload = decision.to_dict()
-    decision_payload["tenant_id"] = "sa_retail_demo"
+    decision_payload["tenant_id"] = tenant_id
     decision_payload["scenario_id"] = _CRITIC_REJECTION_SCENARIO_ID
     decision_payload["role"] = "store_manager"
     decision_payload["critic_verdict"] = "rejected"
@@ -1650,7 +1693,7 @@ def run_critic_rejection_cascade() -> dict[str, Any]:
         "trace": [span.to_dict() for span in spans],
         "inference": load_inference_config().to_public_dict(),
         "seed_data": scenario.to_dict(),
-        "store_intelligence": build_store_intelligence_demo(),
+        "store_intelligence": (facts or _default_facts()).get_store_intelligence(tenant_id),
         "learning": {
             "status": "critic_rejected",
             "message": (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -17,6 +18,7 @@ from .tool_calling import (
     PlatformToolLike,
     PlatformToolRegistry,
     ToolExecution,
+    openai_json_schema_response_format,
     parse_and_validate_json_answer,
     parse_tool_calls,
 )
@@ -271,10 +273,13 @@ class AgentOrchestrator:
         max_tokens: int = 800,
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
+        required_tool_names: Sequence[str] = (),
     ) -> AgentRunResult:
         """Run from a system/user prompt and return one validated agent answer."""
         guarded_system = (
             f"{system.rstrip()}\n\n"
+            "All natural-language values in your JSON response must be written in English. "
+            "Do not switch languages.\n"
             "Use only the supplied tools. Never invent tool results. The tools are your "
             "calculator: any number in your conclusion must be one the tools actually "
             "returned, not a guess or a paraphrase. Explain your reasoning by citing the "
@@ -295,6 +300,7 @@ class AgentOrchestrator:
             max_tokens=max_tokens,
             tenant_id=tenant_id,
             require_tool_call_first=require_tool_call_first,
+            required_tool_names=required_tool_names,
         )
 
     async def run_messages(
@@ -309,6 +315,7 @@ class AgentOrchestrator:
         max_tokens: int = 800,
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
+        required_tool_names: Sequence[str] = (),
     ) -> AgentRunResult:
         """Run a bounded tool loop from pre-built OpenAI-compatible messages.
 
@@ -320,8 +327,17 @@ class AgentOrchestrator:
         normalized_role = _normalized_role(role)
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
-        response_format = _TEXT_RESPONSE_FORMAT
+        response_format = _final_response_format(
+            model=self._runtime.architecture.target_for(normalized_role).model,
+            schema_name=schema_name,
+            schema=final_schema,
+        )
         openai_tools = self._registry.openai_tools()
+        available_tool_names = {tool["function"]["name"] for tool in openai_tools}
+        required_names = tuple(dict.fromkeys(name.strip() for name in required_tool_names if name.strip()))
+        unknown_required = set(required_names).difference(available_tool_names)
+        if unknown_required:
+            raise ValueError(f"required tools are not registered: {sorted(unknown_required)}")
         conversation = [dict(message) for message in messages]
         conversation.append(
             {
@@ -342,7 +358,11 @@ class AgentOrchestrator:
 
         for call_index in range(self._max_model_calls):
             tool_choice: str | dict[str, Any] | None
-            if not openai_tools:
+            executed_names = {execution.name for execution in tool_executions}
+            next_required = next((name for name in required_names if name not in executed_names), None)
+            if next_required is not None:
+                tool_choice = {"type": "function", "function": {"name": next_required}}
+            elif not openai_tools:
                 tool_choice = None
             elif require_tool_call_first and call_index == 0:
                 tool_choice = "required"
@@ -391,6 +411,7 @@ class AgentOrchestrator:
                         raise
                     final_answer_retries += 1
                     continue
+                _ensure_english_payload(answer)
                 return AgentRunResult(
                     role=normalized_role,
                     answer=answer,
@@ -438,6 +459,19 @@ class AgentOrchestrator:
         )
 
 
+def _final_response_format(
+    *,
+    model: str,
+    schema_name: str,
+    schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Use native constrained JSON only for the strong Gemma tier proven to support it."""
+
+    if model.strip().lower() == "google/gemma-4-31b-it":
+        return openai_json_schema_response_format(name=schema_name, schema=schema)
+    return _TEXT_RESPONSE_FORMAT
+
+
 def enforce_execution_mode(model_call: ModelCall, mode: ExecutionMode) -> None:
     """Reject failed calls and enforce network-only evidence in live mode."""
     normalized_mode = ExecutionMode(mode)
@@ -452,6 +486,27 @@ def enforce_execution_mode(model_call: ModelCall, mode: ExecutionMode) -> None:
     is_offline_provider = any(label in provider for label in _OFFLINE_PROVIDERS)
     if model_call.fallback or is_offline_provider:
         raise LiveInferenceRequiredError("live_required rejected an offline/fallback model result")
+
+
+def _ensure_english_payload(value: Any) -> None:
+    """Reject generated JSON containing a clearly non-English writing system."""
+    if isinstance(value, str):
+        letters = [char for char in value if char.isalpha()]
+        if not letters:
+            return
+        latin_letters = sum(
+            "LATIN" in unicodedata.name(char, "") or char.isascii() for char in letters
+        )
+        if latin_letters / len(letters) < 0.8:
+            raise AgentOrchestrationError("model returned a non-English response")
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _ensure_english_payload(item)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+        for item in value:
+            _ensure_english_payload(item)
 
 
 def deepcopy_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from shelfwise_runtime import durable_dir
+
 from .config import load_benchmark_config
 from .models import BenchmarkConfig, EvidenceScope, RunSettings
 from .reporting import write_benchmark_outputs
@@ -142,7 +144,7 @@ def _default_output_dir() -> Path:
     """Return a timestamped report directory without overwriting prior runs."""
 
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return REPO_ROOT / "reports" / f"inference_architecture_eval_{run_id}"
+    return durable_dir("BENCHMARK_OUTPUT_DIR", "reports") / f"inference_architecture_eval_{run_id}"
 
 
 if __name__ == "__main__":

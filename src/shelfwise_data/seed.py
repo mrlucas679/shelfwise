@@ -11,7 +11,8 @@ from typing import Any
 from shelfwise_contracts import Money
 
 REFERENCE_NOW = datetime(2026, 7, 6, 8, 0, tzinfo=UTC)
-HERO_SKU = "4011"
+# Legacy compatibility API: the hero is selected from the supplied dataset, never named in code.
+HERO_SKU: str | None = None
 DEFAULT_DATASETS = Path(__file__).resolve().parents[2] / "data" / "datasets"
 
 
@@ -150,9 +151,10 @@ def load_seeded_scenario(
     datasets_dir: Path = DEFAULT_DATASETS,
     *,
     now: datetime = REFERENCE_NOW,
-    sku: str = HERO_SKU,
+    sku: str | None = None,
 ) -> SeededScenario:
     datasets_dir = Path(datasets_dir)
+    sku = sku or _first_product_sku(datasets_dir)
     validate_seed_data(datasets_dir, now=now, hero_sku=sku)
 
     products = {item.sku: item for item in load_products(datasets_dir / "products.csv")}
@@ -194,9 +196,12 @@ def validate_seed_data(
     datasets_dir: Path = DEFAULT_DATASETS,
     *,
     now: datetime = REFERENCE_NOW,
-    hero_sku: str = HERO_SKU,
+    hero_sku: str | None = None,
 ) -> None:
     products = {item.sku: item for item in load_products(datasets_dir / "products.csv")}
+    hero_sku = hero_sku or next(iter(products), None)
+    if not hero_sku:
+        raise ValueError("products.csv contains no products")
     stock = load_stock(datasets_dir / "stock.csv")
     sales = load_sales(datasets_dir / "sales.csv")
     suppliers = {item.supplier for item in load_suppliers(datasets_dir / "suppliers.csv")}
@@ -223,6 +228,13 @@ def validate_seed_data(
         )
     if not recent_daily_units(sales, sku=hero_sku, location=hero.location):
         raise ValueError(f"planted story hero SKU missing sales history: {hero_sku}")
+
+
+def _first_product_sku(datasets_dir: Path) -> str:
+    products = load_products(Path(datasets_dir) / "products.csv")
+    if not products:
+        raise ValueError("products.csv contains no products")
+    return products[0].sku
 
 
 def recent_daily_units(
