@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 
-from shelfwise_backend.app import app
+import pytest
+
+from shelfwise_backend.app import (
+    _cookie_secure_setting,
+    _reject_insecure_production_cookie_config,
+    cors_allowed_origins,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,6 +37,8 @@ def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> N
     assert 'APP_ENV: production' in text
     assert 'SHELFWISE_AUTH_MODE: jwt' in text
     assert 'SHELFWISE_PUBLIC_DEMO_SESSION: "true"' in text
+    assert 'SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}' in text
+    assert "SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI" in text
     assert '- "80:80"' in text
     assert '- "8000:8000"' not in text
     assert '- "5432:5432"' not in text
@@ -44,10 +51,48 @@ def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> N
     assert "psql -h postgres" in text
 
 
+def test_production_cookie_config_is_secure_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("SHELFWISE_COOKIE_SECURE", raising=False)
+    monkeypatch.delenv("SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI", raising=False)
+
+    _reject_insecure_production_cookie_config()
+
+    assert _cookie_secure_setting() is True
+
+
+def test_production_cookie_config_rejects_insecure_without_disposable_ci_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SHELFWISE_COOKIE_SECURE", "false")
+    monkeypatch.delenv("SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI", raising=False)
+
+    with pytest.raises(RuntimeError, match="not allowed"):
+        _reject_insecure_production_cookie_config()
+
+
+def test_disposable_ci_is_the_only_insecure_production_cookie_override(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SHELFWISE_COOKIE_SECURE", "false")
+    monkeypatch.setenv("SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI", "true")
+
+    _reject_insecure_production_cookie_config()
+
+    assert _cookie_secure_setting() is False
+
+
 def test_frontend_proxy_includes_browser_session_route() -> None:
     text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
 
     assert "^/(auth|" in text
+
+
+def test_credentialed_cors_rejects_wildcard_origin(monkeypatch) -> None:
+    monkeypatch.setenv("SHELFWISE_CORS_ORIGINS", "*")
+
+    with pytest.raises(RuntimeError, match="cannot contain"):
+        cors_allowed_origins()
 
 
 def test_postgres_schema_is_mounted_for_compose_init() -> None:
@@ -107,22 +152,8 @@ def test_ci_boots_and_smokes_production_public_origin() -> None:
     assert "docker-compose.production.yml down --volumes" in workflow
 
 
-def test_readme_connected_api_list_matches_backend_schema() -> None:
+def test_readme_points_to_capability_manifest_for_api_reference() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    section = readme.split("Connected API endpoints:", 1)[1].split("## Smoke", 1)[0]
-    documented = sorted(line.strip() for line in section.splitlines() if line.startswith("- `"))
 
-    assert documented == sorted(_backend_endpoint_lines())
-
-
-def _backend_endpoint_lines() -> list[str]:
-    routes: dict[str, set[str]] = defaultdict(set)
-    for path, operations in app.openapi()["paths"].items():
-        for method in operations:
-            upper = method.upper()
-            if upper in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-                routes[path].add(upper)
-    return [
-        f"- `{'/'.join(sorted(methods))} http://localhost:8000{path}`"
-        for path, methods in sorted(routes.items())
-    ]
+    assert "capabilities/manifest.json" in readme
+    assert "compare_capability_manifests.py" in readme
