@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
-from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
+from shelfwise_runtime import DataDomain, normalize_domain
 from shelfwise_storage import auto_schema_enabled, connect, jsonb
+from shelfwise_storage import now_iso as _now
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .memory_consolidation import TenantFact
@@ -54,12 +55,19 @@ class InMemoryTenantFactStore:
         self,
         *,
         tenant_id: str | None = None,
+        data_domain: str | None = None,
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         with self._lock:
             facts = list(self._facts.values())
         if tenant_id is not None:
             facts = [fact for fact in facts if fact.get("tenant_id") == tenant_id]
+        if data_domain is not None:
+            resolved_domain = normalize_domain(
+                data_domain,
+                default=DataDomain.OPERATIONAL_TWIN,
+            )
+            facts = [fact for fact in facts if fact.get("data_domain") == resolved_domain]
         if active_only:
             facts = [fact for fact in facts if fact.get("active", True) is True]
         facts.sort(key=lambda fact: (str(fact.get("sku", "")), str(fact.get("action", ""))))
@@ -95,12 +103,13 @@ class PostgresTenantFactStore:
                 """
                 insert into shelfwise_learned_patterns
                     (
-                        id, tenant_id, pattern_type, sku, conclusion,
+                        id, tenant_id, data_domain, pattern_type, sku, conclusion,
                         evidence_refs, payload, created_at
                     )
-                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (id) do update
                 set tenant_id = excluded.tenant_id,
+                    data_domain = excluded.data_domain,
                     pattern_type = excluded.pattern_type,
                     sku = excluded.sku,
                     conclusion = excluded.conclusion,
@@ -110,6 +119,7 @@ class PostgresTenantFactStore:
                 (
                     fact.id,
                     fact.tenant_id,
+                    fact.data_domain,
                     _PATTERN_TYPE,
                     fact.sku,
                     fact.fact,
@@ -159,6 +169,7 @@ class PostgresTenantFactStore:
         self,
         *,
         tenant_id: str | None = None,
+        data_domain: str | None = None,
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         where = "where pattern_type = %s"
@@ -166,6 +177,11 @@ class PostgresTenantFactStore:
         if tenant_id is not None:
             where += " and tenant_id = %s"
             params.append(tenant_id)
+        if data_domain is not None:
+            where += " and data_domain = %s"
+            params.append(
+                normalize_domain(data_domain, default=DataDomain.OPERATIONAL_TWIN)
+            )
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
@@ -208,15 +224,12 @@ def create_tenant_fact_store() -> InMemoryTenantFactStore | PostgresTenantFactSt
     raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 _TENANT_FACT_SCHEMA_SQL = """
 create extension if not exists vector;
 create table if not exists shelfwise_learned_patterns (
     id text primary key,
     tenant_id text not null,
+    data_domain text not null default 'world_simulation',
     pattern_type text not null,
     sku text,
     conclusion text not null,
@@ -225,6 +238,9 @@ create table if not exists shelfwise_learned_patterns (
     embedding vector(768),
     created_at timestamptz not null
 );
+alter table shelfwise_learned_patterns
+add column if not exists data_domain text not null default 'world_simulation';
+drop index if exists idx_shelfwise_learned_patterns_tenant_type;
 create index if not exists idx_shelfwise_learned_patterns_tenant_type
-on shelfwise_learned_patterns (tenant_id, pattern_type);
+on shelfwise_learned_patterns (tenant_id, data_domain, pattern_type);
 """

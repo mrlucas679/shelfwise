@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 from shelfwise_eval.full_system import (
+    LIVE_REQUIRED_FEATURE_RECEIPTS,
+    LIVE_REQUIRED_ROUTE_RECEIPTS,
     REQUIRED_FEATURE_RECEIPTS,
     REQUIRED_ROUTE_RECEIPTS,
     SCENARIO_ROTATION,
@@ -88,6 +90,24 @@ def test_integrity_audit_rejects_decision_reuse_mismatch_noop_and_zero_live_answ
     assert any(item.startswith("learning_noop:dec_reused") for item in failures)
     assert "live_model_answer_mismatch:model=0:calls=1" in failures
     assert "live_offline_answers:1" in failures
+    assert "missing_feature_receipt:agentic_workflows" in failures
+    assert any(
+        failure == f"missing_route_receipt:{route}"
+        for route in LIVE_REQUIRED_ROUTE_RECEIPTS
+        for failure in failures
+    )
+
+
+def test_live_only_receipts_cover_all_agentic_workflows() -> None:
+    assert {"agentic_workflows", "agent_role_coverage"} == LIVE_REQUIRED_FEATURE_RECEIPTS
+    assert {
+        "POST /demo/golden/agentic",
+        "POST /demo/procurement/agentic",
+        "POST /demo/sales/agentic",
+        "POST /demo/catalog-price/agentic",
+        "POST /demo/expiry-risk/agentic",
+        "POST /demo/cold-chain/agentic",
+    } == LIVE_REQUIRED_ROUTE_RECEIPTS
 
 
 def test_integrity_audit_requires_feature_and_route_receipts() -> None:

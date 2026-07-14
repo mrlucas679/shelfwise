@@ -3,29 +3,115 @@ create extension if not exists vector;
 create table if not exists shelfwise_decisions (
     id text primary key,
     tenant_id text not null default 'default',
+    data_domain text not null default 'world_simulation',
     status text not null,
     payload jsonb not null,
     created_at timestamptz not null,
     updated_at timestamptz not null
 );
+alter table shelfwise_decisions
+add column if not exists data_domain text not null default 'world_simulation';
 
 create index if not exists idx_shelfwise_decisions_status_updated
 on shelfwise_decisions (status, updated_at desc);
 
 create index if not exists idx_shelfwise_decisions_tenant_updated
 on shelfwise_decisions (tenant_id, updated_at desc);
+create index if not exists idx_shelfwise_decisions_tenant_domain_updated
+on shelfwise_decisions (tenant_id, data_domain, updated_at desc);
+
+create table if not exists shelfwise_candidates (
+    candidate_key text primary key,
+    tenant_id text not null,
+    data_domain text not null default 'world_simulation',
+    candidate_type text not null,
+    sku text not null,
+    lot_id text,
+    status text not null,
+    score numeric not null,
+    urgency numeric not null,
+    exposure_units integer not null,
+    monitoring_only boolean not null,
+    evidence jsonb not null,
+    first_seen_at timestamptz not null,
+    last_seen_at timestamptz not null,
+    updated_at timestamptz not null,
+    suppression_reason text,
+    suppressed_until timestamptz,
+    decision_id text
+);
+alter table shelfwise_candidates
+add column if not exists data_domain text not null default 'world_simulation';
+
+drop index if exists idx_shelfwise_candidates_tenant_status_updated;
+create index if not exists idx_shelfwise_candidates_tenant_status_updated
+on shelfwise_candidates (tenant_id, data_domain, status, updated_at desc);
+
+drop index if exists idx_shelfwise_candidates_tenant_suppression;
+create index if not exists idx_shelfwise_candidates_tenant_suppression
+on shelfwise_candidates (tenant_id, data_domain, suppressed_until);
+
+create table if not exists shelfwise_open_orders (
+    tenant_id text not null,
+    data_domain text not null default 'operational_twin',
+    order_id text not null,
+    sku text not null,
+    supplier_id text not null,
+    ordered_units integer not null,
+    received_units integer not null,
+    remaining_units integer not null,
+    eta timestamptz,
+    status text not null,
+    source_event_id text not null,
+    updated_at timestamptz not null,
+    payload jsonb not null,
+    primary key (tenant_id, data_domain, order_id)
+);
+alter table shelfwise_open_orders
+add column if not exists data_domain text not null default 'operational_twin';
+alter table shelfwise_open_orders drop constraint if exists shelfwise_open_orders_pkey;
+alter table shelfwise_open_orders add primary key (tenant_id, data_domain, order_id);
+
+drop index if exists idx_shelfwise_open_orders_tenant_sku_status;
+create index if not exists idx_shelfwise_open_orders_tenant_sku_status
+on shelfwise_open_orders (tenant_id, data_domain, sku, status, eta);
 
 create table if not exists shelfwise_events (
-    id text primary key,
+    id text not null,
     tenant_id text not null,
+    data_domain text not null default 'operational_twin',
     event_type text not null,
     event_ts timestamptz not null,
     payload jsonb not null,
-    received_at timestamptz not null
+    received_at timestamptz not null,
+    published boolean not null default false,
+    primary key (tenant_id, data_domain, id)
 );
 
+-- Legacy installs predate explicit data-domain provenance. Prefix checks are used
+-- only for this one-time backfill; request-time policy uses Event.data_domain.
+alter table shelfwise_events add column if not exists data_domain text;
+alter table shelfwise_events add column if not exists published boolean not null default false;
+update shelfwise_events
+set data_domain = case
+    when payload->>'data_domain' in
+         ('operational_twin', 'world_simulation', 'training_fixture', 'twin_scenario')
+        then payload->>'data_domain'
+    when id like 'evt_demo_%'
+         or coalesce(payload->>'correlation_id', '') like 'world_%'
+        then 'world_simulation'
+    else 'operational_twin'
+end
+where data_domain is null;
+alter table shelfwise_events
+    alter column data_domain set default 'operational_twin',
+    alter column data_domain set not null;
+alter table shelfwise_events drop constraint if exists shelfwise_events_pkey;
+alter table shelfwise_events add primary key (tenant_id, data_domain, id);
+
+drop index if exists idx_shelfwise_events_tenant_received;
 create index if not exists idx_shelfwise_events_tenant_received
-on shelfwise_events (tenant_id, received_at desc);
+on shelfwise_events (tenant_id, data_domain, received_at desc);
 
 create table if not exists shelfwise_inbound_records (
     id text primary key,
@@ -49,34 +135,57 @@ on shelfwise_inbound_records (tenant_id, source_system, source_object_id);
 
 create table if not exists shelfwise_learning_thresholds (
     tenant_id text not null default 'default',
+    data_domain text not null default 'world_simulation',
     metric text not null,
     sku text not null,
     threshold_units integer not null,
     updated_at timestamptz not null,
-    primary key (tenant_id, metric)
+    primary key (tenant_id, data_domain, metric)
 );
+alter table shelfwise_learning_thresholds
+add column if not exists data_domain text not null default 'world_simulation';
+alter table shelfwise_learning_thresholds
+drop constraint if exists shelfwise_learning_thresholds_pkey;
+alter table shelfwise_learning_thresholds
+add primary key (tenant_id, data_domain, metric);
 
-create unique index if not exists ux_shelfwise_learning_thresholds_tenant_metric
-on shelfwise_learning_thresholds (tenant_id, metric);
+drop index if exists ux_shelfwise_learning_thresholds_tenant_metric;
+create unique index if not exists ux_shelfwise_learning_thresholds_domain_metric
+on shelfwise_learning_thresholds (tenant_id, data_domain, metric);
 
 create table if not exists shelfwise_learning_events (
     tenant_id text not null default 'default',
+    data_domain text not null default 'world_simulation',
     decision_id text not null,
     payload jsonb not null,
     created_at timestamptz not null,
-    primary key (tenant_id, decision_id)
+    primary key (tenant_id, data_domain, decision_id)
 );
+alter table shelfwise_learning_events
+add column if not exists data_domain text not null default 'world_simulation';
+alter table shelfwise_learning_events
+drop constraint if exists shelfwise_learning_events_pkey;
+alter table shelfwise_learning_events
+add primary key (tenant_id, data_domain, decision_id);
 
+drop index if exists idx_shelfwise_learning_events_tenant_created;
 create index if not exists idx_shelfwise_learning_events_tenant_created
-on shelfwise_learning_events (tenant_id, created_at desc);
+on shelfwise_learning_events (tenant_id, data_domain, created_at desc);
 
 create table if not exists cascade_runs (
     run_id text primary key,
     tenant_id text not null,
+    data_domain text not null default 'operational_twin',
     status text not null default 'running',
     started_at timestamptz not null,
     finished_at timestamptz
 );
+
+alter table cascade_runs
+add column if not exists data_domain text not null default 'operational_twin';
+
+create index if not exists idx_cascade_runs_tenant_domain_started
+on cascade_runs (tenant_id, data_domain, started_at desc);
 
 create table if not exists cascade_steps (
     run_id text not null references cascade_runs(run_id) on delete cascade,
@@ -103,12 +212,28 @@ create table if not exists shelfwise_model_runs (
     input_tokens integer not null,
     output_tokens integer not null,
     latency_ms integer not null,
+    data_domain text not null default 'world_simulation',
     status text not null default 'ok',
-    created_at timestamptz not null
+    created_at timestamptz not null,
+    user_message text not null default '',
+    response_text text not null default '',
+    error_detail text not null default ''
 );
+
+alter table shelfwise_model_runs
+add column if not exists data_domain text not null default 'world_simulation';
+alter table shelfwise_model_runs
+add column if not exists user_message text not null default '';
+alter table shelfwise_model_runs
+add column if not exists response_text text not null default '';
+alter table shelfwise_model_runs
+add column if not exists error_detail text not null default '';
 
 create index if not exists idx_shelfwise_model_runs_tenant_created
 on shelfwise_model_runs (tenant_id, created_at desc);
+
+create index if not exists idx_shelfwise_model_runs_tenant_domain_created
+on shelfwise_model_runs (tenant_id, data_domain, created_at desc);
 
 create table if not exists shelfwise_prompt_versions (
     tenant_id text not null,
@@ -127,6 +252,7 @@ on shelfwise_prompt_versions (tenant_id, agent, version);
 
 create table if not exists shelfwise_writeback_tasks (
     tenant_id text not null,
+    data_domain text not null default 'operational_twin',
     idempotency_key text not null,
     task_id text not null unique,
     title text not null,
@@ -137,11 +263,18 @@ create table if not exists shelfwise_writeback_tasks (
     payload jsonb not null,
     created_at timestamptz not null,
     updated_at timestamptz not null,
-    primary key (tenant_id, idempotency_key)
+    primary key (tenant_id, data_domain, idempotency_key)
 );
 
+alter table shelfwise_writeback_tasks
+add column if not exists data_domain text not null default 'operational_twin';
+alter table shelfwise_writeback_tasks
+drop constraint if exists shelfwise_writeback_tasks_pkey;
+alter table shelfwise_writeback_tasks
+add primary key (tenant_id, data_domain, idempotency_key);
+drop index if exists idx_shelfwise_writeback_tasks_tenant_created;
 create index if not exists idx_shelfwise_writeback_tasks_tenant_created
-on shelfwise_writeback_tasks (tenant_id, created_at desc);
+on shelfwise_writeback_tasks (tenant_id, data_domain, created_at desc);
 
 create table if not exists shelfwise_worldgen_runs (
     run_id text primary key,
@@ -173,6 +306,7 @@ on shelfwise_product_state (tenant_id, sku);
 create table if not exists shelfwise_learned_patterns (
     id text primary key,
     tenant_id text not null,
+    data_domain text not null default 'world_simulation',
     pattern_type text not null,
     sku text,
     conclusion text not null,
@@ -182,8 +316,11 @@ create table if not exists shelfwise_learned_patterns (
     created_at timestamptz not null
 );
 
+alter table shelfwise_learned_patterns
+add column if not exists data_domain text not null default 'world_simulation';
+drop index if exists idx_shelfwise_learned_patterns_tenant_type;
 create index if not exists idx_shelfwise_learned_patterns_tenant_type
-on shelfwise_learned_patterns (tenant_id, pattern_type);
+on shelfwise_learned_patterns (tenant_id, data_domain, pattern_type);
 
 create table if not exists shelfwise_business_profile (
     tenant_id text primary key,
@@ -260,10 +397,139 @@ create table if not exists shelfwise_world_snapshot (
     payload jsonb not null
 );
 
+-- Additive exact-store digital-twin state. Raw media is intentionally not represented here;
+-- edge devices submit only derived, provenance-bearing observations.
+create table if not exists shelfwise_twin_entities (
+    tenant_id text not null,
+    twin_id text not null,
+    store_id text not null,
+    entity_type text not null,
+    model_version text not null,
+    display_name text not null,
+    attributes jsonb not null default '{}',
+    created_at timestamptz not null,
+    retired_at timestamptz,
+    primary key (tenant_id, twin_id)
+);
+
+create table if not exists shelfwise_twin_relationships (
+    tenant_id text not null,
+    relationship_id text not null,
+    source_twin_id text not null,
+    relationship_type text not null,
+    target_twin_id text not null,
+    attributes jsonb not null default '{}',
+    valid_from timestamptz not null,
+    valid_to timestamptz,
+    primary key (tenant_id, relationship_id),
+    foreign key (tenant_id, source_twin_id)
+        references shelfwise_twin_entities (tenant_id, twin_id),
+    foreign key (tenant_id, target_twin_id)
+        references shelfwise_twin_entities (tenant_id, twin_id)
+);
+
+create table if not exists shelfwise_twin_observations (
+    tenant_id text not null,
+    observation_id text not null,
+    store_id text not null,
+    twin_id text not null,
+    property_name text not null,
+    lane text not null check (lane in ('reported', 'estimated', 'desired', 'predicted')),
+    value jsonb not null,
+    unit text,
+    observed_at timestamptz not null,
+    ingested_at timestamptz not null,
+    source_system text not null,
+    source_object_id text not null,
+    source_sequence text,
+    source_quality double precision not null check (source_quality between 0 and 1),
+    schema_version text not null,
+    correlation_id text not null,
+    causation_id text,
+    scenario_branch_id text,
+    payload_hash text not null,
+    primary key (tenant_id, observation_id),
+    foreign key (tenant_id, twin_id)
+        references shelfwise_twin_entities (tenant_id, twin_id),
+    check (lane <> 'predicted' or scenario_branch_id is not null)
+);
+
+create unique index if not exists ux_shelfwise_twin_observation_source
+on shelfwise_twin_observations
+    (tenant_id, source_system, source_object_id, property_name, lane, payload_hash);
+
+create index if not exists idx_shelfwise_twin_observations_entity_time
+on shelfwise_twin_observations (tenant_id, twin_id, observed_at desc);
+
+create table if not exists shelfwise_twin_property_state (
+    tenant_id text not null,
+    twin_id text not null,
+    property_name text not null,
+    lane text not null check (lane in ('reported', 'estimated', 'desired', 'predicted')),
+    scenario_branch_key text not null default '',
+    value jsonb not null,
+    unit text,
+    observation_id text not null,
+    observed_at timestamptz not null,
+    projected_at timestamptz not null,
+    source_system text not null,
+    source_quality double precision not null check (source_quality between 0 and 1),
+    confidence double precision not null check (confidence between 0 and 1),
+    freshness text not null,
+    primary key (tenant_id, twin_id, property_name, lane, scenario_branch_key)
+);
+
+create table if not exists shelfwise_twin_calibrations (
+    tenant_id text not null,
+    store_id text not null,
+    device_id text not null,
+    property_name text not null,
+    reference_value double precision not null,
+    observed_value double precision not null,
+    tolerance double precision not null check (tolerance > 0),
+    calibrated_at timestamptz not null,
+    calibration_id text not null,
+    primary key (tenant_id, store_id, device_id, property_name)
+);
+
+create table if not exists shelfwise_twin_onboarding_manifests (
+    tenant_id text not null,
+    store_id text not null,
+    manifest jsonb not null,
+    primary key (tenant_id, store_id)
+);
+
+create table if not exists shelfwise_twin_scenario_branches (
+    tenant_id text not null,
+    store_id text not null,
+    branch_id text not null,
+    payload jsonb not null,
+    created_at timestamptz not null,
+    updated_at timestamptz not null,
+    primary key (tenant_id, store_id, branch_id)
+);
+
+create index if not exists idx_shelfwise_twin_scenarios_tenant_store
+on shelfwise_twin_scenario_branches (tenant_id, store_id, updated_at desc);
+
 alter table shelfwise_decisions enable row level security;
 alter table shelfwise_decisions force row level security;
 drop policy if exists shelfwise_decisions_tenant_isolation on shelfwise_decisions;
 create policy shelfwise_decisions_tenant_isolation on shelfwise_decisions
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_candidates enable row level security;
+alter table shelfwise_candidates force row level security;
+drop policy if exists shelfwise_candidates_tenant_isolation on shelfwise_candidates;
+create policy shelfwise_candidates_tenant_isolation on shelfwise_candidates
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_open_orders enable row level security;
+alter table shelfwise_open_orders force row level security;
+drop policy if exists shelfwise_open_orders_tenant_isolation on shelfwise_open_orders;
+create policy shelfwise_open_orders_tenant_isolation on shelfwise_open_orders
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 
@@ -411,5 +677,58 @@ alter table shelfwise_world_snapshot force row level security;
 drop policy if exists shelfwise_world_snapshot_tenant_isolation
 on shelfwise_world_snapshot;
 create policy shelfwise_world_snapshot_tenant_isolation on shelfwise_world_snapshot
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_entities enable row level security;
+alter table shelfwise_twin_entities force row level security;
+drop policy if exists shelfwise_twin_entities_tenant_isolation on shelfwise_twin_entities;
+create policy shelfwise_twin_entities_tenant_isolation on shelfwise_twin_entities
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_relationships enable row level security;
+alter table shelfwise_twin_relationships force row level security;
+drop policy if exists shelfwise_twin_relationships_tenant_isolation on shelfwise_twin_relationships;
+create policy shelfwise_twin_relationships_tenant_isolation on shelfwise_twin_relationships
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_observations enable row level security;
+alter table shelfwise_twin_observations force row level security;
+drop policy if exists shelfwise_twin_observations_tenant_isolation on shelfwise_twin_observations;
+create policy shelfwise_twin_observations_tenant_isolation on shelfwise_twin_observations
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_property_state enable row level security;
+alter table shelfwise_twin_property_state force row level security;
+drop policy if exists shelfwise_twin_property_state_tenant_isolation on shelfwise_twin_property_state;
+create policy shelfwise_twin_property_state_tenant_isolation on shelfwise_twin_property_state
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_calibrations enable row level security;
+alter table shelfwise_twin_calibrations force row level security;
+drop policy if exists shelfwise_twin_calibrations_tenant_isolation on shelfwise_twin_calibrations;
+create policy shelfwise_twin_calibrations_tenant_isolation on shelfwise_twin_calibrations
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_onboarding_manifests enable row level security;
+alter table shelfwise_twin_onboarding_manifests force row level security;
+drop policy if exists shelfwise_twin_onboarding_manifests_tenant_isolation
+    on shelfwise_twin_onboarding_manifests;
+create policy shelfwise_twin_onboarding_manifests_tenant_isolation
+    on shelfwise_twin_onboarding_manifests
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_twin_scenario_branches enable row level security;
+alter table shelfwise_twin_scenario_branches force row level security;
+drop policy if exists shelfwise_twin_scenario_branches_tenant_isolation
+on shelfwise_twin_scenario_branches;
+create policy shelfwise_twin_scenario_branches_tenant_isolation
+on shelfwise_twin_scenario_branches
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));

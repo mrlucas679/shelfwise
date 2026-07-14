@@ -173,6 +173,7 @@ def _discover_openapi_routes(root: Path) -> list[OpenAPIRouteCapability]:
     paths = (
         root / "src/shelfwise_backend/app.py",
         root / "src/shelfwise_backend/intelligence_api.py",
+        root / "src/shelfwise_backend/routes_twin.py",
         root / "src/shelfwise_multimodal/router.py",
     )
     feature_by_path = {

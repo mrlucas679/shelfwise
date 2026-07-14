@@ -41,6 +41,11 @@ def test_tenant_rls_sql_is_fail_closed_and_covers_current_business_tables() -> N
     assert "shelfwise_business_profile" in TENANT_SCOPED_TABLES
     assert "shelfwise_chat_conversations" in TENANT_SCOPED_TABLES
     assert "shelfwise_inventory_positions" in TENANT_SCOPED_TABLES
+    assert "shelfwise_twin_entities" in TENANT_SCOPED_TABLES
+    assert "shelfwise_twin_relationships" in TENANT_SCOPED_TABLES
+    assert "shelfwise_twin_observations" in TENANT_SCOPED_TABLES
+    assert "shelfwise_twin_property_state" in TENANT_SCOPED_TABLES
+    assert "shelfwise_twin_scenario_branches" in TENANT_SCOPED_TABLES
     assert "force row level security" in joined
     assert "current_setting('app.tenant_id', true)" in joined
     assert "with check" in joined
@@ -112,7 +117,32 @@ def test_compose_init_schema_matches_tenant_scoped_tables() -> None:
     )
 
     assert "create extension if not exists vector" in schema
+    assert "data_domain text not null default 'operational_twin'" in schema
+    assert "primary key (tenant_id, data_domain, id)" in schema
+    assert "published boolean not null default false" in schema
     for table in TENANT_SCOPED_TABLES:
         assert f"create table if not exists {table}" in schema
         assert f"alter table {table} force row level security" in schema
         assert f"create policy {table}_tenant_isolation" in schema
+
+
+def test_model_run_schema_migrates_telemetry_columns_before_domain_index() -> None:
+    schema = (ROOT / "src" / "shelfwise_storage" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(schema.split())
+    domain_migration = (
+        "alter table shelfwise_model_runs add column if not exists data_domain "
+        "text not null default 'world_simulation';"
+    )
+    domain_index = (
+        "create index if not exists idx_shelfwise_model_runs_tenant_domain_created "
+        "on shelfwise_model_runs (tenant_id, data_domain, created_at desc);"
+    )
+
+    assert normalized.index(domain_migration) < normalized.index(domain_index)
+    for column in ("user_message", "response_text", "error_detail"):
+        assert (
+            f"alter table shelfwise_model_runs add column if not exists {column} "
+            "text not null default '';"
+        ) in normalized

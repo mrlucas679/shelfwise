@@ -6,10 +6,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
+from shelfwise_backend.deps import _request_authorization
 from shelfwise_backend.tenant import default_tenant_context, verify_bearer_token
 from shelfwise_contracts import Event, EventSource, EventType, SourceRef
 
@@ -134,17 +135,22 @@ def build_scan_router(*, api_key: str | None = None) -> APIRouter:
     @router.post("/barcode")
     async def scan_barcode(
         body: BarcodeScanBody,
+        request: Request,
         authorization: str | None = Header(default=None, alias="authorization"),
     ) -> dict[str, object]:
-        candidate = _scan_event_candidate(body, tenant_id=_tenant_id(authorization))
+        candidate = _scan_event_candidate(
+            body,
+            tenant_id=_tenant_id(_request_authorization(request, authorization)),
+        )
         return {"candidate": candidate, "requires_human_review": True}
 
     @router.post("/receipt")
     async def scan_receipt(
         body: ReceiptScanBody,
+        request: Request,
         authorization: str | None = Header(default=None, alias="authorization"),
     ) -> dict[str, object]:
-        tenant_id = _tenant_id(authorization)
+        tenant_id = _tenant_id(_request_authorization(request, authorization))
         return {
             "candidates": [
                 _receipt_line_candidate(body, line, tenant_id=tenant_id) for line in body.lines

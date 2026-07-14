@@ -165,3 +165,34 @@ def test_runner_records_required_metrics_and_synchronized_worst_case() -> None:
     assert comparison.request_rps_ratio_vs_shared is not None
     assert comparison.gpu_util_ratio_vs_shared is None
     assert "control-plane-only" in comparison.notes
+
+
+def test_runner_honors_explicit_workflow_cap_even_when_window_is_short() -> None:
+    config = _config()
+    config = BenchmarkConfig(
+        config.workflow,
+        config.endpoints,
+        config.strategies,
+        RunSettings(
+            peak_concurrency=config.settings.peak_concurrency,
+            synchronized_workflows=config.settings.synchronized_workflows,
+            warmup_seconds=0,
+            steady_seconds=0.0001,
+            repeats=config.settings.repeats,
+            telemetry_interval_seconds=config.settings.telemetry_interval_seconds,
+            max_workflows_per_window=1,
+        ),
+    )
+
+    result = asyncio.run(
+        BenchmarkRunner(
+            config,
+            scope=EvidenceScope.CONTROL_PLANE_ONLY,
+            adapter=FakeInferenceAdapter(),
+            metrics_client=FakeMetricsClient(),
+            host_sampler=FakeHostSampler(),
+            strict_preflight=False,
+        ).run()
+    )
+
+    assert len(result.workflows) == 20

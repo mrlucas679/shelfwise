@@ -1,5 +1,11 @@
 from .client import InferenceError, InferenceResult, OpenAICompatibleInferenceClient
-from .config import InferenceConfig, ModelTier, ProviderKind, load_inference_config
+from .config import (
+    SUBMISSION_TIMEOUT_LIMIT_S,
+    InferenceConfig,
+    ModelTier,
+    ProviderKind,
+    load_inference_config,
+)
 from .orchestration import (
     AgentArchitecture,
     AgentOrchestrator,
@@ -12,6 +18,7 @@ from .orchestration import (
 from .tool_calling import PlatformToolRegistry
 
 __all__ = [
+    "SUBMISSION_TIMEOUT_LIMIT_S",
     "AgentArchitecture",
     "AgentOrchestrator",
     "AgentRunResult",

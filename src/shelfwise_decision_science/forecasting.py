@@ -21,13 +21,12 @@ def forecast_demand(
     sku: str,
     recent_daily_units: list[Decimal],
     horizon_days: int,
-    payday_multiplier: Decimal = Decimal("1.35"),
+    payday_multiplier: Decimal = Decimal("1"),
 ) -> DemandForecast:
     """Moving-average forecast, optionally uplifted for a payday demand spike.
 
-    The default multiplier matches the calibrated golden payday-yoghurt scenario. Any
-    caller whose story is NOT payday-driven must pass `payday_multiplier=Decimal("1")`
-    explicitly - the uplift is not a general-purpose demand adjustment.
+    Payday uplift is opt-in and must be supplied by a caller whose evidence includes a
+    payday demand signal. It is not a general-purpose demand adjustment.
     """
     if horizon_days <= 0:
         raise ValueError("horizon_days must be positive")
@@ -53,6 +52,10 @@ def forecast_demand(
         daily_units=q2(daily),
         horizon_days=horizon_days,
         horizon_units=q2(daily * horizon_days),
-        method="moving_average_with_payday_multiplier",
+        method=(
+            "moving_average_with_payday_uplift"
+            if payday_multiplier != Decimal("1")
+            else "moving_average"
+        ),
         confidence=confidence,
     )

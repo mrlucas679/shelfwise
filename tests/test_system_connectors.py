@@ -125,6 +125,43 @@ def test_lightspeed_sale_maps_to_sales_line_and_normalizes() -> None:
     assert event is not None
     assert event.type.value == "sale"
     assert event.payload["unit_price"] == "30.00"
+    assert event.payload["unit_price_minor_units"] == 3000
+    assert event.payload["unit_price_currency"] == "ZAR"
+
+
+def test_sales_normalization_preserves_fractional_quantities_without_crashing() -> None:
+    records = map_shopify_order(
+        {
+            "id": "weighted_sale",
+            "created_at": "2026-07-06T10:00:00Z",
+            "line_items": [
+                {"id": "line_1", "sku": "bulk-4011", "quantity": "2.5", "price": "20.00"}
+            ],
+        },
+        tenant_id="t1",
+    )
+
+    event = record_to_event(records[0])
+
+    assert event is not None
+    assert event.payload["quantity"] == "2.5"
+    assert event.payload["unit_price_minor_units"] == 2000
+
+
+def test_sales_normalization_drops_malformed_numeric_payloads_without_raising() -> None:
+    records = map_shopify_order(
+        {
+            "id": "bad_sale",
+            "created_at": "2026-07-06T10:00:00Z",
+            "line_items": [
+                {"id": "line_1", "sku": "4011", "quantity": "not-a-number", "price": "20.00"}
+            ],
+        },
+        tenant_id="t1",
+    )
+
+    assert records[0].validation.ok is False
+    assert record_to_event(records[0]) is None
 
 
 def test_square_inventory_webhook_maps_and_normalizes_to_event() -> None:

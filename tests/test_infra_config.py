@@ -82,10 +82,12 @@ def test_disposable_ci_is_the_only_insecure_production_cookie_override(monkeypat
     assert _cookie_secure_setting() is False
 
 
-def test_frontend_proxy_includes_browser_session_route() -> None:
+def test_frontend_proxy_includes_all_browser_feature_route_prefixes() -> None:
     text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
 
     assert "^/(auth|" in text
+    for prefix in ("intelligence", "scan", "trace", "twin", "voice"):
+        assert f"|{prefix}|" in text
 
 
 def test_credentialed_cors_rejects_wildcard_origin(monkeypatch) -> None:
@@ -113,6 +115,12 @@ def test_backend_image_contains_seeded_runtime_datasets() -> None:
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "COPY data ./data" in text
+
+
+def test_frontend_image_contains_runtime_endpoint_configuration() -> None:
+    text = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY public ./public" in text
 
 
 def test_make_smoke_exercises_health_trace_approval_products_and_critic() -> None:

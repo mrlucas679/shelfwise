@@ -44,7 +44,7 @@ def test_square_connector_intake_stores_inbound_record_and_event_once() -> None:
     first = client.post("/connectors/square/intake", json={"payload": payload})
     duplicate = client.post("/connectors/square/intake", json={"payload": payload})
     records = client.get("/connectors/inbound-records")
-    bus = client.get("/events/bus")
+    bus = client.get("/events/bus?data_domain=operational_twin")
 
     assert first.status_code == 200
     body = first.json()
@@ -78,8 +78,9 @@ def test_shopify_connector_intake_enters_sales_cascade() -> None:
     assert body["event"]["payload"]["sku"] == demo_sku()
     assert body["event"]["payload"]["location"] == "store_12"
     assert body["event"]["payload"]["unit_price"] == _catalog_price()
-    assert body["pipeline"]["cascade"]["scenario"] == "pos_sale_price_integrity"
-    assert body["pipeline"]["cascade"]["decision"]["action"]["type"] == "record_sale"
+    assert body["pipeline"]["cascade"]["scenario"] == "insufficient_operational_facts"
+    assert body["pipeline"]["cascade"]["decision"] is None
+    assert body["pipeline"]["cascade"]["missing_data"]
 
 
 def test_shopify_multi_line_order_intake_persists_and_pipelines_every_line() -> None:
@@ -143,7 +144,10 @@ def test_syspro_and_lightspeed_connector_intake_use_registered_mappers() -> None
     assert syspro.json()["event"]["type"] == "stock_update"
     assert lightspeed.status_code == 200
     assert lightspeed.json()["status"] == "accepted"
-    assert lightspeed.json()["pipeline"]["cascade"]["scenario"] == "pos_sale_price_integrity"
+    assert (
+        lightspeed.json()["pipeline"]["cascade"]["scenario"]
+        == "insufficient_operational_facts"
+    )
 
 
 def test_invalid_connector_record_is_persisted_without_event() -> None:

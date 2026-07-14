@@ -33,6 +33,7 @@ git pull --ff-only origin developers
 read -rsp "Hugging Face token: " HF_TOKEN; echo
 export HF_TOKEN
 export VLLM_API_KEY="$(openssl rand -hex 32)"
+export VLLM_ALLOWED_CIDR='<application-host-private-ip>/32'
 printf '%s\n' "$VLLM_API_KEY" > /root/shelfwise-vllm-api-key
 chmod 600 /root/shelfwise-vllm-api-key
 ```
@@ -46,7 +47,13 @@ bash scripts/bootstrap_mi300x_vllm.sh
 The script detects AMD's preinstalled `rocm` container, installs `/opt/shelfwise/.venv`
 with the benchmark extra, forwards the HF token for cold downloads, starts both models, and
 publishes the strong port. It uses `--enforce-eager` to avoid long ROCm graph-compilation
-delays during demo bootstrap.
+delays during demo bootstrap. It validates the host tools, ports, ROCm devices, and source CIDR
+before downloading weights, and writes `/root/shelfwise-mi300x-bootstrap.json` only after both
+model IDs are returned by authenticated `/v1/models` checks.
+
+Keep the commit from `git rev-parse HEAD` and that receipt with the run artifacts. If the command
+times out, inspect the printed `/root/shelfwise-vllm/vllm-8000.log` or `vllm-8001.log` tail before
+retrying; the failure is otherwise indistinguishable from a long model download.
 
 ## Verify Models
 
@@ -61,6 +68,12 @@ docker exec rocm curl -fsS \
   -H "Authorization: Bearer $VLLM_API_KEY" \
   http://127.0.0.1:8001/v1/models
 rocm-smi --showuse --showmemuse --showpids
+```
+
+The bootstrap receipt is the compact, secret-free record of the same proof:
+
+```bash
+cat /root/shelfwise-mi300x-bootstrap.json
 ```
 
 The public droplet address is ephemeral. Set the application values using the new droplet
@@ -88,6 +101,28 @@ BENCHMARK_API_KEY="$VLLM_API_KEY" \
   --warmup-seconds 0 --steady-seconds 30 --repeats 1 \
   --max-workflows-per-window 32 \
   --output-dir reports/soak/mi300x_hybrid_concurrency
+```
+
+For the full 1/8/32 concurrency sweep referenced in `IMPLEMENTATION_STATUS.md`'s external-proof list,
+repeat the same invocation at each peak (same env vars as above, omitted for brevity):
+
+```bash
+for peak in 1 8 32; do
+  .venv/bin/python -m shelfwise_benchmark.cli \
+    --execution-scope cloud_inference_host \
+    --strategy hybrid --peak "$peak" --synchronized-workflows 1 \
+    --warmup-seconds 0 --steady-seconds 30 --repeats 1 \
+    --max-workflows-per-window "$peak" \
+    --output-dir "reports/soak/mi300x_hybrid_concurrency_peak_${peak}"
+done
+```
+
+Before running any of the above against the live droplet, validate the config offline first (no
+endpoint required, catches config typos before burning droplet time):
+
+```bash
+PYTHONPATH=src python -m shelfwise_benchmark.cli --validate-config
+# expected: valid workflow=shelfwise_eleven_role_cascade agents=11 strategies=4 kinds=[shared, replicated, per_agent, hybrid]
 ```
 
 ## Application Shakedown

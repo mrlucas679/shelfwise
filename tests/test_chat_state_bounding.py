@@ -29,6 +29,23 @@ def _decision(idx: int, *, status: str) -> dict[str, object]:
     }
 
 
+def _decision_with_context(
+    idx: int,
+    *,
+    status: str,
+    summary: str,
+    risk_tier: str = "low",
+) -> dict[str, object]:
+    decision = _decision(idx, status=status)
+    decision.update(
+        {
+            "summary": summary,
+            "action": {"type": "monitor", "risk_tier": risk_tier},
+        }
+    )
+    return decision
+
+
 def test_bounded_chat_decisions_windows_pending_queue_by_recency() -> None:
     decisions = [_decision(i, status="pending") for i in range(50)]
     decisions += [_decision(i, status="approved") for i in range(50, 60)]
@@ -52,6 +69,55 @@ def test_bounded_chat_decisions_windows_resolved_history_by_recency() -> None:
     kept_indices = {int(item["id"].removeprefix("dec_")) for item in bounded}
     most_recent = set(range(resolved_count - _CHAT_RESOLVED_DECISION_LIMIT, resolved_count))
     assert kept_indices == most_recent
+
+
+def test_bounded_chat_decisions_keeps_question_matching_history() -> None:
+    decisions = [
+        _decision_with_context(
+            0,
+            status="approved",
+            summary="Supplier switch for chilled milk was approved",
+            risk_tier="high",
+        )
+    ]
+    decisions.extend(
+        _decision_with_context(
+            index,
+            status="approved",
+            summary="Routine shelf replenishment completed",
+        )
+        for index in range(1, 12)
+    )
+
+    bounded = _bounded_chat_decisions(
+        decisions,
+        question="What happened with milk supplier switch?",
+    )
+
+    assert any(item["id"] == "dec_0" for item in bounded)
+
+
+def test_bounded_chat_decisions_keeps_high_risk_history_when_question_is_broad() -> None:
+    decisions = [
+        _decision_with_context(
+            0,
+            status="approved",
+            summary="Older high-risk markdown recommendation",
+            risk_tier="high",
+        )
+    ]
+    decisions.extend(
+        _decision_with_context(
+            index,
+            status="approved",
+            summary="Routine low-risk replenishment",
+        )
+        for index in range(1, 12)
+    )
+
+    bounded = _bounded_chat_decisions(decisions, question="What needs attention?")
+
+    assert any(item["id"] == "dec_0" for item in bounded)
 
 
 def test_bounded_recent_is_a_no_op_under_the_limit() -> None:

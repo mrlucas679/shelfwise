@@ -24,6 +24,7 @@ class ModelRun:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    data_domain: str = "world_simulation"
     status: str = "ok"
     created_at: str = ""
     # Observability payload: what was actually sent/received, so a real prompt/response/error
@@ -46,6 +47,7 @@ class ModelRun:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "latency_ms": self.latency_ms,
+            "data_domain": self.data_domain,
             "status": self.status,
             "created_at": self.created_at or datetime.now(UTC).isoformat(),
             "user_message": self.user_message,
@@ -90,10 +92,18 @@ class InMemoryModelRunRegistry:
         self._runs.append(run)
         return run
 
-    def list(self, *, tenant_id: str | None = None) -> list[ModelRun]:
-        if tenant_id is None:
-            return list(self._runs)
-        return [run for run in self._runs if run.tenant_id == tenant_id]
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        data_domain: str | None = None,
+    ) -> list[ModelRun]:
+        runs = list(self._runs)
+        if tenant_id is not None:
+            runs = [run for run in runs if run.tenant_id == tenant_id]
+        if data_domain is not None:
+            runs = [run for run in runs if run.data_domain == data_domain]
+        return runs
 
     def clear(self) -> None:
         self._runs.clear()
@@ -182,13 +192,15 @@ class PostgresModelRunRegistry:
                     (
                         id, tenant_id, correlation_id, agent, model, provider,
                         prompt_version, schema_version, input_tokens, output_tokens,
-                        latency_ms, status, created_at, user_message, response_text, error_detail
+                        latency_ms, data_domain, status, created_at,
+                        user_message, response_text, error_detail
                     )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (id) do update
                 set status = excluded.status,
                     output_tokens = excluded.output_tokens,
                     latency_ms = excluded.latency_ms,
+                    data_domain = excluded.data_domain,
                     response_text = excluded.response_text,
                     error_detail = excluded.error_detail
                 """,
@@ -204,6 +216,7 @@ class PostgresModelRunRegistry:
                     stored.input_tokens,
                     stored.output_tokens,
                     stored.latency_ms,
+                    stored.data_domain,
                     stored.status,
                     stored.created_at,
                     stored.user_message,
@@ -214,20 +227,33 @@ class PostgresModelRunRegistry:
             conn.commit()
         return stored
 
-    def list(self, *, tenant_id: str | None = None) -> list[ModelRun]:
-        where = "where tenant_id = %s" if tenant_id is not None else ""
-        params = (tenant_id,) if tenant_id is not None else ()
+    def list(
+        self,
+        *,
+        tenant_id: str | None = None,
+        data_domain: str | None = None,
+    ) -> list[ModelRun]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if tenant_id is not None:
+            clauses.append("tenant_id = %s")
+            params.append(tenant_id)
+        if data_domain is not None:
+            clauses.append("data_domain = %s")
+            params.append(data_domain)
+        where = f"where {' and '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
                 select id, tenant_id, correlation_id, agent, model, provider,
                        prompt_version, schema_version, input_tokens, output_tokens,
-                       latency_ms, status, created_at, user_message, response_text, error_detail
+                       latency_ms, data_domain, status, created_at,
+                       user_message, response_text, error_detail
                 from shelfwise_model_runs
                 {where}
                 order by created_at asc, id asc
                 """,
-                params,
+                tuple(params),
             ).fetchall()
         return [_model_run_from_row(row) for row in rows]
 
@@ -239,6 +265,12 @@ class PostgresModelRunRegistry:
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
             conn.execute(_MODEL_RUN_SCHEMA_SQL)
+            conn.execute(
+                """
+                alter table shelfwise_model_runs
+                add column if not exists data_domain text not null default 'world_simulation'
+                """
+            )
             conn.execute(
                 """
                 alter table shelfwise_model_runs
@@ -469,6 +501,7 @@ def _model_run_from_row(row: dict[str, Any]) -> ModelRun:
         input_tokens=int(row["input_tokens"]),
         output_tokens=int(row["output_tokens"]),
         latency_ms=int(row["latency_ms"]),
+        data_domain=str(row.get("data_domain") or "world_simulation"),
         status=str(row["status"]),
         created_at=_iso(row["created_at"]),
         user_message=str(row.get("user_message") or ""),
@@ -509,6 +542,7 @@ create table if not exists shelfwise_model_runs (
     input_tokens integer not null,
     output_tokens integer not null,
     latency_ms integer not null,
+    data_domain text not null default 'world_simulation',
     status text not null default 'ok',
     created_at timestamptz not null,
     user_message text not null default '',
@@ -517,6 +551,8 @@ create table if not exists shelfwise_model_runs (
 );
 create index if not exists idx_shelfwise_model_runs_tenant_created
 on shelfwise_model_runs (tenant_id, created_at desc);
+create index if not exists idx_shelfwise_model_runs_tenant_domain_created
+on shelfwise_model_runs (tenant_id, data_domain, created_at desc);
 """
 
 _PROMPT_VERSION_SCHEMA_SQL = """

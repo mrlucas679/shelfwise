@@ -120,18 +120,17 @@ def test_score_expiry_risk_weights_sum_to_one_not_over() -> None:
 
 def test_forecast_demand_payday_multiplier_is_opt_in_not_default_behavior() -> None:
     """The payday uplift belongs to the golden payday scenario; other callers must pass 1."""
-    payday_default = forecast_demand(
+    no_multiplier = forecast_demand(
         sku="4011", recent_daily_units=[Decimal("10"), Decimal("10")], horizon_days=3
     )
-    no_payday = forecast_demand(
+    payday_uplift = forecast_demand(
         sku="4011",
         recent_daily_units=[Decimal("10"), Decimal("10")],
         horizon_days=3,
-        payday_multiplier=Decimal("1"),
+        payday_multiplier=Decimal("1.35"),
     )
-
-    assert payday_default.daily_units == Decimal("13.50")
-    assert no_payday.daily_units == Decimal("10.00")
+    assert no_multiplier.daily_units == Decimal("10.00")
+    assert payday_uplift.daily_units == Decimal("13.50")
 
 
 def test_supplier_recommendation_uses_graph_candidates_and_measured_profiles() -> None:

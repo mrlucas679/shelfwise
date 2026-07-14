@@ -205,9 +205,10 @@ class BenchmarkRunner:
             nonlocal counter
             while True:
                 async with lock:
-                    if (not self.plan_only and time.perf_counter() >= deadline) or (
-                        maximum is not None and counter >= maximum
-                    ):
+                    if maximum is not None:
+                        if counter >= maximum:
+                            return
+                    elif not self.plan_only and time.perf_counter() >= deadline:
                         return
                     workflow_index = counter
                     counter += 1

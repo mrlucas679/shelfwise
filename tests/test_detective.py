@@ -55,6 +55,7 @@ def test_detective_endpoint_reports_ingested_scan_root_cause() -> None:
             "actor": "store_12",
             "source": "scanner",
             "tenant_id": "sa_retail_demo",
+            "data_domain": "world_simulation",
             "payload": {"sku": demo_sku(), "location": "store_12"},
         },
     )

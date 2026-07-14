@@ -192,6 +192,8 @@ def test_chat_prompt_fences_hostile_user_text_for_live_clients() -> None:
 
     class FakeResult:
         content = "ok"
+        model = "fake-executive-model"
+        used_network = True
 
     class FakeClient:
         config = FakeConfig()

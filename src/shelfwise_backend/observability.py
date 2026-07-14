@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from shelfwise_contracts import Money
 
+from .workload import build_workload_snapshot
+
 
 def build_observability_snapshot(
     *,
     tenant_id: str,
+    data_domain: str | None = None,
     decisions: list[dict[str, Any]],
     model_runs: list[dict[str, Any]],
     inbound_records: list[dict[str, Any]],
@@ -21,6 +25,9 @@ def build_observability_snapshot(
     learning_events: list[dict[str, Any]],
     tenant_facts: list[dict[str, Any]],
     rate_zar_per_1k: Decimal,
+    candidate_records: list[dict[str, Any]] | None = None,
+    open_orders: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     tenant_decisions = [
         decision
@@ -38,6 +45,7 @@ def build_observability_snapshot(
     ]
     return {
         "tenant_id": tenant_id,
+        "data_domain": data_domain,
         "decisions": _decision_metrics(tenant_decisions),
         "inference": _inference_metrics(model_runs, rate_zar_per_1k=rate_zar_per_1k),
         "connectors": _connector_metrics(inbound_records),
@@ -45,6 +53,13 @@ def build_observability_snapshot(
         "writeback": _writeback_metrics(writeback_tasks),
         "worker": _worker_metrics(worker_status, worker_runs, tenant_id=tenant_id),
         "learning": _learning_metrics(tenant_learning_events, tenant_facts),
+        "candidates": _candidate_metrics(candidate_records or []),
+        "open_orders": _open_order_metrics(open_orders or []),
+        "hitl_workload": build_workload_snapshot(
+            tenant_decisions,
+            candidates=candidate_records or [],
+            now=now,
+        ),
     }
 
 
@@ -160,6 +175,31 @@ def _learning_metrics(
         "tenant_facts": len(tenant_facts),
         "active_facts": len(active_facts),
         "tombstoned_facts": len(tenant_facts) - len(active_facts),
+    }
+
+
+def _candidate_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize candidate volume and lifecycle state for queue health dashboards."""
+    statuses = Counter(str(record.get("status") or "unknown") for record in records)
+    types = Counter(str(record.get("candidate_type") or "unknown") for record in records)
+    return {
+        "total": len(records),
+        "status_counts": dict(sorted(statuses.items())),
+        "type_counts": dict(sorted(types.items())),
+        "monitoring_only": sum(1 for record in records if record.get("monitoring_only")),
+        "suppressed": statuses["suppressed"],
+        "pending": statuses["pending"],
+    }
+
+
+def _open_order_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize committed supplier units that can prevent reorder noise."""
+    statuses = Counter(str(record.get("status") or "unknown") for record in records)
+    return {
+        "total": len(records),
+        "status_counts": dict(sorted(statuses.items())),
+        "open": statuses["open"],
+        "remaining_units": sum(_int(record.get("remaining_units")) for record in records),
     }
 
 

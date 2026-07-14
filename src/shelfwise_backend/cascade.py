@@ -32,20 +32,10 @@ from shelfwise_decision_science import (
     simulate_markdown,
 )
 from shelfwise_inference import load_inference_config
-from shelfwise_worldgen import create_world_snapshot_store
 
 from .tenant import default_tenant_context
 from .world_facts import WorldFactsProvider
-
-_default_facts_store: Any = None
-
-
-def _default_facts() -> WorldFactsProvider:
-    """Lazily-shared facts provider for callers that don't inject their own."""
-    global _default_facts_store
-    if _default_facts_store is None:
-        _default_facts_store = create_world_snapshot_store()
-    return WorldFactsProvider(_default_facts_store)
+from .world_facts import default_facts_provider as _default_facts
 
 
 def _event_tenant_id(event: Event | None) -> str:
@@ -72,6 +62,35 @@ def _span(name: str, start: float, detail: dict[str, Any] | None = None) -> Trac
     return TraceSpan(name=name, status="ok", ms=elapsed_ms, detail=detail or {})
 
 
+def _monitor_action(sku: str) -> RecommendedAction:
+    """The low-risk "hold, no action needed" verdict shared by every scenario's routing.
+
+    Both the deterministic cascades below and the agentic tracks in agentic_cascade.py
+    construct this identical fallback action - shared here instead of five independent
+    literal copies.
+    """
+    return RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+
+
+def _facts_source_dataset(facts: object) -> str:
+    """Name the measured source without assuming every provider is the demo world."""
+    return str(getattr(facts, "source_dataset", "generated_world"))
+
+
+def _facts_source_method(facts: object) -> str:
+    """Describe how source facts entered the cascade evidence."""
+    return str(getattr(facts, "source_method", "generated_world_projection"))
+
+
+def _event_source_dataset(event: Event, simulation_source: str) -> str:
+    """Use the live twin label for operational events and demo labels only in simulation."""
+    return (
+        "operational_twin"
+        if event.data_domain.value == "operational_twin"
+        else simulation_source
+    )
+
+
 def run_golden_cascade(
     event: Event | None = None, *, facts: WorldFactsProvider | None = None
 ) -> dict[str, Any]:
@@ -81,12 +100,20 @@ def run_golden_cascade(
     those facts into evidence; the critic checks them; the executive emits one pending HITL action.
     """
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
-    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_outage = SourceRef.dataset("load_shedding", f"{scenario.location}:fridge_a")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_method = _facts_source_method(resolved_facts)
+    source_stock = SourceRef.dataset(source_dataset, f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    payload = event.payload if event is not None else {}
+    cold_area = str(payload.get("cold_chain_area") or "fridge_a")
+    outage_hours = Decimal(str(payload.get("cold_chain_outage_hours") or "3"))
+    average_temp_c = Decimal(str(payload.get("cold_chain_average_temp_c") or "7"))
+    payday_multiplier = Decimal(str(payload.get("payday_multiplier") or "1.35"))
+    source_outage = SourceRef.dataset(source_dataset, f"{scenario.location}:{cold_area}")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
     inference = load_inference_config()
@@ -96,6 +123,7 @@ def run_golden_cascade(
         sku=sku,
         recent_daily_units=list(scenario.recent_daily_units),
         horizon_days=3,
+        payday_multiplier=payday_multiplier,
     )
     spans.append(
         _span(
@@ -107,9 +135,9 @@ def run_golden_cascade(
 
     started = perf_counter()
     cold = score_cold_chain_risk(
-        area="fridge_a",
-        outage_hours=Decimal("3"),
-        average_temp_c=Decimal("7"),
+        area=cold_area,
+        outage_hours=outage_hours,
+        average_temp_c=average_temp_c,
     )
     spans.append(_span("decision_science.score_cold_chain_risk", started, {"risk": str(cold.risk)}))
 
@@ -144,7 +172,7 @@ def run_golden_cascade(
         )
     )
 
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
     markdown = RecommendedAction(
         "apply_markdown",
         {"sku": sku, "discount_pct": "0.20", "duration_hours": 24},
@@ -162,7 +190,7 @@ def run_golden_cascade(
                     "units_on_hand",
                     scenario.units_on_hand,
                     str(source_stock),
-                    "generated_world_stock",
+                    source_method,
                 )
             ],
             confidence=Decimal("0.92"),
@@ -327,9 +355,7 @@ def run_golden_cascade(
         "trace": [span.to_dict() for span in spans],
         "inference": inference.to_public_dict(),
         "seed_data": scenario.to_dict(),
-        "store_intelligence": (facts or _default_facts()).get_store_intelligence(
-            _event_tenant_id(event)
-        ),
+        "store_intelligence": resolved_facts.get_store_intelligence(_event_tenant_id(event)),
         "learning": {
             "status": "armed",
             "message": "After approval, compare actual sell-through with simulated sell-through.",
@@ -343,12 +369,15 @@ def run_procurement_cascade(
     """Run the procurement role path: reorder policy plus measured supplier choice."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
-    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_suppliers = SourceRef.dataset("generated_world", "suppliers")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_method = _facts_source_method(resolved_facts)
+    source_stock = SourceRef.dataset(source_dataset, f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    source_suppliers = SourceRef.dataset(source_dataset, "suppliers")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
 
@@ -384,10 +413,8 @@ def run_procurement_cascade(
     )
 
     graph = RelationStore()
-    current = (facts or _default_facts()).get_supplier_for_sku(
-        _event_tenant_id(event), sku
-    )
-    alternate = (facts or _default_facts()).get_alternate_supplier(
+    current = resolved_facts.get_supplier_for_sku(_event_tenant_id(event), sku)
+    alternate = resolved_facts.get_alternate_supplier(
         _event_tenant_id(event), exclude=current["supplier_id"]
     )
     current_supplier = str(current["supplier_id"])
@@ -432,7 +459,7 @@ def run_procurement_cascade(
         },
         RiskTier.MEDIUM,
     )
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
 
     evidence.append(
         EvidenceObject(
@@ -491,7 +518,7 @@ def run_procurement_cascade(
                     "profiled_supplier_count",
                     len(profiles),
                     str(source_suppliers),
-                    "generated_world_supplier_profiles",
+                    source_method,
                 ),
             ],
             confidence=ranking.coverage,
@@ -589,7 +616,8 @@ def run_sales_cascade(
     """Run the Sales/POS role path over a sale event and catalogue price reference."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = _payload_value(event, "sku", scenario.sku)
     location = _payload_value(event, "location", scenario.location)
     quantity = Decimal(str(_payload_value(event, "quantity", scenario.recent_daily_units[-1])))
@@ -598,8 +626,9 @@ def run_sales_cascade(
     line_revenue = Money.zar(unit_price * quantity)
     expected_revenue = scenario.unit_price * quantity
     price_delta = unit_price - expected_price
-    source_pos = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_product = SourceRef.dataset("generated_world", f"products:sku:{sku}")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_pos = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    source_product = SourceRef.dataset(source_dataset, f"products:sku:{sku}")
     spans: list[TraceSpan] = []
 
     started = perf_counter()
@@ -799,8 +828,10 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
     catalog = Money(minor_units=catalog_price_c)
     exposure = Money(minor_units=(unit_price_c - catalog_price_c) * max(units, 1))
     delta_display = f"{(delta_pct * 100).quantize(Decimal('0.1'))}%"
-    source_pos = SourceRef.dataset("worldgen_pos", f"sale:{event.id}")
-    source_catalog = SourceRef.dataset("worldgen_catalog", f"catalog:sku:{sku}")
+    source_pos = SourceRef.dataset(_event_source_dataset(event, "worldgen_pos"), f"sale:{event.id}")
+    source_catalog = SourceRef.dataset(
+        _event_source_dataset(event, "worldgen_catalog"), f"catalog:sku:{sku}"
+    )
 
     action = RecommendedAction(
         "review_price_exception",
@@ -920,7 +951,7 @@ def run_expiry_risk_check(event: Event) -> dict[str, Any] | None:
         started,
         {"days_to_expiry": str(days), "max_days": str(EXPIRY_REVIEW_MAX_DAYS)},
     )
-    source = SourceRef.dataset("worldgen_wms", f"expiry:{event.id}")
+    source = SourceRef.dataset(_event_source_dataset(event, "worldgen_wms"), f"expiry:{event.id}")
     action = RecommendedAction(
         "review_expiry_markdown",
         {"sku": sku, "batch_id": batch_id, "days_to_expiry": str(days)},
@@ -993,7 +1024,8 @@ def run_cold_chain_cascade(
     """Run the measured cold-chain alert path into facilities HITL review."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     payload = event.payload if event is not None else {}
     site_id = str(payload.get("site_id") or _payload_value(event, "location", scenario.location))
     asset_id = str(
@@ -1576,7 +1608,7 @@ def run_critic_rejection_cascade(*, facts: WorldFactsProvider | None = None) -> 
     scenario = (facts or _default_facts()).get_scenario_facts(tenant_id)
     sku = scenario.sku
     source_supplier = SourceRef.dataset("generated_world", f"suppliers:{scenario.supplier}")
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
     supplier_switch = RecommendedAction(
         "supplier_switch",
         {
@@ -1710,7 +1742,11 @@ def _whole_units(value: Decimal) -> int:
 
 def _decision_id(event: Event | None) -> str:
     """Use immutable event identity for replays; mint a fresh id for manual runs."""
-    return f"dec_{_slug(event.id)}" if event is not None else new_id("dec")
+    return (
+        f"dec_{_slug(event.tenant_id)}_{_slug(event.data_domain.value)}_{_slug(event.id)}"
+        if event is not None
+        else new_id("dec")
+    )
 
 
 def _cause_id(event: Event | None, correlation_id: str) -> str:

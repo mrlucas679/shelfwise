@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
-from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from shelfwise_storage import auto_schema_enabled, connect, jsonb
+from shelfwise_storage import (
+    auto_schema_enabled,
+    connect,
+    jsonb,
+)
+from shelfwise_storage import (
+    now_iso as _now,
+)
+from shelfwise_storage import (
+    validate_limit as _validate_limit,
+)
 from shelfwise_storage.rls import apply_tenant_rls
 
 
@@ -152,15 +161,6 @@ def _run_id(run: dict[str, Any]) -> str:
     if not run_id:
         raise ValueError("worldgen run must include run_id")
     return run_id
-
-
-def _validate_limit(limit: int) -> None:
-    if limit <= 0 or limit > 500:
-        raise ValueError("limit must be between 1 and 500")
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 _WORLDGEN_RUN_SCHEMA_SQL = """

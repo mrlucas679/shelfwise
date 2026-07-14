@@ -9,6 +9,7 @@ from random import Random
 from typing import Any
 
 from shelfwise_contracts import Event, EventSource, EventType
+from shelfwise_runtime.provenance import DataDomain
 
 from .catalog.sample import sample_assortment
 
@@ -353,6 +354,7 @@ class World:
             payload=payload,
             source=source,
             tenant_id=self.cfg.tenant_id,
+            data_domain=DataDomain.WORLD_SIMULATION,
             correlation_id=f"world_{self.cfg.scenario_id}_{self.cfg.seed}",
         )
 

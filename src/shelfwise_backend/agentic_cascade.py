@@ -14,6 +14,7 @@ from shelfwise_contracts import (
     RiskTier,
     SourceRef,
 )
+from shelfwise_inference.client import RunRecorder
 from shelfwise_inference.config import load_inference_config
 from shelfwise_inference.orchestration import (
     AgentOrchestrationError,
@@ -25,7 +26,7 @@ from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
 )
-from shelfwise_worldgen import create_world_snapshot_store
+from shelfwise_runtime import DataDomain
 
 from .cascade import (
     _COLD_CHAIN_SCENARIO_ID,
@@ -38,25 +39,13 @@ from .cascade import (
     PRICE_EXCEPTION_TOLERANCE,
     _cause_id,
     _decision_id,
+    _monitor_action,
 )
-from .tenant import default_tenant_context
+from .cascade import _event_tenant_id as _tenant_id
 from .tools.mcp_surface import AuditLog, PlatformTool, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
 from .world_facts import WorldFactsProvider
-
-_default_facts_store: Any = None
-
-
-def _default_facts() -> WorldFactsProvider:
-    """Lazily-shared facts provider for callers that don't inject their own."""
-    global _default_facts_store
-    if _default_facts_store is None:
-        _default_facts_store = create_world_snapshot_store()
-    return WorldFactsProvider(_default_facts_store)
-
-
-def _tenant_id(event: Event | None) -> str:
-    return event.tenant_id if event is not None else default_tenant_context().tenant_id
+from .world_facts import default_facts_provider as _default_facts
 
 # Unlike run_golden_cascade (deterministic Python math plus hand-authored EvidenceObject
 # literals), this path hands the same seeded facts to Gemma as read-only tools and requires
@@ -208,17 +197,24 @@ def run_golden_cascade_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     """Run the golden scenario's Critic + Executive reasoning through real Gemma tool calls."""
-    return asyncio.run(
-        _run(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -230,15 +226,17 @@ async def _run(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
-    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    tenant_id = _tenant_id(event)
     scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
     correlation_id = event.correlation_id if event is not None else None
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -249,7 +247,11 @@ async def _run(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -316,12 +318,61 @@ async def _run(
 
 
 def _default_orchestrator(
-    *, tools: list[PlatformTool], execution_mode: ExecutionMode
+    *,
+    tools: list[PlatformTool],
+    execution_mode: ExecutionMode,
+    recorder: RunRecorder | None = None,
 ) -> AgentOrchestrator:
     config = load_inference_config()
     architecture = architecture_from_inference_config(config)
-    runtime = OpenAIModelRuntime(architecture=architecture, execution_mode=execution_mode)
+    runtime = OpenAIModelRuntime(
+        architecture=architecture,
+        execution_mode=execution_mode,
+        recorder=recorder,
+    )
     return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+
+def _event_data_domain(event: Event | None) -> str:
+    """Keep manual/demo runs explicit while preserving an operational event's boundary."""
+    return (
+        event.data_domain.value
+        if event is not None
+        else DataDomain.WORLD_SIMULATION.value
+    )
+
+
+def _scoped_recorder(
+    recorder: RunRecorder | None,
+    event: Event | None,
+) -> RunRecorder | None:
+    """Attach the cascade domain before a model receipt reaches the shared registry."""
+    if recorder is None:
+        return None
+    data_domain = _event_data_domain(event)
+
+    def record(payload: dict[str, Any]) -> None:
+        recorder({**payload, "data_domain": data_domain})
+
+    return record
+
+
+def _scope_result(
+    result: dict[str, Any] | None,
+    event: Event | None,
+) -> dict[str, Any] | None:
+    """Stamp agent output and its decision before any store or trace can observe it."""
+    if result is None:
+        return None
+    tenant_id = _tenant_id(event)
+    data_domain = _event_data_domain(event)
+    result["tenant_id"] = tenant_id
+    result["data_domain"] = data_domain
+    decision = result.get("decision")
+    if isinstance(decision, dict):
+        decision["tenant_id"] = tenant_id
+        decision["data_domain"] = data_domain
+    return result
 
 
 def _build_result(
@@ -345,7 +396,7 @@ def _build_result(
         {"sku": scenario_sku, "discount_pct": "0.20", "duration_hours": 24},
         RiskTier.HIGH,
     )
-    monitor = RecommendedAction("monitor", {"sku": scenario_sku}, RiskTier.LOW)
+    monitor = _monitor_action(scenario_sku)
     routed_action = markdown if action_type == "apply_markdown" else monitor
 
     tool_sources = tuple(
@@ -429,17 +480,24 @@ def run_procurement_cascade_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     """Run the procurement reorder/supplier decision through real Gemma tool calls."""
-    return asyncio.run(
-        _run_procurement(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run_procurement(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -451,15 +509,17 @@ async def _run_procurement(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
-    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    tenant_id = _tenant_id(event)
     scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
     correlation_id = event.correlation_id if event is not None else None
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -470,7 +530,11 @@ async def _run_procurement(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -557,7 +621,7 @@ def _build_procurement_result(
         {"sku": scenario_sku, "supplier_id": supplier_id},
         RiskTier.MEDIUM,
     )
-    monitor = RecommendedAction("monitor", {"sku": scenario_sku}, RiskTier.LOW)
+    monitor = _monitor_action(scenario_sku)
     routed_action = reorder if action_type == "reorder" else monitor
 
     tool_sources = tuple(
@@ -641,17 +705,24 @@ def run_sales_cascade_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     """Run the POS price-integrity verdict through real Gemma tool calls."""
-    return asyncio.run(
-        _run_sales(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run_sales(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -663,9 +734,11 @@ async def _run_sales(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
-    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    tenant_id = _tenant_id(event)
     scenario = resolved_facts.get_scenario_facts(tenant_id)
     sku = scenario.sku
     product = scenario.product_name
@@ -675,7 +748,7 @@ async def _run_sales(
     # agent catching, not a rounding/promotion variance that should pass silently.
     observed_unit_price = float(scenario.unit_price.amount) * 1.2
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -686,7 +759,11 @@ async def _run_sales(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -853,17 +930,24 @@ def run_catalog_price_check_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any] | None:
     """Run a POS price-outlier event through real Gemma tool calls."""
-    return asyncio.run(
-        _run_catalog_price_check(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run_catalog_price_check(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -875,6 +959,8 @@ async def _run_catalog_price_check(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any] | None:
     payload = event.payload
     try:
@@ -899,7 +985,7 @@ async def _run_catalog_price_check(
     catalog = Decimal(catalog_price_cents) / Decimal("100")
     units = max(1, int(payload.get("units") or 1))
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -910,7 +996,11 @@ async def _run_catalog_price_check(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -1089,17 +1179,24 @@ def run_expiry_risk_check_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any] | None:
     """Run an imminent-expiry event through real Gemma tool calls."""
-    return asyncio.run(
-        _run_expiry_risk_check(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run_expiry_risk_check(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -1111,6 +1208,8 @@ async def _run_expiry_risk_check(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any] | None:
     payload = event.payload
     try:
@@ -1126,7 +1225,7 @@ async def _run_expiry_risk_check(
     batch_id = str(payload.get("batch_id") or f"BATCH-{sku}")
     scenario = resolved_facts.get_scenario_facts(tenant_id, sku)
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -1137,7 +1236,11 @@ async def _run_expiry_risk_check(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -1309,17 +1412,24 @@ def run_cold_chain_cascade_via_agents(
     memory: Any,
     facts: WorldFactsProvider | None = None,
     orchestrator_factory: Any = None,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     """Run the cold-chain facilities-escalation verdict through real Gemma tool calls."""
-    return asyncio.run(
-        _run_cold_chain(
-            event,
-            execution_mode=execution_mode,
-            decisions=decisions,
-            memory=memory,
-            facts=facts,
-            orchestrator_factory=orchestrator_factory,
-        )
+    return _scope_result(
+        asyncio.run(
+            _run_cold_chain(
+                event,
+                execution_mode=execution_mode,
+                decisions=decisions,
+                memory=memory,
+                facts=facts,
+                orchestrator_factory=orchestrator_factory,
+                audit=audit,
+                model_run_recorder=model_run_recorder,
+            )
+        ),
+        event,
     )
 
 
@@ -1331,10 +1441,12 @@ async def _run_cold_chain(
     memory: Any,
     facts: WorldFactsProvider | None,
     orchestrator_factory: Any,
+    audit: AuditLog | None = None,
+    model_run_recorder: RunRecorder | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
     payload = event.payload if event is not None else {}
-    tenant_id = event.tenant_id if event is not None else default_tenant_context().tenant_id
+    tenant_id = _tenant_id(event)
     scenario = resolved_facts.get_scenario_facts(tenant_id)
     asset_id = str(
         payload.get("asset_id") or f"cold-chain:{scenario.location}:{scenario.category}"
@@ -1343,7 +1455,7 @@ async def _run_cold_chain(
     average_temp_c = float(payload.get("temp_c") or 8.2)
     correlation_id = event.correlation_id if event is not None else None
 
-    audit = AuditLog()
+    audit = audit or AuditLog()
     tools: list[PlatformTool] = build_platform_tools(
         decisions=decisions,
         memory=memory,
@@ -1354,7 +1466,11 @@ async def _run_cold_chain(
     orchestrator = (
         orchestrator_factory()
         if orchestrator_factory is not None
-        else _default_orchestrator(tools=tools, execution_mode=execution_mode)
+        else _default_orchestrator(
+            tools=tools,
+            execution_mode=execution_mode,
+            recorder=_scoped_recorder(model_run_recorder, event),
+        )
     )
 
     try:
@@ -1378,7 +1494,7 @@ async def _run_cold_chain(
             final_schema=_COLD_CHAIN_CRITIC_SCHEMA,
             final_schema_name="cold_chain_critic_verdict",
             correlation_id=correlation_id,
-            tenant_id=event.tenant_id if event is not None else default_tenant_context().tenant_id,
+            tenant_id=_tenant_id(event),
             temperature=0.0,
             require_tool_call_first=True,
         )
@@ -1402,7 +1518,7 @@ async def _run_cold_chain(
             final_schema=_COLD_CHAIN_EXECUTIVE_SCHEMA,
             final_schema_name="cold_chain_executive_verdict",
             correlation_id=critic_run.correlation_id,
-            tenant_id=event.tenant_id if event is not None else default_tenant_context().tenant_id,
+            tenant_id=_tenant_id(event),
             temperature=0.0,
         )
         executive_answer = executive_run.answer

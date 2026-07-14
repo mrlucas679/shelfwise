@@ -81,7 +81,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
-          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_COOKIE_SECURE: "true"
           DOCKER_DEFAULT_PLATFORM: linux/amd64
         run: |
           docker compose -f docker-compose.production.yml build
@@ -103,8 +103,11 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: "true"
         run: |
           trap 'docker compose -f docker-compose.production.yml logs --no-color backend postgres migrate frontend' ERR
+          docker compose -f docker-compose.production.yml up -d --wait
           curl --fail --silent --show-error http://127.0.0.1/ > /dev/null
           curl --fail --silent --show-error \
             --cookie-jar /tmp/shelfwise.cookies \
@@ -124,8 +127,20 @@ jobs:
           assert golden['decision']['tenant_id'] == session['session']['tenant_id']
           PY
 
+      - name: Shakedown deployed public topology
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: "true"
+        run: |
+          python scripts/deployment_shakedown.py \
+            --base-url http://127.0.0.1 \
+            --cycles 3 \
+            --output reports/deployment-shakedown.json
+
       - name: Track 3 live response and language gate
-        if: ${{ secrets.LLM_ROUTINE_BASE_URL != '' && secrets.LLM_API_KEY != '' }}
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
@@ -137,6 +152,11 @@ jobs:
           LLM_ROUTINE_MODEL: ${{ secrets.LLM_ROUTINE_MODEL || 'google/gemma-4-E4B-it' }}
           LLM_STRONG_MODEL: ${{ secrets.LLM_STRONG_MODEL || 'google/gemma-4-31B-it' }}
         run: |
+          if [ -z "$LLM_ROUTINE_BASE_URL" ] || [ -z "$LLM_ROUTINE_API_KEY" ]; then
+            echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
+            echo "Production topology and fail-closed behavior are covered by the application tests."
+            exit 0
+          fi
           docker compose -f docker-compose.production.yml up -d --wait
           python - <<'PY'
           import json
@@ -172,12 +192,6 @@ jobs:
           assert responses[0] != responses[1], 'distinct inputs produced identical answers'
           print('Track 3 request/language/unseen-input gate: PASS')
           PY
-
-      - name: Track 3 fail-closed gate without AMD endpoint
-        if: ${{ secrets.LLM_ROUTINE_BASE_URL == '' || secrets.LLM_API_KEY == '' }}
-        run: |
-          echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
-          echo "Production topology and fail-closed behavior are covered by the application tests."
 
       - name: Stop production topology
         if: always()

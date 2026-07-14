@@ -10,6 +10,7 @@ from shelfwise_connectors import (
     InventoryState,
     SourceSystem,
     TaskWriteBackSink,
+    create_inbound_record_store,
     inventory_to_event,
     neutralise_formula,
     parse_gs1,
@@ -175,3 +176,35 @@ def test_quarantine_caps_webhook_bodies() -> None:
     assert ok.kind == "webhook_body"
     assert too_large.accepted is False
     assert too_large.kind == "too_large"
+
+
+def test_inbound_records_from_one_payload_get_distinct_stored_ids() -> None:
+    """Two line items on one webhook share a raw_payload (and thus payload_hash), but are
+    distinct source objects. Their stored `id` (a Postgres primary key) must not collide."""
+    store = create_inbound_record_store()
+    shared_payload = {"order_id": "ord_1", "lines": [{"sku": "4011"}, {"sku": "4012"}]}
+    first = InboundRecord(
+        tenant_id="tenant_1",
+        source_system=SourceSystem.SHOPIFY,
+        source_object_type="sale",
+        source_object_id="ord_1:line_1",
+        event_time=datetime(2026, 7, 6, 10, 14, tzinfo=UTC),
+        raw_payload=shared_payload,
+        canonical_type="sale",
+        correlation_id="cor_1",
+    )
+    second = InboundRecord(
+        tenant_id="tenant_1",
+        source_system=SourceSystem.SHOPIFY,
+        source_object_type="sale",
+        source_object_id="ord_1:line_2",
+        event_time=datetime(2026, 7, 6, 10, 14, tzinfo=UTC),
+        raw_payload=shared_payload,
+        canonical_type="sale",
+        correlation_id="cor_1",
+    )
+
+    _, stored_first = store.record(first)
+    _, stored_second = store.record(second)
+
+    assert stored_first["id"] != stored_second["id"]

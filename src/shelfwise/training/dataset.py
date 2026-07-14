@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from shelfwise_runtime.provenance import require_training_domain
+
 VALID_CASE_TYPES = {
     "shipment_damage",
     "supplier_risk",
@@ -46,6 +48,7 @@ class TrainingRow:
     messages: list[dict[str, str]]
     evidence: list[EvidenceItem]
     expected_output: dict[str, Any]
+    data_domain: str = "training_fixture"
 
     @property
     def evidence_types(self) -> set[str]:
@@ -160,12 +163,14 @@ def parse_training_row(raw: dict[str, Any], *, repo_root: Path, strict: bool = T
         for index, item in enumerate(evidence_value)
     ]
     expected = _validate_expected(raw.get("expected_output"), row_id)
+    data_domain = require_training_domain(raw.get("data_domain"))
     return TrainingRow(
         id=row_id,
         case_type=str(case_type),
         messages=messages,
         evidence=evidence,
         expected_output=expected,
+        data_domain=data_domain,
     )
 
 
@@ -198,6 +203,7 @@ def load_training_rows(
 def summarize_rows(rows: list[TrainingRow]) -> dict[str, Any]:
     by_case = Counter(row.case_type for row in rows)
     by_modality: Counter[str] = Counter()
+    by_domain: Counter[str] = Counter(row.data_domain for row in rows)
     unavailable: list[str] = []
     for row in rows:
         if not row.evidence:
@@ -210,5 +216,6 @@ def summarize_rows(rows: list[TrainingRow]) -> dict[str, Any]:
         "row_count": len(rows),
         "case_types": dict(sorted(by_case.items())),
         "modalities": dict(sorted(by_modality.items())),
+        "data_domains": dict(sorted(by_domain.items())),
         "unavailable_evidence": unavailable,
     }

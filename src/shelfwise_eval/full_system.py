@@ -62,6 +62,9 @@ SUPPORT_FEATURES = (
 )
 
 REQUIRED_FEATURE_RECEIPTS = frozenset((*SCENARIO_ROTATION, *SUPPORT_FEATURES))
+LIVE_REQUIRED_FEATURE_RECEIPTS = frozenset(
+    {"agentic_workflows", "agent_role_coverage"}
+)
 
 REQUIRED_ROUTE_RECEIPTS = frozenset(
     {
@@ -77,6 +80,7 @@ REQUIRED_ROUTE_RECEIPTS = frozenset(
         "POST /connectors/square/intake",
         "POST /connectors/shopify/intake",
         "POST /scan/barcode",
+        "POST /scan/candidates/confirm",
         "GET /decisions/{decision_id}",
         "POST /decisions/{decision_id}/approve",
         "POST /decisions/{decision_id}/reject",
@@ -90,6 +94,17 @@ REQUIRED_ROUTE_RECEIPTS = frozenset(
     }
 )
 
+LIVE_REQUIRED_ROUTE_RECEIPTS = frozenset(
+    {
+        "POST /demo/golden/agentic",
+        "POST /demo/procurement/agentic",
+        "POST /demo/sales/agentic",
+        "POST /demo/catalog-price/agentic",
+        "POST /demo/expiry-risk/agentic",
+        "POST /demo/cold-chain/agentic",
+    }
+)
+
 _GOLDEN_AGENTS = {
     "inventory",
     "demand",
@@ -100,6 +115,7 @@ _GOLDEN_AGENTS = {
     "executive",
 }
 _DOMAIN_AGENTS = {*_GOLDEN_AGENTS, "sales", "procurement", "cold_chain"}
+_ALL_AGENT_ROLES = {*_DOMAIN_AGENTS, "orchestrator"}
 _OFFLINE_MARKERS = (
     "Current ShelfWise state:",
     "The current recommendation is",
@@ -223,6 +239,8 @@ class FullSystemReport:
             "event_contract": deepcopy(self.event_contract),
             "required_features": sorted(REQUIRED_FEATURE_RECEIPTS),
             "required_routes": sorted(REQUIRED_ROUTE_RECEIPTS),
+            "live_required_features": sorted(LIVE_REQUIRED_FEATURE_RECEIPTS),
+            "live_required_routes": sorted(LIVE_REQUIRED_ROUTE_RECEIPTS),
             "feature_receipts": [item.to_dict() for item in self.feature_receipts],
             "route_receipts": [item.to_dict() for item in self.route_receipts],
             "failures": list(self.failures),
@@ -274,7 +292,10 @@ def audit_full_system_integrity(
     feature_rows: dict[str, list[FeatureReceipt]] = {}
     for receipt in feature_receipts:
         feature_rows.setdefault(receipt.feature, []).append(receipt)
-    for feature in sorted(REQUIRED_FEATURE_RECEIPTS):
+    required_features = set(REQUIRED_FEATURE_RECEIPTS)
+    if live_required:
+        required_features.update(LIVE_REQUIRED_FEATURE_RECEIPTS)
+    for feature in sorted(required_features):
         rows = feature_rows.get(feature, [])
         if not rows:
             failures.append(f"missing_feature_receipt:{feature}")
@@ -285,7 +306,10 @@ def audit_full_system_integrity(
     route_rows: dict[str, list[RouteReceipt]] = {}
     for receipt in route_receipts:
         route_rows.setdefault(receipt.key, []).append(receipt)
-    for route in sorted(REQUIRED_ROUTE_RECEIPTS):
+    required_routes = set(REQUIRED_ROUTE_RECEIPTS)
+    if live_required:
+        required_routes.update(LIVE_REQUIRED_ROUTE_RECEIPTS)
+    for route in sorted(required_routes):
         rows = route_rows.get(route, [])
         if not rows:
             failures.append(f"missing_route_receipt:{route}")
@@ -373,6 +397,9 @@ class _FullSystemDriver:
         self._probe_multimodal_review()
         self._probe_auth_tenant_isolation()
         self._probe_tools_and_agents()
+        if self.config.live_required:
+            self._probe_agentic_workflows()
+            self._probe_agent_role_coverage()
         self._resolve_hitl()
         self._probe_writeback_and_learning()
         self._record_chat_feature()
@@ -777,17 +804,38 @@ class _FullSystemDriver:
         body = _json_body(response)
         candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
         event = candidate.get("event") if isinstance(candidate.get("event"), dict) else {}
+        confirmation = self._request(
+            "multimodal_review",
+            "POST",
+            "/scan/candidates/confirm",
+            json={"event": event, "review_note": "Full-system reviewer accepted the scan"},
+        )
+        confirmed = _json_body(confirmation)
+        confirmed_event = (
+            confirmed.get("event") if isinstance(confirmed.get("event"), dict) else {}
+        )
+        confirmed_payload = (
+            confirmed_event.get("payload")
+            if isinstance(confirmed_event.get("payload"), dict)
+            else {}
+        )
         passed = (
             response.status_code == 200
             and body.get("requires_human_review") is True
             and event.get("type") == "scan"
             and event.get("payload", {}).get("sku") == "local-probe"
+            and confirmation.status_code == 200
+            and confirmed.get("status") == "accepted"
+            and bool(confirmed_payload.get("reviewed_by"))
         )
         self._feature(
             "multimodal_review",
             passed,
-            f"review={body.get('requires_human_review')} type={event.get('type')}",
-            route="POST /scan/barcode",
+            (
+                f"review={body.get('requires_human_review')} type={event.get('type')} "
+                f"confirmation={confirmed.get('status')}"
+            ),
+            route="POST /scan/candidates/confirm",
         )
 
     def _probe_auth_tenant_isolation(self) -> None:
@@ -825,6 +873,7 @@ class _FullSystemDriver:
                     "actor": self.site_id,
                     "source": "scanner",
                     "tenant_id": "local",
+                    "data_domain": "world_simulation",
                     "payload": {"sku": "local-probe", "location": "local-site"},
                 },
             )
@@ -1007,6 +1056,96 @@ class _FullSystemDriver:
                 f"total_units={split.get('total_units')}"
             ),
             route="GET /tools/platform; POST /intelligence/stock/fefo-split",
+        )
+
+    def _probe_agentic_workflows(self) -> None:
+        paths = (
+            "/demo/golden/agentic",
+            "/demo/procurement/agentic",
+            "/demo/sales/agentic",
+            "/demo/catalog-price/agentic",
+            "/demo/expiry-risk/agentic",
+            "/demo/cold-chain/agentic",
+        )
+        outcomes: list[dict[str, Any]] = []
+        for path in paths:
+            response = self._request(
+                "agentic_workflows",
+                "POST",
+                f"{path}?live_required=true",
+                route_key=f"POST {path}",
+            )
+            body = _json_body(response)
+            calls = body.get("model_calls") if isinstance(body.get("model_calls"), list) else []
+            calls_are_live = bool(calls) and all(
+                isinstance(call, dict)
+                and call.get("used_network") is True
+                and str(call.get("provider") or "").lower() != "offline"
+                for call in calls
+            )
+            decision = _decision_from(body)
+            passed = response.status_code == 200 and calls_are_live and bool(decision)
+            outcomes.append(
+                {
+                    "path": path,
+                    "status_code": response.status_code,
+                    "model_calls": len(calls),
+                    "passed": passed,
+                }
+            )
+            self.totals["agentic_model_calls"] += len(calls)
+            if response.status_code == 200:
+                self._capture_cascade(body, source=f"probe:{path}")
+
+        self._feature(
+            "agentic_workflows",
+            all(item["passed"] for item in outcomes),
+            f"workflows={len(outcomes)} model_calls={self.totals['agentic_model_calls']}",
+            route="; ".join(f"POST {path}" for path in paths),
+            evidence={"workflows": outcomes},
+        )
+
+    def _probe_agent_role_coverage(self) -> None:
+        from shelfwise_eval.agent_role_coverage import run_agent_role_coverage
+        from shelfwise_inference.orchestration import ExecutionMode
+
+        try:
+            results = run_agent_role_coverage(execution_mode=ExecutionMode.LIVE_REQUIRED)
+        except Exception as exc:
+            self._feature(
+                "agent_role_coverage",
+                False,
+                f"coverage_setup_failed:{type(exc).__name__}:{str(exc)[:200]}",
+            )
+            return
+
+        rows = [result.to_dict() for result in results]
+        observed_roles = {result.role for result in results}
+        model_calls = [call for result in results for call in result.model_calls]
+        live_receipts = bool(model_calls) and all(
+            call.get("used_network") is True
+            and str(call.get("provider") or "").lower() != "offline"
+            and int(call.get("usage", {}).get("total_tokens") or 0) > 0
+            and int(call.get("latency_ms") or 0) >= 0
+            for call in model_calls
+        )
+        passed = (
+            observed_roles == _ALL_AGENT_ROLES
+            and all(result.ok and result.model_call_count > 0 for result in results)
+            and live_receipts
+        )
+        self.totals["agent_role_model_calls"] += len(model_calls)
+        self.totals["agent_role_total_tokens"] += sum(
+            result.total_tokens for result in results
+        )
+        self._feature(
+            "agent_role_coverage",
+            passed,
+            (
+                f"roles={len(observed_roles)}/{len(_ALL_AGENT_ROLES)} "
+                f"model_calls={len(model_calls)}"
+            ),
+            evidence={"roles": rows},
         )
 
     def _resolve_hitl(self) -> None:

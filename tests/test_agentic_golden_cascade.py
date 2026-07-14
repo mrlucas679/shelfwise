@@ -3,18 +3,21 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from shelfwise_action import create_decision_store
+from shelfwise_backend import agentic_cascade as agentic_cascade_module
 from shelfwise_backend.agentic_cascade import (
     AgenticCascadeError,
     run_golden_cascade_via_agents,
 )
 from shelfwise_backend.tools.mcp_surface import AuditLog, build_platform_tools
 from shelfwise_backend.world_facts import WorldFactsProvider
+from shelfwise_contracts import Event, EventType
 from shelfwise_decision_science import simulate_markdown as compute_markdown
 from shelfwise_inference.orchestration import (
     AgentArchitecture,
@@ -25,6 +28,7 @@ from shelfwise_inference.orchestration import (
     RoleModelTarget,
 )
 from shelfwise_memory import create_learning_store
+from shelfwise_runtime import DataDomain
 from shelfwise_worldgen.world_store import InMemoryWorldSnapshotStore
 
 
@@ -174,6 +178,42 @@ def test_agentic_golden_cascade_drives_real_tool_calls_and_produces_decision() -
     assert decision["scenario_id"] == "stage4_loadshedding_x_payday_yoghurt"
 
 
+def test_operational_agentic_result_and_model_receipt_keep_live_domain() -> None:
+    tools, decisions, memory, facts = _build_tools()
+    sku, on_hand, profit = _hero_markdown_profit(facts)
+    runtime = _FakeRuntime(_scripted_messages(sku, on_hand, profit))
+    event = Event(
+        id="evt_agentic_scope",
+        type=EventType.SCAN,
+        ts=datetime(2026, 7, 13, 9, tzinfo=UTC),
+        actor="store_1",
+        tenant_id="sa_retail_demo",
+        data_domain=DataDomain.OPERATIONAL_TWIN,
+        payload={"sku": sku},
+    )
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_golden_cascade_via_agents(
+        event=event,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+    recorded: list[dict[str, Any]] = []
+    recorder = agentic_cascade_module._scoped_recorder(recorded.append, event)
+    assert recorder is not None
+    recorder({"id": "mr_scope"})
+
+    assert result["tenant_id"] == "sa_retail_demo"
+    assert result["data_domain"] == "operational_twin"
+    assert result["decision"]["data_domain"] == "operational_twin"
+    assert recorded == [{"id": "mr_scope", "data_domain": "operational_twin"}]
+
+
 def test_agentic_golden_cascade_hard_fails_when_live_required_sees_offline_provider() -> None:
     tools, decisions, memory, facts = _build_tools()
     sku, on_hand, profit = _hero_markdown_profit(facts)
@@ -230,3 +270,43 @@ def test_agentic_golden_cascade_rejects_a_conclusion_that_cites_no_real_numbers(
             facts=facts,
             orchestrator_factory=factory,
         )
+
+
+def test_agentic_golden_cascade_threads_the_caller_audit_log_into_its_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every agentic cascade used to build its own throwaway AuditLog() internally, so no
+    real tool call an agent made in production was ever recorded in the shared
+    `/tools/platform/audit` trail. The cascade must use the caller-supplied audit log
+    instead of silently discarding it."""
+    from shelfwise_backend import agentic_cascade as agentic_cascade_module
+
+    tools, decisions, memory, facts = _build_tools()
+    sku, on_hand, profit = _hero_markdown_profit(facts)
+    runtime = _FakeRuntime(_scripted_messages(sku, on_hand, profit))
+    shared_audit = AuditLog()
+    captured: dict[str, Any] = {}
+    real_build_platform_tools = agentic_cascade_module.build_platform_tools
+
+    def spying_build_platform_tools(**kwargs: Any):
+        captured["audit"] = kwargs.get("audit")
+        return real_build_platform_tools(**kwargs)
+
+    monkeypatch.setattr(
+        agentic_cascade_module, "build_platform_tools", spying_build_platform_tools
+    )
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    run_golden_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+        audit=shared_audit,
+    )
+
+    assert captured["audit"] is shared_audit

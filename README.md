@@ -1,5 +1,9 @@
 # ShelfWise
 
+> **Working-product branch boundary:** This repository is being continued on `developers` after
+> the hackathon. The working product remains on `main`; keep implementation commits on
+> `developers` and do not merge them to `main` without an explicit release decision.
+
 [![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
 [![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -38,6 +42,7 @@ happens.
 - [Deployment](#deployment)
 - [Project Structure](#project-structure)
 - [Current Scope](#current-scope)
+  - [Digital Twin (in progress)](#digital-twin-in-progress-not-yet-fully-tested)
 - [Inference Strategy](#inference-strategy)
 - [Model Training](#model-training)
 - [Contributing](#contributing)
@@ -310,6 +315,10 @@ A few endpoints worth knowing by name (used throughout this README):
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
 | `GET /demo/worldgen-runs` | Digital-twin world simulation runs |
+| `GET /twin/stores/{store_id}` · `GET /twin/entities/{twin_id}` | Exact-store topology, current state, and provenance |
+| `GET /twin/observations` · `GET /twin/fidelity` · `POST /twin/observations` | Derived observations, fidelity guards, and tenant-bound intake |
+| `POST /twin/onboarding` · `POST /twin/stores/{store_id}/bootstrap` · `GET /twin/stores/{store_id}/snapshot` | Explicit shop binding, event replay, and deterministic snapshot identity |
+| `POST /twin/edge/observations` | Signed, derived edge observations; raw camera/audio media is rejected and not stored |
 
 ## Smoke
 
@@ -394,6 +403,136 @@ Next (honest roadmap, not yet built):
   and unit-tested; today's demo network is generated-world snapshot data, not live branch feeds).
 - Persist score history and candidate deltas in a production database rather than the current
   repeatable synthetic fleet-evaluation receipt.
+
+### Digital Twin (in progress, not yet fully tested)
+
+ShelfWise is being extended into an exact-store digital twin — a versioned, provenance-tracked
+model of one real shop, layered underneath (not replacing) the agent cascade above. The twin core
+(`shelfwise_twin`: entities, relationships, append-only observations, idempotent projection,
+scenario branches, fidelity scoring, sensor calibration, and a durably-replayable onboarding
+manifest registry) is landing on `developers` now, with its own test suite
+(`tests/test_twin_*.py`) passing alongside the existing 590+ tests. Onboarding-created topology
+(seeded fixtures, the store's own display name/attributes) and the deterministic replay/recovery
+projection hash both survive a full projected-state rebuild — verified directly by wiping the
+twin store and replaying purely from durable state. The camera/edge-sensor layer below is still
+design-stage — not yet implemented, not yet tested against real hardware. Full detail, hard
+guards, and phased rollout live in `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md`.
+
+**Twin core data flow (partially implemented, under active test):**
+
+```mermaid
+flowchart LR
+    subgraph Physical["Exact demonstration shop"]
+        POS["POS / sales"]
+        ERP["ERP / WMS / product master"]
+        OPS["Scans / counts / receiving"]
+        IOT["Temperature / door / power sensors"]
+        LAYOUT["Floor plan / planogram"]
+    end
+
+    subgraph Intake["Trust boundary"]
+        CONN["Connector instances"]
+        QUAR["Validate, quarantine, deduplicate"]
+        CANON["Canonical CloudEvents"]
+    end
+
+    subgraph Twin["ShelfWise twin core"]
+        OBS["Append-only observations"]
+        BUS["Redis Streams"]
+        PROJ["Idempotent twin projector"]
+        GRAPH["Current entity graph and property state"]
+        HIST["Snapshots, history, freshness, divergence"]
+    end
+
+    subgraph Reasoning["Existing ShelfWise workflow"]
+        TOOLS["Deterministic decision tools"]
+        SIM["Isolated scenario branch"]
+        AGENTS["Routine agents -> Critic -> Executive"]
+        HITL["Human approval / rejection"]
+        OUTCOME["Outcome and calibration events"]
+    end
+
+    UI["2D store map + timeline + proof rail"]
+    VM["MI300X/vLLM routine and strong tiers"]
+
+    POS --> CONN
+    ERP --> CONN
+    OPS --> CONN
+    IOT --> CONN
+    LAYOUT --> CONN
+    CONN --> QUAR --> CANON --> OBS
+    OBS --> BUS --> PROJ --> GRAPH
+    PROJ --> HIST
+    GRAPH --> TOOLS --> AGENTS
+    GRAPH --> SIM --> AGENTS
+    AGENTS <--> VM
+    AGENTS --> HITL --> OUTCOME --> OBS
+    GRAPH --> UI
+    HIST --> UI
+    SIM --> UI
+```
+
+**AMD edge-to-twin reference architecture (future — no camera/sensor hardware integrated yet):**
+
+```mermaid
+flowchart TB
+    subgraph Shop["Exact demonstration shop"]
+        CAMS["Third-party ONVIF/RTSP cameras"]
+        IOT["Temperature, door, power, load cells, RFID"]
+        BIZ["POS, ERP/WMS, planogram, handheld scans"]
+        subgraph Edge["AMD edge appliance"]
+            IO["Stream/sensor adapters"]
+            VITIS["Vitis AI model runtime"]
+            EFUSE["Deterministic sensor fusion"]
+            EQUEUE["Signed bounded offline queue"]
+            HEALTH["Device/model/time health"]
+        end
+    end
+
+    subgraph Core["ShelfWise state plane on AMD EPYC-class compute"]
+        INTAKE["FastAPI trust boundary"]
+        OBS["Append-only derived observations"]
+        REDIS["Redis Streams"]
+        PROJ["Idempotent twin projector"]
+        GRAPH["Postgres entity graph and property history"]
+        DS["Decision-science and scenario branches"]
+    end
+
+    subgraph AI["AMD Instinct inference plane"]
+        ROUTE["Role/model router"]
+        SMALL["MI300X routine model"]
+        STRONG["MI300X strong model"]
+    end
+
+    subgraph Work["Human-controlled operations"]
+        UI["2D store twin and proof rail"]
+        CASCADE["Existing ShelfWise cascade"]
+        HITL["Critic, Executive, approval"]
+        TASK["Associate/facilities task"]
+        OUTCOME["Observed outcome"]
+    end
+
+    CAMS --> IO
+    IOT --> IO
+    IO --> VITIS --> EFUSE
+    HEALTH --> EFUSE
+    EFUSE --> EQUEUE
+    BIZ --> INTAKE
+    EQUEUE --> INTAKE --> OBS --> REDIS --> PROJ --> GRAPH
+    GRAPH --> DS
+    GRAPH --> CASCADE
+    DS --> CASCADE
+    CASCADE --> ROUTE
+    ROUTE --> SMALL
+    ROUTE --> STRONG
+    CASCADE --> HITL --> TASK --> OUTCOME --> INTAKE
+    GRAPH --> UI
+    HITL --> UI
+```
+
+Camera/sensor edge hardware (AMD Kria/Versal), the 2D Store Twin UI, and multi-week fidelity
+re-validation are explicitly **not implemented** — see the plan doc's phased roadmap (Phases 0-G)
+for the intended build order before any of it is claimed as working.
 
 ## Inference Strategy
 

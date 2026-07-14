@@ -134,6 +134,46 @@ input {
   gap: 8px;
 }
 
+.data-source-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 172px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.data-source-switch button {
+  min-width: 0;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mute);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.data-source-switch button:hover {
+  color: var(--text);
+}
+
+.data-source-switch button.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.data-source-switch button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .icon-btn {
   display: grid;
   place-items: center;
@@ -2139,6 +2179,20 @@ input {
 }
 
 @media (max-width: 480px) {
+  .brand-name,
+  .inference-pill {
+    display: none;
+  }
+
+  .data-source-switch {
+    width: 148px;
+  }
+
+  .data-source-switch button {
+    padding: 0 4px;
+    font-size: 10.5px;
+  }
+
   .chat-inner {
     padding: 12px 10px 20px;
   }

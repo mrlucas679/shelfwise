@@ -240,6 +240,7 @@ def _world_event(
     invoiced = 36
     temperature_c = 9.2 if product.refrigerated and case_label != "normal safe transaction" else 4.0
     return {
+        "data_domain": "world_simulation",
         "event_id": f"world_evt_{seed}_{index:04d}",
         "ts": datetime.combine(current, time(8 + index % 10), tzinfo=UTC).isoformat(),
         "store_id": "store_obs_main",
@@ -271,6 +272,7 @@ def _row_from_event(
     expected = _expected_output(case_label, risk_level, event)
     return {
         "id": f"world-mm-{index:04d}",
+        "data_domain": "world_simulation",
         "case_type": _case_type(case_label),
         "case_label": case_label,
         "mixture": mixture,

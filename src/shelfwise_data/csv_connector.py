@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from shelfwise_connectors import TaskWriteBackSink, raw_payload_hash
-from shelfwise_contracts import Event, EventSource, EventType, RecommendedAction
+from shelfwise_contracts import DataDomain, Event, EventSource, EventType, RecommendedAction
 
 from .seed import (
     DEFAULT_DATASETS,
@@ -30,10 +30,12 @@ class CsvConnector:
         *,
         now: datetime = REFERENCE_NOW,
         tenant_id: str = TENANT_ID,
+        data_domain: DataDomain | str = DataDomain.WORLD_SIMULATION,
     ) -> None:
         self._dir = Path(datasets_dir)
         self._now = now
         self._tenant_id = tenant_id
+        self._data_domain = DataDomain(data_domain)
         self._sink = TaskWriteBackSink()
 
     async def read_export(self, kind: str) -> AsyncIterator[Event]:
@@ -62,6 +64,7 @@ class CsvConnector:
         return self._sink.create_task(
             idempotency_key=idempotency_key,
             tenant_id=self._tenant_id,
+            data_domain=self._data_domain.value,
             title=f"Review {action.type}",
             action=action.to_dict(),
         )
@@ -126,6 +129,7 @@ class CsvConnector:
                     actor=sale.location,
                     source=EventSource.POS_CSV,
                     tenant_id=self._tenant_id,
+                    data_domain=self._data_domain,
                     payload=payload,
                 )
             )
@@ -167,6 +171,7 @@ class CsvConnector:
             source=source,
             payload=payload,
             tenant_id=self._tenant_id,
+            data_domain=self._data_domain,
         )
 
 

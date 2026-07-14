@@ -83,7 +83,9 @@ def test_recall_retry_is_idempotent_and_approval_creates_writeback_task() -> Non
     duplicate = client.post("/ingest", json=payload)
     decision_id = first.json()["cascade"]["decision"]["id"]
     approved = client.post(f"/decisions/{decision_id}/approve")
-    tasks = client.get("/writeback/tasks").json()["tasks"]
+    tasks = client.get(
+        "/writeback/tasks?data_domain=operational_twin"
+    ).json()["tasks"]
 
     assert first.status_code == 200
     assert duplicate.json()["status"] == "duplicate"

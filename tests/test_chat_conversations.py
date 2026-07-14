@@ -91,6 +91,73 @@ def test_conversations_are_isolated_by_tenant_and_user(monkeypatch) -> None:
     assert client.get("/chat/conversations", headers=other_user).json()["conversations"] == []
 
 
+def test_conversation_cannot_mix_live_and_simulation_context(monkeypatch) -> None:
+    _enable_jwt(monkeypatch)
+    client = TestClient(app)
+    headers = _headers(tenant_id="tenant_a", user_id="user_a")
+
+    first = client.post(
+        "/chat",
+        headers=headers,
+        json={
+            "question": "What needs attention?",
+            "conversation_id": "domain_locked",
+            "message_id": "msg_world",
+            "data_domain": "world_simulation",
+        },
+    )
+    mixed = client.post(
+        "/chat",
+        headers=headers,
+        json={
+            "question": "Now check the live store",
+            "conversation_id": "domain_locked",
+            "message_id": "msg_live",
+            "data_domain": "operational_twin",
+        },
+    )
+
+    assert first.status_code == 200
+    assert first.headers["X-ShelfWise-Data-Domain"] == "world_simulation"
+    assert mixed.status_code == 409
+    assert mixed.json()["detail"] == "Start a new conversation when changing the data source"
+
+
+def test_conversation_lists_are_filtered_by_data_domain(monkeypatch) -> None:
+    _enable_jwt(monkeypatch)
+    client = TestClient(app)
+    headers = _headers(tenant_id="tenant_domain_list", user_id="user_a")
+
+    for domain in ("world_simulation", "operational_twin"):
+        response = client.post(
+            "/chat",
+            headers=headers,
+            json={
+                "question": f"Check {domain}",
+                "conversation_id": f"conv_{domain}",
+                "message_id": f"msg_{domain}",
+                "data_domain": domain,
+            },
+        )
+        assert response.status_code == 200
+
+    simulation = client.get(
+        "/chat/conversations?data_domain=world_simulation", headers=headers
+    ).json()
+    operational = client.get(
+        "/chat/conversations?data_domain=operational_twin", headers=headers
+    ).json()
+
+    assert [item["id"] for item in simulation["conversations"]] == [
+        "conv_world_simulation"
+    ]
+    assert simulation["conversations"][0]["data_domain"] == "world_simulation"
+    assert [item["id"] for item in operational["conversations"]] == [
+        "conv_operational_twin"
+    ]
+    assert operational["conversations"][0]["data_domain"] == "operational_twin"
+
+
 def test_chat_store_bounds_persisted_history() -> None:
     store = ChatConversationStore(history_limit=6)
     for index in range(10):

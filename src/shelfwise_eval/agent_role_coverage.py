@@ -23,6 +23,8 @@ from shelfwise_inference.tool_calling import (
     assert_conclusion_grounded_in_tool_results,
 )
 from shelfwise_memory import create_learning_store
+from shelfwise_mlops import ModelRun, create_model_run_registry
+from shelfwise_storage import bind_tenant_context, reset_tenant_context
 from shelfwise_worldgen import create_world_snapshot_store
 
 # The provider can, intermittently, stall producing the final JSON object even after a
@@ -46,6 +48,11 @@ _ROLE_SCHEMA: dict[str, Any] = {
     "required": ["conclusion", "confidence", "requires_human_review"],
     "additionalProperties": False,
 }
+
+
+def _record_role_model_run(registry: Any, payload: dict[str, Any]) -> None:
+    """Persist evaluator inference with the simulation boundary made explicit."""
+    registry.record(ModelRun(**{**payload, "data_domain": "world_simulation"}))
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +158,7 @@ class RoleCoverageResult:
     answer: dict[str, Any] | None
     model_call_count: int
     total_tokens: int
+    model_calls: tuple[dict[str, Any], ...]
     error: str | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -165,6 +173,7 @@ class RoleCoverageResult:
             "answer": self.answer,
             "model_call_count": self.model_call_count,
             "total_tokens": self.total_tokens,
+            "model_calls": [dict(call) for call in self.model_calls],
             "error": self.error,
         }
 
@@ -177,50 +186,60 @@ def run_agent_role_coverage(
 
 
 async def _run(*, execution_mode: ExecutionMode) -> list[RoleCoverageResult]:
-    decisions = create_decision_store()
-    memory = create_learning_store()
-    audit = AuditLog()
-    facts = WorldFactsProvider(create_world_snapshot_store())
     tenant_id = "eval_tenant"
-    hero_sku = facts.get_hero_sku(tenant_id)
-    hero = facts.get_scenario_facts(tenant_id, hero_sku)
-    # One real pending decision so list_open_decisions returns a non-empty queue and
-    # explain_decision has a genuine id to resolve - without it the critic's
-    # explain_decision coverage would be untestable against an empty store.
-    decisions.upsert(
-        {
-            "id": "dec_role_coverage_seed",
-            "status": "pending",
-            "action": {
-                "type": "apply_markdown",
-                "params": {"sku": hero_sku, "discount_pct": "0.20"},
-                "risk_tier": "high",
-            },
-            "caused_by": ["role_coverage_seed"],
-            "summary": (
-                f"Pending manager approval: 20% markdown for {hero.product_name} "
-                f"at {hero.location}."
-            ),
-            "tenant_id": tenant_id,
-            "critic_verdict": "approved",
-        }
-    )
-    tools: list[PlatformTool] = build_platform_tools(
-        decisions=decisions,
-        memory=memory,
-        audit=audit,
-        facts=facts,
-        tenant_id=tenant_id,
-    )
-    config = load_inference_config()
-    architecture = architecture_from_inference_config(config)
-    runtime = OpenAIModelRuntime(architecture=architecture, execution_mode=execution_mode)
-    orchestrator = AgentOrchestrator(tools=tools, model_runtime=runtime)
+    tenant_token = bind_tenant_context(tenant_id)
+    try:
+        decisions = create_decision_store()
+        memory = create_learning_store()
+        audit = AuditLog()
+        facts = WorldFactsProvider(create_world_snapshot_store())
+        hero_sku = facts.get_hero_sku(tenant_id)
+        hero = facts.get_scenario_facts(tenant_id, hero_sku)
+        # Seed one real pending decision so the Critic can exercise explain_decision.
+        decisions.upsert(
+            {
+                "id": "dec_role_coverage_seed",
+                "status": "pending",
+                "action": {
+                    "type": "apply_markdown",
+                    "params": {"sku": hero_sku, "discount_pct": "0.20"},
+                    "risk_tier": "high",
+                },
+                "caused_by": ["role_coverage_seed"],
+                "summary": (
+                    f"Pending manager approval: 20% markdown for {hero.product_name} "
+                    f"at {hero.location}."
+                ),
+                "tenant_id": tenant_id,
+                "data_domain": "world_simulation",
+                "critic_verdict": "approved",
+            }
+        )
+        tools: list[PlatformTool] = build_platform_tools(
+            decisions=decisions,
+            memory=memory,
+            audit=audit,
+            facts=facts,
+            tenant_id=tenant_id,
+        )
+        config = load_inference_config()
+        architecture = architecture_from_inference_config(config)
+        model_runs = create_model_run_registry()
+        runtime = OpenAIModelRuntime(
+            architecture=architecture,
+            execution_mode=execution_mode,
+            recorder=lambda payload: _record_role_model_run(model_runs, payload),
+        )
+        orchestrator = AgentOrchestrator(tools=tools, model_runtime=runtime)
 
-    results: list[RoleCoverageResult] = []
-    for prompt in _ROLE_PROMPTS:
-        results.append(await _run_one(orchestrator, prompt, tenant_id=tenant_id, sku=hero_sku))
-    return results
+        results: list[RoleCoverageResult] = []
+        for prompt in _ROLE_PROMPTS:
+            results.append(
+                await _run_one(orchestrator, prompt, tenant_id=tenant_id, sku=hero_sku)
+            )
+        return results
+    finally:
+        reset_tenant_context(tenant_token)
 
 
 async def _run_one(
@@ -257,9 +276,11 @@ async def _run_one(
             answer=None,
             model_call_count=0,
             total_tokens=0,
+            model_calls=(),
             error=str(exc),
         )
     total_tokens = sum(call.input_tokens + call.output_tokens for call in run_result.model_calls)
+    model_calls = tuple(call.to_dict() for call in run_result.model_calls)
     tools_called = tuple(call.name for call in run_result.tool_calls)
     if prompt.expected_tool is not None and prompt.expected_tool not in tools_called:
         return RoleCoverageResult(
@@ -270,6 +291,7 @@ async def _run_one(
             answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
             model_call_count=len(run_result.model_calls),
             total_tokens=total_tokens,
+            model_calls=model_calls,
             error=f"expected tool was not called: {prompt.expected_tool}",
         )
     return RoleCoverageResult(
@@ -280,5 +302,6 @@ async def _run_one(
         answer=dict(run_result.answer) if isinstance(run_result.answer, dict) else None,
         model_call_count=len(run_result.model_calls),
         total_tokens=total_tokens,
+        model_calls=model_calls,
         error=None,
     )

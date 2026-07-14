@@ -334,7 +334,9 @@ class AgentOrchestrator:
         )
         openai_tools = self._registry.openai_tools()
         available_tool_names = {tool["function"]["name"] for tool in openai_tools}
-        required_names = tuple(dict.fromkeys(name.strip() for name in required_tool_names if name.strip()))
+        required_names = tuple(
+            dict.fromkeys(name.strip() for name in required_tool_names if name.strip())
+        )
         unknown_required = set(required_names).difference(available_tool_names)
         if unknown_required:
             raise ValueError(f"required tools are not registered: {sorted(unknown_required)}")
@@ -359,7 +361,10 @@ class AgentOrchestrator:
         for call_index in range(self._max_model_calls):
             tool_choice: str | dict[str, Any] | None
             executed_names = {execution.name for execution in tool_executions}
-            next_required = next((name for name in required_names if name not in executed_names), None)
+            next_required = next(
+                (name for name in required_names if name not in executed_names),
+                None,
+            )
             if next_required is not None:
                 tool_choice = {"type": "function", "function": {"name": next_required}}
             elif not openai_tools:

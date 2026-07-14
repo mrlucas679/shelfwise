@@ -115,14 +115,19 @@ def _host_label(base_url: str) -> str:
     return parsed.netloc or parsed.path
 
 
+SUBMISSION_TIMEOUT_LIMIT_S = 30
+"""Hackathon submission response-time ceiling. Every timeout/readiness check that reasons
+about "did we stay under the submission limit" must import this instead of hardcoding 30."""
+
+
 def _timeout_seconds() -> int:
-    """Clamp the network timeout under the 30s hackathon submission response limit."""
+    """Clamp the network timeout under `SUBMISSION_TIMEOUT_LIMIT_S`."""
     raw = os.getenv("LLM_TIMEOUT_SECONDS", "25")
     try:
         value = int(raw)
     except ValueError:
         value = 25
-    return max(1, min(value, 29))
+    return max(1, min(value, SUBMISSION_TIMEOUT_LIMIT_S - 1))
 
 
 def _default_compute_resource(provider: ProviderKind) -> str:

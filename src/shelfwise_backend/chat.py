@@ -4,7 +4,7 @@ import asyncio
 import json
 import unicodedata
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,23 +19,15 @@ from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
 )
-from shelfwise_worldgen import create_world_snapshot_store
+from shelfwise_twin import TwinService
 
+from .context_assembler import assemble_context
 from .product_catalog import get_delivery_exception, search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
-from .tools.mcp_surface import AuditLog, build_platform_tools
+from .tools.mcp_surface import AuditLog, build_live_twin_tools, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
 from .world_facts import WorldFactsProvider
-
-_default_facts_store: Any = None
-
-
-def _default_facts() -> WorldFactsProvider:
-    global _default_facts_store
-    if _default_facts_store is None:
-        _default_facts_store = create_world_snapshot_store()
-    return WorldFactsProvider(_default_facts_store)
-
+from .world_facts import default_facts_provider as _default_facts
 
 _CHAT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -102,6 +94,7 @@ class ChatBody(BaseModel):
     question: str = Field(min_length=1, max_length=2_000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
     message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None
     live_required: bool = False
 
 
@@ -143,6 +136,8 @@ def build_chat_reply(
     decisions: Any = None,
     memory: Any = None,
     facts: WorldFactsProvider | None = None,
+    twin: TwinService | None = None,
+    audit: AuditLog | None = None,
     orchestrator_factory: Any = None,
 ) -> str:
     """Build a chat answer from current backend state."""
@@ -156,6 +151,8 @@ def build_chat_reply(
         decisions=decisions,
         memory=memory,
         facts=facts,
+        twin=twin,
+        audit=audit,
         orchestrator_factory=orchestrator_factory,
     )
     return answer
@@ -172,6 +169,8 @@ def build_chat_reply_with_meta(
     decisions: Any = None,
     memory: Any = None,
     facts: WorldFactsProvider | None = None,
+    twin: TwinService | None = None,
+    audit: AuditLog | None = None,
     orchestrator_factory: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Answer using a real agentic tool-calling loop when a decision/memory store is
@@ -188,29 +187,49 @@ def build_chat_reply_with_meta(
     """
     inference = client or OpenAICompatibleInferenceClient()
     resolved_facts = facts or _default_facts()
-    subject, product, tool_calls = _tool_context(
-        question, facts=resolved_facts, tenant_id=tenant_id
-    )
+    live_twin = twin is not None
+    if live_twin:
+        subject, product, tool_calls = question[:80], None, [{"tool": "live_twin.context"}]
+    else:
+        subject, product, tool_calls = _tool_context(
+            question, facts=resolved_facts, tenant_id=tenant_id
+        )
     meta: dict[str, Any] = {
         "tools_used": [call["tool"] for call in tool_calls],
         "subject": subject,
-        "model": getattr(inference.config, "strong_model", ""),
+        # Placeholder until a real inference call actually resolves a model - the agentic path
+        # (role="chat") and the non-agentic fallback (agent="executive") do not necessarily
+        # route to the same tier, so this is corrected below to whichever model the run that
+        # actually produced the answer used, rather than assumed up front.
+        "model": getattr(inference.config, "routine_model", ""),
         "provider": getattr(getattr(inference.config, "provider", None), "value", "unknown"),
         "answer_source": "offline",
     }
     state = dict(state)
-    state["tool_results"] = {"catalog_search": product, "subject": subject}
+    state["tool_results"] = (
+        {"live_twin_context": twin.live_context(tenant_id), "subject": subject}
+        if live_twin
+        else {"catalog_search": product, "subject": subject}
+    )
+    assembled = assemble_context(state, decision_type="chat")
+    state = assembled.payload
     if not inference.config.api_key_present:
         if live_required:
             raise InferenceError("live chat requires configured inference credentials")
+        if live_twin:
+            return (
+                "Live inference is unavailable, so I will not answer from simulated data.",
+                meta,
+            )
         return (
-            _offline_reply(
+            _safe_offline_reply(
                 question=question,
                 state=state,
                 subject=subject,
                 product=product,
                 facts=resolved_facts,
                 tenant_id=tenant_id,
+                live_twin=live_twin,
             ),
             meta,
         )
@@ -225,7 +244,7 @@ def build_chat_reply_with_meta(
         last_error: AgentOrchestrationError | ToolCallingError | None = None
         for attempt in range(2):
             try:
-                answer, run_tool_calls = asyncio.run(
+                answer, run_tool_calls, model_used = asyncio.run(
                     _run_agentic_chat(
                         prompt=prompt,
                         inference=inference,
@@ -237,10 +256,14 @@ def build_chat_reply_with_meta(
                             correlation_id if attempt == 0 else f"{correlation_id}:retry-{attempt}"
                         ),
                         orchestrator_factory=orchestrator_factory,
+                        twin=twin,
+                        audit=audit,
                     )
                 )
                 meta["answer_source"] = "model"
                 meta["tools_used"] = [call.name for call in run_tool_calls]
+                if model_used:
+                    meta["model"] = model_used
                 return answer, meta
             except (AgentOrchestrationError, ToolCallingError) as exc:
                 last_error = exc
@@ -249,13 +272,14 @@ def build_chat_reply_with_meta(
             if live_required:
                 raise InferenceError(f"live agentic chat failed: {last_error}") from last_error
             return (
-                _offline_reply(
+                _safe_offline_reply(
                     question=question,
                     state=state,
                     subject=subject,
                     product=product,
                     facts=resolved_facts,
                     tenant_id=tenant_id,
+                    live_twin=live_twin,
                 ),
                 meta,
             )
@@ -283,13 +307,14 @@ def build_chat_reply_with_meta(
         if live_required:
             raise
         return (
-            _offline_reply(
+            _safe_offline_reply(
                 question=question,
                 state=state,
                 subject=subject,
                 product=product,
                 facts=resolved_facts,
                 tenant_id=tenant_id,
+                live_twin=live_twin,
             ),
             meta,
         )
@@ -300,17 +325,20 @@ def build_chat_reply_with_meta(
         if live_required:
             raise InferenceError("live chat received an empty inference result")
         return (
-            _offline_reply(
+            _safe_offline_reply(
                 question=question,
                 state=state,
                 subject=subject,
                 product=product,
                 facts=resolved_facts,
                 tenant_id=tenant_id,
+                live_twin=live_twin,
             ),
             meta,
         )
     meta["answer_source"] = "model"
+    if result.model:
+        meta["model"] = result.model
     return answer, meta
 
 
@@ -324,14 +352,32 @@ async def _run_agentic_chat(
     tenant_id: str,
     correlation_id: str | None,
     orchestrator_factory: Any,
-) -> tuple[str, tuple[Any, ...]]:
-    """Run chat through the real platform-tool registry and return a grounded answer."""
-    tools = build_platform_tools(
-        decisions=decisions,
-        memory=memory,
-        audit=AuditLog(),
-        facts=facts,
-        tenant_id=tenant_id,
+    twin: TwinService | None,
+    audit: AuditLog | None,
+) -> tuple[str, tuple[Any, ...], str]:
+    """Run chat through the real platform-tool registry and return a grounded answer.
+
+    Also returns the model that actually answered the question - role="chat" resolves
+    through `AgentArchitecture.target_for`, which is not necessarily the strong model just
+    because chat is user-facing, so the caller must not assume a tier and should record
+    whichever model this run's final answer-producing call actually used.
+    """
+    tools = (
+        build_live_twin_tools(
+            decisions=decisions,
+            memory=memory,
+            twin=twin,
+            tenant_id=tenant_id,
+            audit=audit,
+        )
+        if twin is not None
+        else build_platform_tools(
+            decisions=decisions,
+            memory=memory,
+            facts=facts,
+            tenant_id=tenant_id,
+            audit=audit,
+        )
     )
     orchestrator: AgentOrchestrator = (
         orchestrator_factory()
@@ -340,7 +386,23 @@ async def _run_agentic_chat(
     )
     run = await orchestrator.run(
         role="chat",
-        system=_CHAT_SYSTEM_PROMPT,
+        system=(
+            _CHAT_SYSTEM_PROMPT
+            if twin is None
+            else _CHAT_SYSTEM_PROMPT.replace(
+                "get_stock (on-hand/on-order for a SKU), get_demand_forecast, get_expiry_risk, "
+                "get_reorder_policy and get_supplier_ranking (procurement/ordering), "
+                "get_stock_sourcing_options (ranks real branches/DC/suppliers for a shortage), "
+                "get_cold_chain_status (refrigeration risk), check_price_integrity (till price vs "
+                "catalogue), simulate_markdown (what-if discount math), list_open_decisions and "
+                "explain_decision (approvals/HITL), and get_thresholds (learned policy memory).",
+                "get_live_twin_state, get_live_stock, and get_live_cold_chain_status for reported "
+                "operational observations, plus live_list_open_decisions, live_explain_decision, "
+                "and live_get_thresholds. Never use generated-world or what-if data to answer a "
+                "live-store "
+                "question; if a reported property is missing, say that it is unavailable.",
+            )
+        ),
         user=prompt,
         final_schema=_CHAT_SCHEMA,
         final_schema_name="chat_answer",
@@ -353,7 +415,8 @@ async def _run_agentic_chat(
     assert_conclusion_grounded_in_tool_results(answer, run.tool_calls)
     if not answer:
         raise AgentOrchestrationError("agentic chat produced an empty answer")
-    return answer[:3_000], run.tool_calls
+    model_used = run.model_calls[-1].model if run.model_calls else ""
+    return answer[:3_000], run.tool_calls, model_used
 
 
 def _default_chat_orchestrator(
@@ -401,6 +464,29 @@ def _tool_context(
     product = products[0] if products else None
     tool_calls[0]["hits"] = len(products)
     return subject, product, tool_calls
+
+
+def _safe_offline_reply(
+    *,
+    live_twin: bool,
+    question: str,
+    state: dict[str, Any],
+    subject: str = "",
+    product: dict[str, Any] | None = None,
+    facts: WorldFactsProvider | None = None,
+    tenant_id: str = "",
+) -> str:
+    """Keep synthetic fallback facts out of live-store conversations."""
+    if live_twin:
+        return "Live inference is unavailable, so I will not answer from simulated data."
+    return _offline_reply(
+        question=question,
+        state=state,
+        subject=subject,
+        product=product,
+        facts=facts,
+        tenant_id=tenant_id,
+    )
 
 
 def _offline_reply(

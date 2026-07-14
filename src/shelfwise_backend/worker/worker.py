@@ -12,6 +12,8 @@ from shelfwise_backend.cascade import (
     run_sales_cascade,
 )
 from shelfwise_contracts import Event, EventType
+from shelfwise_runtime import DataDomain
+from shelfwise_storage import bind_tenant_context, reset_tenant_context
 
 from .journal import InMemoryJournal, PostgresJournal, journaled
 
@@ -77,10 +79,16 @@ class CascadeWorker:
 
         message_id = str(message["message_id"])
         message_stream = str(message["stream"])
+        tenant_token = None
         try:
             event = Event.parse_wire(message["event"])
-            run_id = event.id
-            self._journal.start_run(run_id, tenant_id=event.tenant_id)
+            tenant_token = bind_tenant_context(event.tenant_id)
+            run_id = _event_run_id(event)
+            self._journal.start_run(
+                run_id,
+                tenant_id=event.tenant_id,
+                data_domain=event.data_domain.value,
+            )
             cascade = journaled(
                 self._journal,
                 run_id,
@@ -112,6 +120,9 @@ class CascadeWorker:
                 error=str(exc),
                 dead_lettered=dead_lettered,
             )
+        finally:
+            if tenant_token is not None:
+                reset_tenant_context(tenant_token)
 
     def _persist_decision(self, run_id: str, cascade: dict[str, Any]) -> dict[str, Any] | None:
         decision = cascade.get("decision")
@@ -145,8 +156,42 @@ class CascadeWorker:
         except TypeError:
             return bool(self._bus.nack(stream, message_id))
 
+    def reclaim_stale(self, *, min_idle_ms: int = 30_000) -> int:
+        """Reclaim stale bus entries through the configured bus implementation."""
+        reclaim = getattr(self._bus, "reclaim_stale", None)
+        if not callable(reclaim):
+            return 0
+        try:
+            return int(
+                reclaim(
+                    None,
+                    group=self._group,
+                    consumer=self._consumer,
+                    min_idle_ms=min_idle_ms,
+                )
+            )
+        except TypeError:
+            return int(reclaim(None))
+
 
 def default_cascade_handler(event: Event) -> dict[str, Any]:
+    if event.data_domain is DataDomain.OPERATIONAL_TWIN and event.type in {
+        EventType.SCAN,
+        EventType.SUPPLIER_UPDATE,
+        EventType.SALE,
+        EventType.COLD_CHAIN_ALERT,
+    }:
+        return _attach_event_causality(
+            {
+                "scenario": "operational_dispatcher_required",
+                "decision": None,
+                "evidence": [],
+                "trace": [],
+                "status": "insufficient_operational_facts",
+                "missing_data": ["configured operational facts provider"],
+            },
+            event,
+        )
     if event.type is EventType.SCAN:
         return _attach_event_causality(run_golden_cascade(event), event)
     if event.type is EventType.SUPPLIER_UPDATE:
@@ -174,13 +219,24 @@ def _run_id_from_message(message: dict[str, Any]) -> str | None:
     event = message.get("event")
     if not isinstance(event, dict):
         return None
-    return str(event.get("id") or event.get("correlation_id") or "") or None
+    try:
+        return _event_run_id(Event.parse_wire(event))
+    except (TypeError, ValueError):
+        return str(event.get("id") or event.get("correlation_id") or "") or None
+
+
+def _event_run_id(event: Event) -> str:
+    """Scope journal identity to the same uniqueness boundary as persisted events."""
+    return f"event:{event.tenant_id}:{event.data_domain.value}:{event.id}"
 
 
 def _attach_event_causality(result: dict[str, Any], event: Event) -> dict[str, Any]:
     result["correlation_id"] = event.correlation_id
     result["tenant_id"] = event.tenant_id
+    result["data_domain"] = event.data_domain.value
     decision = result.get("decision")
     if isinstance(decision, dict):
         decision["caused_by"] = [event.id]
+        decision["tenant_id"] = event.tenant_id
+        decision["data_domain"] = event.data_domain.value
     return result

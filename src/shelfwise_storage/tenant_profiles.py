@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
-from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
 from .postgres import auto_schema_enabled, connect, jsonb
 from .rls import apply_tenant_rls
+from .time_utils import now_iso as _now
 
 DEFAULT_BUDGETS = {
     "daily_request_limit": 500,
@@ -201,10 +201,6 @@ def _clean_tenant_id(value: str) -> str:
     if len(tenant_id) > 128 or not tenant_id.replace("_", "").replace("-", "").isalnum():
         raise ValueError("tenant_id must be a simple identifier")
     return tenant_id
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 _TENANT_PROFILE_SCHEMA_SQL = """

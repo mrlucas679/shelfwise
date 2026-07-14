@@ -6,6 +6,9 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from shelfwise_backend.app import app as backend_app
+from shelfwise_backend.deps import SESSION_COOKIE
+from shelfwise_backend.tenant import encode_hs256_token
 from shelfwise_contracts import SourceRef
 from shelfwise_multimodal import (
     VOICE_SYSTEM_ADDENDUM,
@@ -292,6 +295,32 @@ def test_barcode_scan_returns_review_required_scan_candidate(monkeypatch):
     assert event["payload"]["barcode"] == "SKU-4011"
 
 
+def test_scan_router_accepts_the_browser_session_cookie(monkeypatch):
+    secret = "scan-cookie-test-secret-at-least-32-characters"
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", secret)
+    client = TestClient(_scan_app(monkeypatch, enabled=False))
+    client.cookies.set(
+        SESSION_COOKIE,
+        encode_hs256_token(
+            {
+                "tenant_id": "tenant_browser",
+                "user_id": "manager_browser",
+                "role": "manager",
+            },
+            secret=secret,
+        ),
+    )
+
+    response = client.post(
+        "/scan/barcode",
+        json={"code": "SKU-4011", "location": "store_12"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candidate"]["event"]["tenant_id"] == "tenant_browser"
+
+
 def test_receipt_scan_returns_review_required_sale_candidates(monkeypatch):
     client = TestClient(_scan_app(monkeypatch, enabled=False))
 
@@ -313,6 +342,54 @@ def test_receipt_scan_returns_review_required_sale_candidates(monkeypatch):
     assert event["source"] == "scanner"
     assert event["payload"]["receipt_id"] == "r_1"
     assert event["payload"]["quantity"] == 2
+
+
+def test_reviewed_scanner_candidate_enters_the_canonical_pipeline(monkeypatch):
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "off")
+    candidate_client = TestClient(_scan_app(monkeypatch, enabled=False))
+    event = candidate_client.post(
+        "/scan/barcode",
+        json={"code": "SKU-4011", "location": "store_12"},
+    ).json()["candidate"]["event"]
+
+    client = TestClient(backend_app)
+    accepted = client.post(
+        "/scan/candidates/confirm",
+        json={"event": event, "review_note": "Matched the shelf label"},
+    )
+    duplicate = client.post(
+        "/scan/candidates/confirm",
+        json={"event": event, "review_note": "Matched the shelf label"},
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+    assert accepted.json()["event"]["payload"]["reviewed_by"]
+    assert accepted.json()["event"]["payload"]["review_note"] == "Matched the shelf label"
+    assert duplicate.status_code == 200
+    assert duplicate.json()["status"] == "duplicate"
+
+
+def test_scan_confirmation_rejects_non_scanner_and_simulated_events(monkeypatch):
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "off")
+    candidate_client = TestClient(_scan_app(monkeypatch, enabled=False))
+    event = candidate_client.post(
+        "/scan/barcode",
+        json={"code": "SKU-4011", "location": "store_12"},
+    ).json()["candidate"]["event"]
+    client = TestClient(backend_app)
+
+    wrong_source = client.post(
+        "/scan/candidates/confirm",
+        json={"event": {**event, "source": "manual"}},
+    )
+    wrong_domain = client.post(
+        "/scan/candidates/confirm",
+        json={"event": {**event, "data_domain": "world_simulation"}},
+    )
+
+    assert wrong_source.status_code == 422
+    assert wrong_domain.status_code == 422
 
 
 def test_scan_image_route_is_keyed_when_configured(monkeypatch):

@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Any
 
 from shelfwise_storage import auto_schema_enabled, connect, jsonb
+from shelfwise_storage import validate_limit as _validate_limit
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .provenance import InboundRecord
@@ -282,11 +283,13 @@ def _record_key(record: InboundRecord) -> tuple[str, str, str, str]:
 
 
 def _record_id(record: InboundRecord) -> str:
-    basis = f"{record.tenant_id}:{record.source_system.value}:{record.payload_hash}"
+    # Must include source_object_id, same as `_record_key` above: a single raw webhook
+    # payload can map to several distinct records (e.g. one line item per SKU on a
+    # multi-item order), all sharing one payload_hash. Hashing only tenant/system/hash
+    # here would collide their `id` primary key and raise on insert.
+    basis = (
+        f"{record.tenant_id}:{record.source_system.value}:"
+        f"{record.payload_hash}:{record.source_object_id}"
+    )
     digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()
     return f"inbound_{digest[:16]}"
-
-
-def _validate_limit(limit: int) -> None:
-    if limit <= 0 or limit > 500:
-        raise ValueError("limit must be between 1 and 500")

@@ -9,7 +9,7 @@ from ...canonical import SalesLine, SourceSystem
 from ...provenance import InboundRecord, ValidationResult
 from ...validation import validate_sales
 from ..webhook import InMemoryWebhookDedupStore, WebhookReceiver
-from ._common import parse_time, wrap
+from ._common import parse_quantity, parse_time, wrap
 
 
 def map_lightspeed_sale(payload: dict, *, tenant_id: str) -> list[InboundRecord]:
@@ -54,7 +54,7 @@ def map_lightspeed_sale(payload: dict, *, tenant_id: str) -> list[InboundRecord]
                 line_id=line_id,
                 sku=str(line.get("sku") or line.get("custom_sku") or line.get("product_id") or ""),
                 location_id=location_id,
-                quantity=int(line.get("quantity") or line.get("qty") or 0),
+                quantity=parse_quantity(line.get("quantity") or line.get("qty") or 0),
                 unit_price=Money.zar(line.get("price") or line.get("unit_price") or "0"),
                 sold_at=sold_at,
             )
