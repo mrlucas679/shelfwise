@@ -21,6 +21,14 @@ readonly STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-900}"
 readonly APP_VENV_DIR="${APP_VENV_DIR:-/opt/shelfwise/.venv}"
 readonly BOOTSTRAP_RECEIPT="${BOOTSTRAP_RECEIPT:-/root/shelfwise-mi300x-bootstrap.json}"
 
+# The python3 CIDR-validation and receipt heredocs read these settings from the environment.
+# Re-passing a readonly variable through a command prefix (VAR="$VAR" python3 ...) is a fatal
+# "readonly variable" error in bash, so export the attribute here (legal on a readonly name,
+# no reassignment) and let the heredocs inherit them. Keeps the immutability guarantee.
+export ROUTINE_CONTAINER STRONG_CONTAINER ROUTINE_PORT STRONG_PORT ROUTINE_MODEL \
+  STRONG_MODEL VLLM_ALLOWED_CIDR VLLM_IMAGE VLLM_HOST_CONTAINER HF_CACHE_DIR \
+  APP_VENV_DIR BOOTSTRAP_RECEIPT REPO_ROOT
+
 validate_numeric_settings() {
   # Reject malformed ports and timeouts before any package install or model download.
   for setting in ROUTINE_PORT STRONG_PORT STARTUP_TIMEOUT_SECONDS; do
@@ -97,7 +105,7 @@ validate_vllm_allowed_cidr() {
     echo "python3 is required to validate VLLM_ALLOWED_CIDR" >&2
     exit 1
   }
-  VLLM_ALLOWED_CIDR="$VLLM_ALLOWED_CIDR" python3 - <<'PY'
+  python3 - <<'PY'
 import ipaddress
 import os
 import sys
@@ -334,24 +342,13 @@ write_bootstrap_receipt() {
   fi
   mkdir -p "$(dirname -- "$BOOTSTRAP_RECEIPT")"
   umask 077
-  BOOTSTRAP_RECEIPT="$BOOTSTRAP_RECEIPT" \
-  REPO_ROOT="$REPO_ROOT" \
+  # Readonly settings reach python3 via the exported environment (see the export block near
+  # the declarations). Only the genuinely local values computed above are passed as prefixes.
   REPO_COMMIT="$commit" \
   REPO_BRANCH="$branch" \
   REPO_DIRTY="$dirty" \
   HOST_IP="$host_ip" \
-  VLLM_HOST_CONTAINER="$VLLM_HOST_CONTAINER" \
-  ROUTINE_CONTAINER="$ROUTINE_CONTAINER" \
-  STRONG_CONTAINER="$STRONG_CONTAINER" \
-  VLLM_ALLOWED_CIDR="$VLLM_ALLOWED_CIDR" \
-  VLLM_IMAGE="$VLLM_IMAGE" \
   VLLM_VERSION="$version" \
-  HF_CACHE_DIR="$HF_CACHE_DIR" \
-  APP_VENV_DIR="$APP_VENV_DIR" \
-  ROUTINE_MODEL="$ROUTINE_MODEL" \
-  ROUTINE_PORT="$ROUTINE_PORT" \
-  STRONG_MODEL="$STRONG_MODEL" \
-  STRONG_PORT="$STRONG_PORT" \
   python3 - <<'PY'
 import json
 import os
