@@ -292,3 +292,116 @@ def test_concurrent_double_approve_learning_never_500s_and_records_once(
     finally:
         reset_tenant_context(token)
     assert len([e for e in events if e["decision_id"] == decision["id"]]) == 1
+
+
+def test_postgres_open_orders_dedupe_and_ignore_late_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Late/duplicate shipment events must not overwrite newer state in REAL Postgres.
+
+    These ordering/idempotency guarantees were only ever proven for
+    InMemoryOpenOrderStore; the Postgres sibling that production actually runs was
+    unexercised for the same class of write-path defect this file already caught twice.
+    """
+    from uuid import uuid4
+
+    from shelfwise_contracts import Event
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"pg_open_orders_{uuid4().hex[:10]}"
+
+    def shipment(received_units: int, ts: str) -> Event:
+        return Event.parse_wire(
+            {
+                "id": f"shipment-{tenant_id}-{received_units}",
+                "type": "shipment",
+                "ts": ts,
+                "actor": "wms",
+                "source": "api",
+                "tenant_id": tenant_id,
+                "payload": {
+                    "order_id": "PO-1",
+                    "sku": "SKU-1",
+                    "supplier_id": "supplier-1",
+                    "ordered_units": 20,
+                    "received_units": received_units,
+                    "eta": "2026-07-15T10:00:00Z",
+                },
+            }
+        )
+
+    store = PostgresOpenOrderStore(_DATABASE_URL)
+    token = bind_tenant_context(tenant_id)
+    try:
+        current = store.observe_event(shipment(5, "2026-07-13T12:00:00Z"))
+        stale = store.observe_event(shipment(0, "2026-07-13T11:00:00Z"))
+
+        assert current is not None
+        assert stale == current, "a late event must not overwrite newer state"
+        assert store.coverage(tenant_id)["SKU-1"]["remaining_units"] == 15
+
+        repeated = store.observe_event(shipment(5, "2026-07-13T12:00:00Z"))
+        assert repeated is not None
+        assert store.coverage(tenant_id)["SKU-1"]["remaining_units"] == 15, (
+            "an exact duplicate must be idempotent, not double-received"
+        )
+    finally:
+        reset_tenant_context(token)
+
+
+def test_postgres_catalog_rejects_conflicting_identifier_remap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one-identifier-one-variant invariant must hold in REAL Postgres, where it is
+    ultimately enforced by constraints, not by the in-memory dict the existing test
+    exercises."""
+    from uuid import uuid4
+
+    from shelfwise_catalog import (
+        ConflictingIdentifierError,
+        Product,
+        ProductIdentifier,
+        ProductVariant,
+    )
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"pg_catalog_conflict_{uuid4().hex[:10]}"
+    store = PostgresProductCatalogStore(_DATABASE_URL)
+    token = bind_tenant_context(tenant_id)
+    try:
+        store.upsert_product(
+            Product(tenant_id=tenant_id, product_id="prod_milk", name="Full Cream Milk")
+        )
+        store.upsert_variant(
+            ProductVariant(tenant_id=tenant_id, variant_id="var_milk_1l", product_id="prod_milk")
+        )
+        store.upsert_variant(
+            ProductVariant(tenant_id=tenant_id, variant_id="var_other", product_id="prod_milk")
+        )
+        store.upsert_identifier(
+            ProductIdentifier(
+                tenant_id=tenant_id, variant_id="var_milk_1l", kind="gtin", value="6001234567890"
+            )
+        )
+
+        # Idempotent re-assert of the SAME mapping must not raise.
+        store.upsert_identifier(
+            ProductIdentifier(
+                tenant_id=tenant_id, variant_id="var_milk_1l", kind="gtin", value="6001234567890"
+            )
+        )
+
+        with pytest.raises(ConflictingIdentifierError):
+            store.upsert_identifier(
+                ProductIdentifier(
+                    tenant_id=tenant_id, variant_id="var_other", kind="gtin",
+                    value="6001234567890",
+                )
+            )
+
+        resolved = store.resolve_identifier(tenant_id=tenant_id, kind="gtin", value="6001234567890")
+        assert resolved is not None and resolved["variant_id"] == "var_milk_1l", (
+            "the original mapping must survive the rejected remap untouched"
+        )
+    finally:
+        reset_tenant_context(token)

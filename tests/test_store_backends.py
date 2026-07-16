@@ -168,3 +168,41 @@ def test_bus_factory_rejects_unknown_backend(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(ValueError, match="unsupported SHELFWISE_BUS_BACKEND"):
         create_event_bus()
+
+
+def test_candidate_store_factory_pairs_history_backend_with_store_backend(monkeypatch) -> None:
+    """The candidate store must NEVER mix backends with its history sub-store.
+
+    The 2026-07-15 audit found InMemoryCandidateStore silently persisting candidate
+    history to real Postgres because its history default went through an env-sensitive
+    factory - and no test could catch it, because every candidate test constructed the
+    in-memory class directly, bypassing the factory entirely. This test pins the
+    factory wiring itself.
+    """
+    from shelfwise_backend.candidate_history import InMemoryCandidateHistoryStore
+    from shelfwise_backend.candidate_store import InMemoryCandidateStore, create_candidate_store
+
+    monkeypatch.setenv("SHELFWISE_STORE_BACKEND", "memory")
+    # Poison the Postgres coordinates: if any in-memory path still consults them,
+    # construction or first use would fail loudly instead of leaking cross-backend.
+    monkeypatch.setenv("DATABASE_URL", "postgresql://poison:poison@127.0.0.1:1/poison")
+
+    store = create_candidate_store()
+    assert isinstance(store, InMemoryCandidateStore)
+    assert isinstance(store._history, InMemoryCandidateHistoryStore), (
+        "an in-memory candidate store delegating history to any other backend is the "
+        "exact leak class this test exists to catch"
+    )
+
+
+def test_direct_inmemory_candidate_store_never_touches_env_backends(monkeypatch) -> None:
+    """Constructing InMemoryCandidateStore() directly must stay pure in-memory even when
+    the ambient environment says postgres - its name is its contract."""
+    from shelfwise_backend.candidate_history import InMemoryCandidateHistoryStore
+    from shelfwise_backend.candidate_store import InMemoryCandidateStore
+
+    monkeypatch.setenv("SHELFWISE_STORE_BACKEND", "postgres")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://poison:poison@127.0.0.1:1/poison")
+
+    store = InMemoryCandidateStore()
+    assert isinstance(store._history, InMemoryCandidateHistoryStore)

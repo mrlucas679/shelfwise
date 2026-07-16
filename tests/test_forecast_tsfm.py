@@ -4,6 +4,8 @@ import asyncio
 from decimal import Decimal
 from typing import Any
 
+import pytest
+
 from shelfwise_decision_science import forecast_demand
 from shelfwise_decision_science.forecast_tsfm import forecast_demand_tsfm, wape
 
@@ -91,3 +93,68 @@ def test_wape_is_the_promotion_gate_metric() -> None:
 
     assert wape(actuals, actuals) == Decimal("0.00")
     assert wape(actuals, [Decimal("12"), Decimal("22"), Decimal("28")]) == Decimal("0.10")
+
+
+class _TimingOutTsfm:
+    async def forecast(self, **kwargs):
+        raise TimeoutError("simulated transport timeout")
+
+
+class _ConnectionRefusedTsfm:
+    async def forecast(self, **kwargs):
+        raise OSError("connection refused")
+
+
+class _MalformedTsfm:
+    def __init__(self, response):
+        self._response = response
+
+    async def forecast(self, **kwargs):
+        return self._response
+
+
+@pytest.mark.parametrize(
+    "client",
+    [
+        _TimingOutTsfm(),
+        _ConnectionRefusedTsfm(),
+        _MalformedTsfm({"0.5": ["nan", "nan", "nan"]}),
+        _MalformedTsfm({"0.5": [1.0]}),  # wrong horizon length
+    ],
+    ids=["timeout", "connection-refused", "non-finite-values", "wrong-path-length"],
+)
+def test_tsfm_transport_failure_degrades_to_baseline_not_a_crash(client) -> None:
+    """Shadow mode means the baseline is authoritative: a TSFM that times out, refuses
+    connections, or answers with an unusable payload must degrade to the transparent
+    baseline with the failure on the evidence record - never crash the caller and never
+    masquerade as agreement (found 2026-07-15: no failure-handling path existed at all).
+    """
+    baseline = _baseline()
+    result = asyncio.run(
+        forecast_demand_tsfm(
+            client,
+            baseline=baseline,
+            history_units=[Decimal("10")] * 8,
+        )
+    )
+
+    assert result.chosen_daily_units == baseline.daily_units
+    assert result.within_band is False
+    assert result.requires_human_review is False, (
+        "an absent shadow forecast must not degrade operations - the baseline is "
+        "exactly as trustworthy as it was without the TSFM"
+    )
+    assert result.evidence["tsfm_error"], "the failure must be on the record"
+    assert "baseline kept control" in result.evidence["decision"]
+
+
+def test_tsfm_input_validation_errors_still_raise() -> None:
+    """Caller bugs (empty history) are not model-serving weather; they must still raise."""
+    with pytest.raises(ValueError, match="history_units"):
+        asyncio.run(
+            forecast_demand_tsfm(
+                _TimingOutTsfm(),
+                baseline=_baseline(),
+                history_units=[],
+            )
+        )

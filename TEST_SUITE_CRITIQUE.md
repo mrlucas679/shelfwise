@@ -320,17 +320,34 @@ that produced both confirmed bugs, and it recurs in nearly every file below.
    all. So `WORKER_ENABLED` has no effect on them - this is a different, valid architecture for
    these four routes, not an untested configuration. **Not a bug; the flagged gap doesn't apply.**
 
-## Findings flagged, not code bugs (process/coverage gaps, for the team to prioritize)
+## Findings flagged — resolution status (all closed 2026-07-15/16 except where noted)
 
-- `test_gemma4_training_harness.py`'s adapter-metadata test silently no-ops in any CI that
-  doesn't materialize the adapter artifact — worth confirming whether it currently runs at all.
-- `test_submission_evidence.py` asserts against a frozen historical file rather than regenerating
-  it — a stale-evidence trap, not itself a defect.
-- `test_event_bus_bounds.py`'s Redis behavior and `test_forecast_tsfm.py`'s TSFM
-  timeout/malformed-response handling are both real integration points with zero live-dependency
-  coverage anywhere in the suite.
-- Every Postgres-backed store sibling (`PostgresOpenOrderStore`, `PostgresProductCatalogStore`,
-  `PostgresLearningStore`, `PostgresEventStore`, `PostgresModelRunRegistry`,
-  `PostgresTenantFactStore`) has an in-memory-only test file and no equivalent live-Postgres
-  check — given two confirmed bugs already found this way, this is the highest-leverage area for
-  a follow-up pass using the same real-Postgres harness this session built.
+- `test_gemma4_training_harness.py` adapter-metadata test silently no-oped without the local
+  283MB artifact — **closed**: the serving-check logic now runs everywhere against a committed
+  metadata-only fixture (`tests/fixtures/adapter_metadata/`); the artifact-gated test remains
+  for machines that have the real export.
+- `test_forecast_tsfm.py` had zero failure-handling coverage — **closed, and it found a real
+  bug**: `forecast_demand_tsfm` had NO failure path at all; a TSFM timeout/connection
+  error/malformed payload crashed the caller instead of degrading to the transparent baseline
+  its own shadow-mode design promises. Fixed (baseline keeps control, failure on the evidence
+  record, input-validation errors still raise) with four parametrized transport-failure tests.
+- Redis semantics unverified — **closed**: `tests/test_redis_bus_contract.py` runs against real
+  Redis, in CI too.
+- Postgres store siblings with in-memory-only guarantees — **closed for the write-path
+  invariants that matter**: late-event ordering + duplicate idempotency for
+  `PostgresOpenOrderStore` and conflicting-identifier rejection + idempotent re-assert for
+  `PostgresProductCatalogStore` now run against real Postgres in the gated contract file
+  (learning-store race and event-store dedup were already covered there).
+- `test_candidate_history.py`/`test_candidate_store.py` bypassing the factory — **closed**: two
+  factory-wiring tests in `test_store_backends.py` pin memory→memory history pairing (with
+  poisoned Postgres coordinates that would fail loudly on any leak) and the direct-construction
+  purity contract.
+- `test_connector_poll_status_api.py` only asserting the disabled state — **closed**: an
+  enabled/real-run status test now covers the running payload.
+- `test_agentic_http_errors.py` fabricating exceptions at the route boundary — **closed**: a
+  scripted stubbornly-direct runtime now provokes the real ToolCallingError→AgenticCascadeError
+  chain through the real orchestrator and cascade, asserting the same sanitized 503.
+- `test_submission_evidence.py` asserts against a frozen historical receipt — **open by
+  design**: the receipt records sha256 hashes of intentionally-untracked raw artifacts
+  (`tracked is False` is asserted); regenerating it requires a live soak run, which is part of
+  the droplet-recreation acceptance gate, not the unit suite.

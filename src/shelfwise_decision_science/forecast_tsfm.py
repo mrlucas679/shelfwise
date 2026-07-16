@@ -132,30 +132,44 @@ async def forecast_demand_tsfm(
     if divergence_band < 0:
         raise ValueError("divergence_band must be non-negative")
 
-    response = await client.forecast(
-        history=[float(value) for value in history_units],
-        horizon=baseline.horizon_days,
-        covariates=covariates,
-    )
     baseline_path = [baseline.daily_units] * baseline.horizon_days
-    p50 = _quantile_path(
-        response,
-        ("0.5", "p50", "50"),
-        fallback=baseline_path,
-        horizon=baseline.horizon_days,
-    )
-    p10 = _quantile_path(
-        response,
-        ("0.1", "p10", "10"),
-        fallback=p50,
-        horizon=baseline.horizon_days,
-    )
-    p90 = _quantile_path(
-        response,
-        ("0.9", "p90", "90"),
-        fallback=p50,
-        horizon=baseline.horizon_days,
-    )
+    # Shadow mode means the transparent baseline is always authoritative: a TSFM that
+    # times out, refuses connections, or answers with a malformed/non-finite payload
+    # must degrade to the baseline with the failure on the record - never crash the
+    # caller. Input-validation errors above still raise (those are caller bugs, not
+    # model-serving weather).
+    try:
+        response = await client.forecast(
+            history=[float(value) for value in history_units],
+            horizon=baseline.horizon_days,
+            covariates=covariates,
+        )
+        p50 = _quantile_path(
+            response,
+            ("0.5", "p50", "50"),
+            fallback=baseline_path,
+            horizon=baseline.horizon_days,
+        )
+        p10 = _quantile_path(
+            response,
+            ("0.1", "p10", "10"),
+            fallback=p50,
+            horizon=baseline.horizon_days,
+        )
+        p90 = _quantile_path(
+            response,
+            ("0.9", "p90", "90"),
+            fallback=p50,
+            horizon=baseline.horizon_days,
+        )
+    except Exception as exc:
+        return _baseline_kept_control(
+            baseline=baseline,
+            history_units=history_units,
+            covariates=covariates,
+            divergence_band=divergence_band,
+            error=f"{type(exc).__name__}: {exc}"[:200],
+        )
 
     base_daily = baseline.daily_units
     tsfm_daily = _mean(p50)
@@ -204,6 +218,54 @@ async def forecast_demand_tsfm(
         p90_daily_units=_mean(p90),
         method=FORECAST_METHOD,
         confidence=q2(confidence),
+        evidence=evidence,
+    )
+
+
+def _baseline_kept_control(
+    *,
+    baseline: DemandForecast,
+    history_units: list[Decimal],
+    covariates: dict[str, list[float]] | None,
+    divergence_band: Decimal,
+    error: str,
+) -> GuardrailedForecast:
+    """Truthful degraded result when the TSFM transport failed: baseline drives, and the
+    failure is on the evidence record instead of being disguised as agreement or crash."""
+    base_daily = baseline.daily_units
+    evidence: dict[str, Any] = {
+        "method": FORECAST_METHOD,
+        "baseline_method": baseline.method,
+        "baseline_daily_units": str(base_daily),
+        "tsfm_daily_units": None,
+        "chosen_daily_units": str(base_daily),
+        "divergence": None,
+        "band": str(q2(divergence_band)),
+        "within_band": False,
+        "requires_human_review": False,
+        "horizon_days": baseline.horizon_days,
+        "history_points": len(history_units),
+        "covariate_keys": sorted((covariates or {}).keys()),
+        "tsfm_error": error,
+        "decision": (
+            "TSFM unavailable or returned an unusable response; "
+            "transparent baseline kept control"
+        ),
+    }
+    return GuardrailedForecast(
+        sku=baseline.sku,
+        baseline_daily_units=base_daily,
+        tsfm_daily_units=base_daily,
+        chosen_daily_units=base_daily,
+        horizon_days=baseline.horizon_days,
+        chosen_horizon_units=q2(base_daily * baseline.horizon_days),
+        divergence=Decimal("0.00"),
+        within_band=False,
+        requires_human_review=False,
+        p10_daily_units=base_daily,
+        p90_daily_units=base_daily,
+        method=FORECAST_METHOD,
+        confidence=q2(clamp(baseline.confidence)),
         evidence=evidence,
     )
 

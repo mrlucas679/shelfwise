@@ -78,10 +78,31 @@ def test_missing_evidence_fails_in_strict_mode() -> None:
         parse_training_row(raw, repo_root=ROOT, strict=True)
 
 
+def test_serving_check_reads_adapter_metadata_fixture_without_model_load() -> None:
+    """Always-running coverage of the serving-check logic against committed metadata.
+
+    The artifact-gated test below silently skipped in every environment that lacks the
+    283MB local adapter export (CI included), so this file's green status carried no
+    serving-check coverage at all. The check only reads the small metadata JSONs when
+    skip_model_load is set, so those files are committed as a fixture - the logic now
+    runs everywhere, and the real-export test remains for machines that have it.
+    """
+    fixture_dir = ROOT / "tests" / "fixtures" / "adapter_metadata"
+
+    summary = run_serving_check(CONFIG, adapter_path=fixture_dir, skip_model_load=True)
+
+    assert summary["base_model"] == "google/gemma-4-12B-it"
+    assert "patch_dense" in summary["target_modules"]
+    assert summary["processor_class"] == "Gemma4UnifiedProcessor"
+
+
 def test_serving_check_reads_exported_adapter_metadata_without_model_load() -> None:
     adapter_dir = ROOT / "shelfwise-gemma-final-adapter" / "final_adapter"
     if not adapter_dir.exists():
-        pytest.skip("local adapter artifact is not present")
+        pytest.skip(
+            "real exported adapter not present locally - the committed metadata fixture "
+            "test above still covers the serving-check logic"
+        )
 
     summary = run_serving_check(CONFIG, adapter_path=adapter_dir, skip_model_load=True)
 
