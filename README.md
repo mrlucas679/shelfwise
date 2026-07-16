@@ -404,21 +404,25 @@ Next (honest roadmap, not yet built):
 - Persist score history and candidate deltas in a production database rather than the current
   repeatable synthetic fleet-evaluation receipt.
 
-### Digital Twin (in progress, not yet fully tested)
+### Digital Twin (software layer implemented and tested; edge hardware pending)
 
-ShelfWise is being extended into an exact-store digital twin — a versioned, provenance-tracked
+ShelfWise is extended into an exact-store digital twin — a versioned, provenance-tracked
 model of one real shop, layered underneath (not replacing) the agent cascade above. The twin core
 (`shelfwise_twin`: entities, relationships, append-only observations, idempotent projection,
 scenario branches, fidelity scoring, sensor calibration, and a durably-replayable onboarding
-manifest registry) is landing on `developers` now, with its own test suite
-(`tests/test_twin_*.py`) passing alongside the existing 590+ tests. Onboarding-created topology
+manifest registry) is implemented on `developers` with its own passing test suite
+(`tests/test_twin_*.py`). Onboarding-created topology
 (seeded fixtures, the store's own display name/attributes) and the deterministic replay/recovery
 projection hash both survive a full projected-state rebuild — verified directly by wiping the
-twin store and replaying purely from durable state. The camera/edge-sensor layer below is still
+twin store and replaying purely from durable state. The async projection worker is wired as a
+lifespan service (`TwinProjectionLoopService`, enabled via `TWIN_PROJECTION_WORKER_ENABLED`,
+Redis-bus-only by design — it supplements the idempotent inline ingest projection for crash
+recovery and multi-replica topologies, and refuses the in-memory bus, which has no consumer
+groups). The camera/edge-sensor layer below is still
 design-stage — not yet implemented, not yet tested against real hardware. Full detail, hard
 guards, and phased rollout live in `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md`.
 
-**Twin core data flow (partially implemented, under active test):**
+**Twin core data flow (software layer implemented and tested):**
 
 ```mermaid
 flowchart LR
@@ -557,13 +561,33 @@ Camera/sensor edge hardware (AMD Kria/Versal), the 2D Store Twin UI, and multi-w
 re-validation are explicitly **not implemented** — see the plan doc's phased roadmap (Phases 0-G)
 for the intended build order before any of it is claimed as working.
 
-### Conversational assistant architecture (design-stage, not yet implemented)
+### Conversational assistant architecture (implemented 2026-07-16)
 
-The chat surface today is a 12-message sliding window with no skill registry or progressive tool
-discovery (see `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md` Sections 35-43 for the full gap
-analysis). The target design keeps the existing 11 agents and Critic/Executive/HITL chain as the
-sole owners of any recommendation — the assistant is a conversational surface over them, never a
-replacement decision-maker:
+The chat surface is no longer a bare sliding window. Implemented per the plan's Section 41
+blueprint (`conversation_memory.py`, `conversation_routing.py`, `context_budget.py`,
+`shelfwise_mlops/skill_registry.py`, additive Postgres tables with RLS):
+
+- **Hierarchical conversation memory** — everything older than the recent-turns window is
+  compacted into a durable, provenance-tracked rolling episode summary
+  (`shelfwise_chat_memory_items`, idempotent, corrections preserved verbatim, longer prefixes
+  supersede), so a long conversation keeps its objective and earlier context instead of silently
+  losing it. Compaction is deterministic-extractive with the method recorded on the item; an
+  LLM-composed summarizer can swap in behind the same store contract.
+- **Progressive skill discovery** — a validated, versioned skill-manifest registry
+  (`shelfwise_skill_manifests`) with a promotion lifecycle (draft → promoted → retired, gated on
+  each skill's own evaluation pass rate). Discovery is deterministic (trigger-term ranked,
+  role-filtered) and only ever surfaces promoted skills; the model sees the skills relevant to
+  this question, never the whole tool surface.
+- **Deterministic tier routing** — every answer carries an auditable route receipt
+  (`conversation-route-v1`: routine vs strong, with the reason), computed from facts known
+  before inference; no free-form model judgment controls routing.
+- **Token-accounted context receipts** — every answer carries a context receipt (window,
+  per-section estimated tokens, selected memory/skills/tools, omissions) validated against the
+  8,192-token allocation BEFORE network I/O.
+
+The existing 11 agents and Critic/Executive/HITL chain remain the sole owners of any
+recommendation — the assistant is a conversational surface over them, never a replacement
+decision-maker:
 
 **Preservation strategy — the assistant sits above the existing agents, never replaces them:**
 

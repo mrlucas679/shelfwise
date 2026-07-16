@@ -16,6 +16,12 @@ _PRIORITY_KEYS = (
     "decisions",
     "learning_events",
     "source_refs",
+    # Conversational continuity must survive priority pruning: dropping the rolling
+    # summary or recent turns under budget pressure silently severs the conversation -
+    # the exact failure the hierarchical-memory layer exists to prevent.
+    "conversation_summary",
+    "conversation_history",
+    "skill_catalogue",
 )
 
 

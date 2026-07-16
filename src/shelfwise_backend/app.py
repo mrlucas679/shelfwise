@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 from dataclasses import replace
@@ -43,6 +44,7 @@ from shelfwise_mlops import (
     build_accountability_report,
     decision_economics,
 )
+from shelfwise_mlops.skill_registry import discover as discover_skills
 from shelfwise_runtime.provenance import DataDomain, DataDomainBoundaryError
 from shelfwise_storage import (
     TENANT_SCOPED_TABLES,
@@ -79,6 +81,9 @@ from .chat_context import (
     bounded_chat_learning_events as select_chat_learning_events,
 )
 from .connector_poll_service import ConnectorPollService
+from .context_budget import build_context_receipt
+from .conversation_memory import compact_conversation
+from .conversation_routing import ConversationRouteRequest, choose_conversation_route
 from .deps import (
     _COOKIE_OVERRIDE_ENV,
     _INSECURE_APP_ENV_NAMES,
@@ -113,6 +118,7 @@ from .state import (
     chat_store,
     cold_chain_feed,
     connector_cursor_store,
+    conversation_memory_store,
     decision_store,
     event_bus,
     event_store,
@@ -125,10 +131,12 @@ from .state import (
     operational_facts_for_query,
     product_catalog_store,
     prompt_registry,
+    skill_registry,
     tenant_fact_store,
     tenant_profile_store,
     tool_audit,
     trace_registry,
+    twin_projection_service,
     twin_service,
     worker_service,
     world_facts,
@@ -279,6 +287,8 @@ app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
 app.router.add_event_handler("startup", cold_chain_feed.start)
 app.router.add_event_handler("shutdown", cold_chain_feed.stop)
+app.router.add_event_handler("startup", twin_projection_service.start)
+app.router.add_event_handler("shutdown", twin_projection_service.stop)
 
 
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
@@ -573,6 +583,7 @@ def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
             "worldgen_run_store": type(worldgen_run_store).__name__,
             "inbound_record_store": type(inbound_record_store).__name__,
             "cold_chain_feed": cold_chain_feed.status(),
+            "twin_projection_worker": twin_projection_service.status(),
             "auth_mode": _auth_mode(),
             "tenant_auth_secret_configured": bool(os.getenv("TENANT_AUTH_SECRET", "")),
             "tenant_scoped_tables": sorted(TENANT_SCOPED_TABLES),
@@ -1174,8 +1185,75 @@ def _new_chat_response(
         user_id=ctx.user_id,
         conversation_id=conversation_id,
     )
+    conversation_summary = None
     if conversation:
         state["conversation_history"] = _bounded_chat_history(conversation["messages"])
+        # Hierarchical memory (plan Section 37/41): everything older than the recent
+        # window is compacted into a durable, provenance-tracked rolling summary instead
+        # of silently falling off the end of a bare sliding window - a long
+        # conversation keeps its objective, corrections, and earlier turns available to
+        # every later answer.
+        conversation_summary = compact_conversation(
+            conversation_memory_store,
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            conversation_id=conversation_id,
+            messages=conversation["messages"],
+            recent_window=_CHAT_HISTORY_LIMIT,
+        )
+        if conversation_summary is not None:
+            state["conversation_summary"] = conversation_summary.text
+
+    # Progressive skill discovery (plan Section 39/41): the model sees only the promoted
+    # skills relevant to THIS question, never the whole tool surface.
+    discovered_skills = discover_skills(
+        skill_registry,
+        question=body.question,
+        role=str(getattr(ctx, "role", "") or "manager"),
+        tenant_id=ctx.tenant_id,
+    )
+    if discovered_skills:
+        state["skill_catalogue"] = [
+            {
+                "id": manifest.id,
+                "name": manifest.name,
+                "description": manifest.description,
+                "tools": list(manifest.required_tools),
+            }
+            for manifest in discovered_skills
+        ]
+
+    # Deterministic tier routing (plan Section 41.1): the route is computed from facts
+    # known before inference and saved as an auditable receipt on the answer metadata.
+    conversation_route = choose_conversation_route(
+        ConversationRouteRequest(
+            domains=tuple({manifest.domain_owner for manifest in discovered_skills}),
+            risk_tier="low",
+            asks_for_scenario=_question_asks_for_scenario(body.question),
+            has_source_conflict=False,
+            has_memory_conflict=False,
+            is_simple_followup=bool(conversation) and len(body.question) <= 80,
+        )
+    )
+
+    # Context receipt (plan Section 41.3): account the conversational sections this
+    # request contributes and fail closed on overflow BEFORE any network I/O.
+    context_receipt = build_context_receipt(
+        sections={
+            "question": body.question,
+            "recent_turns": json.dumps(state.get("conversation_history", [])),
+            "pinned_and_summary": str(state.get("conversation_summary", "")),
+            "skill_catalogue": json.dumps(state.get("skill_catalogue", [])),
+        },
+        selected_memory_ids=(
+            (conversation_summary.id,) if conversation_summary is not None else ()
+        ),
+        selected_skill_ids=tuple(manifest.id for manifest in discovered_skills),
+        selected_tools=tuple(
+            tool for manifest in discovered_skills for tool in manifest.required_tools
+        ),
+        truncated=bool(conversation_summary is not None),
+    )
     client = OpenAICompatibleInferenceClient(
         recorder=lambda payload: _record_model_run(
             {**payload, "data_domain": chat_domain}
@@ -1201,6 +1279,12 @@ def _new_chat_response(
         raise HTTPException(status_code=503, detail="Live chat inference failed") from exc
     _meta["correlation_id"] = correlation_id
     _meta["data_domain"] = chat_domain
+    _meta["conversation_route"] = conversation_route.to_dict()
+    _meta["context_receipt"] = context_receipt.to_dict()
+    if discovered_skills:
+        _meta["skills"] = [manifest.id for manifest in discovered_skills]
+    if conversation_summary is not None:
+        _meta["conversation_summary_id"] = conversation_summary.id
     chat_store.append_exchange(
         tenant_id=ctx.tenant_id,
         user_id=ctx.user_id,
@@ -1852,6 +1936,21 @@ def _demo_event(
     )
 
 
+def _reject_operational_domain_for_synthetic_drill(
+    data_domain: str | None, *, drill: str
+) -> None:
+    """Fail closed when a synthetic-anomaly drill is pointed at real twin data."""
+    if data_domain == DataDomain.OPERATIONAL_TWIN.value:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The {drill} drill fabricates a synthetic anomaly and is "
+                "simulation-only; live operational anomalies enter through the real "
+                "ingest pipeline, never through a drill projected onto twin data."
+            ),
+        )
+
+
 def _agentic_cascade_context(
     ctx: TenantContext,
     event_type: EventType,
@@ -2103,7 +2202,10 @@ def demo_golden_agentic(
 
 @app.post("/scenarios/procurement/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_procurement_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
 
@@ -2111,15 +2213,25 @@ def demo_procurement_agentic(
     requires an actual model call and tool-calling round trip over get_reorder_policy and
     get_supplier_ranking. With live_required=true (default) it hard-fails with 503 instead
     of silently falling back to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state
+    (`OperationalFactsProvider`), the same contract the golden agentic route uses;
+    raises 422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.SUPPLIER_UPDATE, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_procurement_cascade_via_agents(
-            _demo_event(ctx, EventType.SUPPLIER_UPDATE, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2133,7 +2245,10 @@ def demo_procurement_agentic(
 
 @app.post("/scenarios/sales/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_sales_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the POS price-integrity verdict through a real Gemma tool loop.
 
@@ -2141,15 +2256,24 @@ def demo_sales_agentic(
     an actual model call and tool-calling round trip over check_price_integrity. With
     live_required=true (default) it hard-fails with 503 instead of silently falling back
     to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state; raises
+    422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.SALE, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_sales_cascade_via_agents(
-            _demo_event(ctx, EventType.SALE, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2163,9 +2287,19 @@ def demo_sales_agentic(
 
 @app.post("/scenarios/catalog-price/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_catalog_price_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    """Run the POS catalogue-price guardrail through a real Gemma tool loop."""
+    """Run the POS catalogue-price guardrail through a real Gemma tool loop.
+
+    Simulation-only by contract: this drill fabricates a synthetic price outlier to
+    demonstrate the guardrail, and fabricating an anomaly from a real store's twin data
+    would be invented telemetry. Live operational price exceptions enter through the
+    real POS/ingest pipeline, where the catalog-price dispatcher already screens every
+    sale.
+    """
+    _reject_operational_domain_for_synthetic_drill(data_domain, drill="catalog-price")
     mode = _production_execution_mode(live_required)
     try:
         result = run_catalog_price_check_via_agents(
@@ -2189,9 +2323,18 @@ def demo_catalog_price_agentic(
 
 @app.post("/scenarios/expiry-risk/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_expiry_risk_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    """Run the imminent-expiry guardrail through a real Gemma tool loop."""
+    """Run the imminent-expiry guardrail through a real Gemma tool loop.
+
+    Simulation-only by contract, for the same reason as the catalog-price drill: the
+    synthetic near-expiry entry it fabricates must never be projected onto real twin
+    data. Live expiry entries arrive through the real ingest pipeline's expiry-risk
+    dispatcher.
+    """
+    _reject_operational_domain_for_synthetic_drill(data_domain, drill="expiry-risk")
     mode = _production_execution_mode(live_required)
     try:
         result = run_expiry_risk_check_via_agents(
@@ -2215,7 +2358,10 @@ def demo_expiry_risk_agentic(
 
 @app.post("/scenarios/cold-chain/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_cold_chain_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
 
@@ -2223,15 +2369,24 @@ def demo_cold_chain_agentic(
     requires an actual model call and tool-calling round trip over get_cold_chain_status.
     With live_required=true (default) it hard-fails with 503 instead of silently falling
     back to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state; raises
+    422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.COLD_CHAIN_ALERT, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_cold_chain_cascade_via_agents(
-            _demo_event(ctx, EventType.COLD_CHAIN_ALERT, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2630,6 +2785,15 @@ def _bounded_chat_decisions(
         pending_limit=_CHAT_PENDING_DECISION_LIMIT,
         resolved_limit=_CHAT_RESOLVED_DECISION_LIMIT,
     )
+
+
+_SCENARIO_QUESTION_MARKERS = ("what if", "scenario", "simulate", "would happen", "suppose")
+
+
+def _question_asks_for_scenario(question: str) -> bool:
+    """Deterministic routing fact: scenario/what-if reasoning requires the strong tier."""
+    lowered = question.lower()
+    return any(marker in lowered for marker in _SCENARIO_QUESTION_MARKERS)
 
 
 def _bounded_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:

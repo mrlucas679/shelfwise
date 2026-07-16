@@ -22,9 +22,11 @@ from shelfwise_mlops import (
     create_prompt_registry,
     create_tenant_fact_store,
 )
+from shelfwise_mlops.skill_registry import create_skill_registry, default_skill_manifests
 from shelfwise_storage import create_tenant_profile_store
 from shelfwise_twin import (
     ScenarioEngine,
+    TwinProjectionLoopService,
     TwinProjectionWorker,
     TwinService,
     create_scenario_branch_store,
@@ -36,7 +38,8 @@ from .candidate_store import create_candidate_store
 from .cascade_dispatcher import CascadeDispatcher
 from .chat_store import create_chat_store
 from .cold_chain_feed import ColdChainFeedService
-from .event_bus import create_event_bus
+from .conversation_memory import create_conversation_memory_store
+from .event_bus import create_event_bus, stale_consumer_idle_ms
 from .event_store import create_event_store
 from .open_orders import create_open_order_store
 from .operational_facts import OperationalFactsProvider
@@ -70,6 +73,14 @@ world_facts = WorldFactsProvider(world_snapshot_store)
 twin_service: TwinService = create_twin_service()
 scenario_engine = ScenarioEngine(twin_service, create_scenario_branch_store())
 twin_projection_worker = TwinProjectionWorker(event_bus, twin_service)
+# Wired as a supplement to inline ingest projection (projection is idempotent):
+# recovers events whose inline projection was lost to a crash and consumes on replicas
+# that never saw the original request. Starts only when TWIN_PROJECTION_WORKER_ENABLED
+# is set AND the bus is Redis - see TwinProjectionLoopService for why memory refuses.
+twin_projection_service = TwinProjectionLoopService(
+    twin_projection_worker,
+    reclaim_idle_ms=stale_consumer_idle_ms(),
+)
 cascade_dispatcher = CascadeDispatcher(
     world_facts=world_facts,
     twin_service=twin_service,
@@ -84,6 +95,39 @@ cascade_worker = CascadeWorker(
 )
 worker_service = WorkerLoopService(cascade_worker)
 cold_chain_feed = ColdChainFeedService()
+conversation_memory_store = create_conversation_memory_store()
+skill_registry = create_skill_registry()
+
+
+def _seed_platform_skills() -> None:
+    """Register the built-in promoted catalogue against the real tool/agent surface.
+
+    Seeding is idempotent (registry upsert by id) and validated: a manifest naming a
+    tool or agent that does not actually exist fails loudly at process start, never
+    silently at conversation time.
+    """
+    from shelfwise_contracts import AgentName
+
+    known_agents = {agent.value for agent in AgentName}
+    known_tools = {
+        "get_stock",
+        "get_demand_forecast",
+        "get_expiry_risk",
+        "simulate_markdown",
+        "get_cold_chain_status",
+        "get_reorder_policy",
+        "get_supplier_ranking",
+        "check_price_integrity",
+        "get_delivery_status",
+        "get_stock_sourcing_options",
+        "get_thresholds",
+        "list_open_decisions",
+    }
+    for manifest in default_skill_manifests():
+        skill_registry.upsert(manifest, known_agents=known_agents, known_tools=known_tools)
+
+
+_seed_platform_skills()
 
 
 def operational_facts_for_query(

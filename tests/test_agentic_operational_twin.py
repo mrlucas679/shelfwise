@@ -166,3 +166,30 @@ def test_golden_agentic_route_422s_when_twin_has_no_measured_facts() -> None:
 
     assert response.status_code == 422
     assert "missing operational facts" in response.json()["detail"]
+
+
+def test_synthetic_guardrail_drills_reject_the_operational_domain() -> None:
+    """The catalog-price and expiry-risk drills fabricate synthetic anomalies; pointing
+    them at real twin data would be invented telemetry, so they must 422 instead."""
+    client = TestClient(app)
+
+    for drill in ("catalog-price", "expiry-risk"):
+        response = client.post(
+            f"/scenarios/{drill}/agentic", params={"data_domain": "operational_twin"}
+        )
+        assert response.status_code == 422, drill
+        assert "simulation-only" in response.json()["detail"], drill
+
+
+def test_remaining_agentic_routes_expose_the_operational_domain_and_422_without_twin() -> None:
+    """Procurement, sales, and cold-chain agentic routes must accept the same
+    data_domain/store_id contract golden has, and fail closed (422, naming what is
+    missing) when the twin cannot yet answer - not silently fall back to world facts."""
+    client = TestClient(app)
+
+    for route in ("procurement", "sales", "cold-chain"):
+        response = client.post(
+            f"/scenarios/{route}/agentic",
+            params={"data_domain": "operational_twin", "live_required": "false"},
+        )
+        assert response.status_code == 422, route

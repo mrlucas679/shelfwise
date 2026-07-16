@@ -54,3 +54,42 @@ def test_projection_worker_acknowledges_and_skips_simulation() -> None:
     assert result.status == "skipped_non_operational"
     assert bus.acked == ["message-1"]
     assert service.store.list_entities("tenant-a") == []
+
+
+def test_projection_loop_service_refuses_the_memory_bus_instead_of_stealing_messages(
+    monkeypatch,
+) -> None:
+    """Enabling the twin worker against the in-memory bus would compete with the cascade
+    worker for the same pending deque (no consumer groups exist there) - it must refuse
+    with an honest reason, never silently corrupt the queue."""
+    import asyncio
+
+    from shelfwise_twin import TwinProjectionLoopService
+
+    monkeypatch.setenv("TWIN_PROJECTION_WORKER_ENABLED", "true")
+    monkeypatch.setenv("SHELFWISE_BUS_BACKEND", "memory")
+    service = TwinProjectionLoopService(
+        TwinProjectionWorker(EmptyBus(), TwinService(InMemoryTwinStore()))
+    )
+
+    asyncio.run(service.start())
+
+    status = service.status()
+    assert status["running"] is False
+    assert "consumer groups" in (status["refused_reason"] or "")
+
+
+def test_projection_loop_service_stays_off_by_default(monkeypatch) -> None:
+    import asyncio
+
+    from shelfwise_twin import TwinProjectionLoopService
+
+    monkeypatch.delenv("TWIN_PROJECTION_WORKER_ENABLED", raising=False)
+    service = TwinProjectionLoopService(
+        TwinProjectionWorker(EmptyBus(), TwinService(InMemoryTwinStore()))
+    )
+
+    asyncio.run(service.start())
+
+    assert service.status()["enabled"] is False
+    assert service.status()["running"] is False

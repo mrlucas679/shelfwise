@@ -351,14 +351,21 @@ list first, then only re-verify an item if the surrounding code actually changed
       ambient-tenant footgun and should bind its own tenant context first, not assume `clear()`
       means "delete everything."
 
-**Open gaps - not yet implemented, need a decision or follow-up work (do not re-discover, just
-pick one up):**
-- [ ] `twin_projection_worker` built and unit-tested but never wired to run (see finding above) -
-      needs an owner decision on replace-vs-supplement before implementing the wiring.
-- [ ] The five remaining `/scenarios/*/agentic` routes (procurement, sales, catalog-price,
-      expiry-risk, cold-chain) still hardcode `facts=world_facts` - only `/scenarios/golden/agentic`
-      has been given the `data_domain`/`store_id` operational-twin path (see the earlier "plan to
-      fix everything" entry above). Same mechanical pattern, five routes left.
+**Open gaps - all closed 2026-07-16:**
+- [x] `twin_projection_worker` wired to run as `TwinProjectionLoopService` (lifespan service,
+      `TWIN_PROJECTION_WORKER_ENABLED`, status surfaced on `/health`). Decision taken:
+      SUPPLEMENT, not replace - inline ingest projection is idempotent, so the worker safely
+      adds crash recovery and multi-replica draining on its own Redis consumer group. It
+      refuses the in-memory bus (no consumer groups there - a second consumer would steal
+      cascade messages) with the reason in `status()`, and its reclaim idle threshold is
+      budget-derived, never a bare constant.
+- [x] The remaining `/scenarios/*/agentic` routes: procurement, sales, and cold-chain now
+      accept the same `data_domain`/`store_id` operational-twin contract golden has (422 with
+      the missing facts named when the twin cannot yet answer). Catalog-price and expiry-risk
+      are deliberately simulation-only and now 422 the operational domain explicitly: those
+      drills fabricate synthetic anomalies, and projecting a fabricated anomaly onto real twin
+      data would violate the no-invented-telemetry contract enforced 2026-07-15; live
+      anomalies enter through the real ingest pipeline's dispatchers.
 
 ### HITL/observability audit — Claude, 2026-07-13
 
@@ -4346,35 +4353,35 @@ verified-implemented vs. genuinely-not-yet-built rather than assume either way.
       inline rather than as the standalone module the blueprint sketches. Functionally
       equivalent; no gap here.
 
-**Genuinely not yet implemented - real gaps, not just unverified claims:**
-- [ ] **No hierarchical/external conversation memory exists at all** (Section 37's "Memory
-      layers", "Retrieval pipeline", "Rolling-summary protocol"). Searched for
-      `conversation_routing.py`, `conversation_memory.py`, `context_budget.py`, and
-      `shelfwise_mlops/skill_registry.py` (all named explicitly in Section 41's code blueprint)
-      - none exist. The actual current mechanism is a bare sliding window:
-      `chat.py`'s `_new_chat_response` reads `conversation["messages"][-12:]` and nothing else -
-      no summarization, no retrieval, no memory layer beyond "last 12 raw messages." A long
-      multi-session conversation will silently lose earlier context once it exceeds that
-      window, with no rolling summary to fall back on. This is the single biggest gap between
-      this plan and the running app for the conversational-assistant vision specifically.
-- [ ] **No skill registry/progressive-skill-discovery system exists** (Section 39's "Skill
-      expansion", Section 41's `skill_registry.py`). `src/shelfwise_mlops/skills.py` exists but
-      implements a different, narrower concept: mined `Skill` playbooks derived from outcome
-      history (`derived_from`, `success_rate`, `support` - a learning/governance artifact), not
-      a tool/skill *catalogue* the model discovers progressively at conversation time. These are
-      not the same feature; don't count `skills.py` as satisfying Section 39/41.
-- [ ] **`Skill.status` lifecycle ("draft" and presumably "promoted"/"retired") has no visible
-      promotion workflow** - only a `status: str = "draft"` default was found; Section 39's
-      "Skill promotion rules" describe a governance gate that doesn't appear to be wired to
-      anything that flips this field.
-
-**Recommended next concrete implementation** (per the user's "look for gaps not implemented, so
-you can start implementing those" instruction): the conversation-memory gap is the highest-value,
-best-specified target - Section 41 already has a full code blueprint
-(`conversation_memory.py`, `context_budget.py`, an additive Postgres model, and required routing
-tests) ready to build from. This is a genuinely new subsystem (not a bug fix), sized as its own
-implementation pass with its own tests - flagging it here as the concrete next task rather than
-rushing a partial version into this audit turn.
+**Previously flagged as not implemented - all three closed 2026-07-16 (Section 41 blueprint
+built as specified):**
+- [x] **Hierarchical conversation memory implemented**
+      (`src/shelfwise_backend/conversation_memory.py` + `shelfwise_chat_memory_items` additive
+      RLS table, both in-memory and Postgres stores). Messages older than the recent window
+      compact into a durable, provenance-tracked rolling episode summary - idempotent by
+      covered-message-id hash, corrections preserved verbatim, longer prefixes supersede
+      earlier summaries - and the chat route feeds `conversation_summary` into every prompt,
+      so long conversations keep their objective and earlier context. Compaction is
+      deterministic-extractive (`deterministic_extractive_v1` recorded on the item); an
+      LLM-composed summarizer can swap in behind the same store/provenance contract.
+      Proven end-to-end in `tests/test_conversation_assistant.py`
+      (`test_chat_carries_memory_route_and_context_receipts_end_to_end`).
+      `conversation_routing.py` (auditable routine/strong route receipts) and
+      `context_budget.py` (token-accounted context receipts validated before network I/O) are
+      also implemented per blueprint and attached to every chat answer's metadata.
+- [x] **Skill registry / progressive discovery implemented**
+      (`src/shelfwise_mlops/skill_registry.py` + `shelfwise_skill_manifests` additive RLS
+      table). Validated, versioned `SkillManifest`s (unknown tools/agents, missing
+      evaluations, and write-without-HITL all rejected); deterministic trigger-term-ranked,
+      role-filtered discovery capped per turn; a promoted built-in catalogue of 8 read-only
+      skills seeded at boot against the real tool surface (a manifest naming a nonexistent
+      tool fails process start loudly). `skills.py` remains the separate mined-playbook
+      concept, exactly as this note said it should.
+- [x] **Skill lifecycle promotion workflow implemented** in the same module: `promote()`
+      flips draft -> promoted only when the measured pass rate clears the manifest's own
+      `minimum_pass_rate`; `retire()` is terminal (a retired skill cannot be re-promoted -
+      re-register a new version); discovery only ever surfaces promoted manifests, which is
+      the enforcement point that makes the lifecycle real.
 
 ### Decision-science math correctness audit — Claude, 2026-07-13
 
@@ -4785,6 +4792,16 @@ against verified code, not just categorized.
       against running code since the subject doesn't exist yet.
 - [x] Section 44 (primary research sources for the assistant amendment) - bibliography, no
       technical claims.
+
+> **2026-07-16 closure note:** the Section 38-43 entries above were accurate when written
+> (2026-07-13) and are kept as the audit trail. The design they describe has since been
+> IMPLEMENTED: routine/strong routing with auditable receipts (`conversation_routing.py`),
+> hierarchical conversation memory with rolling compaction (`conversation_memory.py` +
+> `shelfwise_chat_memory_items`), token-accounted context receipts (`context_budget.py`),
+> and the skill registry with promotion lifecycle and progressive discovery
+> (`shelfwise_mlops/skill_registry.py` + `shelfwise_skill_manifests`), all wired into the
+> live `/chat` route and tested in `tests/test_conversation_assistant.py`. See the
+> "Previously flagged as not implemented - all three closed 2026-07-16" entry above.
 
 **Conclusion for this continuation:** the document has now been read start to finish at the
 "trace every specific technical claim into real code" standard, not the earlier "categorize and
