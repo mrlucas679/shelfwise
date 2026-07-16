@@ -7,13 +7,23 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ProductPolicy:
-    """Operational rules that vary by product family."""
+    """Operational rules that vary by product family.
+
+    Markdown parameters live HERE, not inline in cascade code: the candidate discount a
+    cascade evaluates is a business rule that varies by product family, and burying it
+    as a literal in decision logic makes tuning it a code hunt instead of a policy
+    edit. Every family currently carries the historical 20%/24h candidate - moving
+    ownership changed no decision output; changing a family's markdown now happens in
+    this table only.
+    """
 
     policy_id: str
     expiry_review_days: int
     minimum_margin_pct: int
     cold_chain_sensitive: bool
     hitl_required: bool
+    markdown_discount_pct: str = "0.20"
+    markdown_duration_hours: int = 24
 
 
 DEFAULT_POLICY = ProductPolicy(

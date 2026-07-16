@@ -425,3 +425,35 @@ def test_write_path_api_key_guards_ingest_and_approval(monkeypatch) -> None:
     assert blocked_approve.status_code == 401
     assert allowed_approve.status_code == 200
     assert allowed_approve.json()["decision"]["status"] == "approved"
+
+
+def test_operational_cold_chain_alert_with_bare_temp_fails_closed_not_fabricated() -> None:
+    """A live alert carrying only temp_c must NOT have its diagnosis invented.
+
+    Before 2026-07-15 the operational guard required only temp_c, and the cold-chain
+    cascade silently defaulted the rest - diagnosis "generator_failed", severity 2,
+    18 minutes-to-unsafe, a 4h measured outage - fabricating story physics into a real
+    store's decision evidence. The edge/resilience layer genuinely computes those
+    fields (diagnose(), predict_time_to_unsafe()), so a live event that lacks them is
+    incomplete telemetry and must fail closed, never be embellished.
+    """
+    client = TestClient(app)
+    event = {
+        "id": "evt_operational_cold_chain_bare",
+        "type": "cold_chain_alert",
+        "ts": "2026-07-06T10:14:00Z",
+        "actor": "store_ops",
+        "source": "api",
+        "tenant_id": "operational_cold_chain_tenant",
+        "data_domain": "operational_twin",
+        "payload": {"site_id": "store_ops", "asset_id": "fridge_1", "temp_c": "9.1"},
+    }
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 200
+    cascade = response.json()["cascade"]
+    assert cascade["status"] == "insufficient_operational_facts"
+    assert cascade["decision"] is None
+    missing = set(cascade["missing_data"])
+    assert {"diagnosis", "severity", "predicted_minutes_to_unsafe"} <= missing

@@ -244,7 +244,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 333,
+          "line": 377,
           "path": "src/shelfwise_backend/event_bus.py",
           "symbol": "create_event_bus"
         }
@@ -264,7 +264,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 335,
+          "line": 379,
           "path": "src/shelfwise_backend/event_bus.py",
           "symbol": "create_event_bus"
         }
@@ -724,7 +724,7 @@
       ],
       "sources": [
         {
-          "line": 190,
+          "line": 198,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "default_cascade_handler"
         }
@@ -753,7 +753,7 @@
       ],
       "sources": [
         {
-          "line": 209,
+          "line": 217,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "default_cascade_handler"
         }
@@ -782,7 +782,7 @@
       ],
       "sources": [
         {
-          "line": 189,
+          "line": 197,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "default_cascade_handler"
         }
@@ -811,7 +811,7 @@
       ],
       "sources": [
         {
-          "line": 187,
+          "line": 195,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "default_cascade_handler"
         }
@@ -840,7 +840,7 @@
       ],
       "sources": [
         {
-          "line": 188,
+          "line": 196,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "default_cascade_handler"
         }
@@ -4519,7 +4519,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 47,
+          "line": 48,
           "path": "src/shelfwise_backend/worker/worker.py",
           "symbol": "CascadeWorker"
         }
@@ -4562,7 +4562,7 @@
       ],
       "sources": [
         {
-          "line": 12,
+          "line": 14,
           "path": "src/shelfwise_backend/worker/service.py",
           "symbol": "WorkerLoopService"
         }
@@ -4595,7 +4595,7 @@
       ],
       "sources": [
         {
-          "line": 802,
+          "line": 836,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_catalog_price_check"
         }
@@ -4627,7 +4627,7 @@
       ],
       "sources": [
         {
-          "line": 1025,
+          "line": 1059,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_cold_chain_cascade"
         }
@@ -4655,7 +4655,7 @@
       ],
       "sources": [
         {
-          "line": 1607,
+          "line": 1645,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_critic_rejection_cascade"
         }
@@ -4687,7 +4687,7 @@
       ],
       "sources": [
         {
-          "line": 934,
+          "line": 968,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_expiry_risk_check"
         }
@@ -4735,7 +4735,7 @@
       ],
       "sources": [
         {
-          "line": 94,
+          "line": 112,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_golden_cascade"
         }
@@ -4754,7 +4754,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1463,
+          "line": 1501,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_inventory_exception_cascade"
         }
@@ -4786,7 +4786,7 @@
       ],
       "sources": [
         {
-          "line": 366,
+          "line": 400,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_procurement_cascade"
         }
@@ -4805,7 +4805,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1292,
+          "line": 1330,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_recall_cascade"
         }
@@ -4837,7 +4837,7 @@
       ],
       "sources": [
         {
-          "line": 617,
+          "line": 651,
           "path": "src/shelfwise_backend/cascade.py",
           "symbol": "run_sales_cascade"
         }
@@ -4911,7 +4911,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:e11ae036c4c4eb6f9321f2f32aa33d9eb0eb41b77cfb10090dcb799490346835",
+  "fingerprint": "sha256:a98b7deecff055b5a77ba27043f54ba7b12930d63fc0b333960cf3927c32613d",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

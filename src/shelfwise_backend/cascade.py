@@ -33,6 +33,7 @@ from shelfwise_decision_science import (
 )
 from shelfwise_inference import load_inference_config
 
+from .product_policies import resolve_product_policy
 from .tenant import default_tenant_context
 from .world_facts import WorldFactsProvider
 from .world_facts import default_facts_provider as _default_facts
@@ -47,6 +48,23 @@ _GOLDEN_SCENARIO_ID = "stage4_loadshedding_x_payday_yoghurt"
 _PROCUREMENT_SCENARIO_ID = "procurement_reorder_supplier_cover"
 _SALES_SCENARIO_ID = "pos_sale_price_integrity"
 _COLD_CHAIN_SCENARIO_ID = "cold_chain_generator_failure_facilities_review"
+
+# Story physics for the two simulation scenarios above, applied ONLY when a
+# world_simulation event does not carry its own telemetry (scenario drills replay the
+# named story: a 3h loadshedding outage on payday, and a generator failure with a
+# measured 4h outage). Live operational events can never inherit these - the cascade
+# dispatcher fails closed on missing telemetry before this code runs
+# (_require_operational_context in cascade_dispatcher.py), so invented physics cannot
+# reach a real store's decisions.
+_GOLDEN_STORY_COLD_AREA = "fridge_a"
+_GOLDEN_STORY_OUTAGE_HOURS = "3"
+_GOLDEN_STORY_AVERAGE_TEMP_C = "7"
+_GOLDEN_STORY_PAYDAY_MULTIPLIER = "1.35"
+_COLD_CHAIN_STORY_DIAGNOSIS = "generator_failed"
+_COLD_CHAIN_STORY_SEVERITY = 2
+_COLD_CHAIN_STORY_MINUTES_TO_UNSAFE = Decimal("18")
+_COLD_CHAIN_STORY_OUTAGE_HOURS = Decimal("4")
+_COLD_CHAIN_STORY_AVERAGE_TEMP_C = Decimal("8.2")
 _RECALL_SCENARIO_ID = "supplier_lot_recall_quarantine"
 _INVENTORY_EXCEPTION_SCENARIO_ID = "inventory_exception_review"
 _INVENTORY_EXCEPTION_TYPES = frozenset({"return", "damage", "shrink", "misplaced_stock"})
@@ -109,10 +127,16 @@ def run_golden_cascade(
     source_stock = SourceRef.dataset(source_dataset, f"stock:sku:{sku}")
     source_sales = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
     payload = event.payload if event is not None else {}
-    cold_area = str(payload.get("cold_chain_area") or "fridge_a")
-    outage_hours = Decimal(str(payload.get("cold_chain_outage_hours") or "3"))
-    average_temp_c = Decimal(str(payload.get("cold_chain_average_temp_c") or "7"))
-    payday_multiplier = Decimal(str(payload.get("payday_multiplier") or "1.35"))
+    cold_area = str(payload.get("cold_chain_area") or _GOLDEN_STORY_COLD_AREA)
+    outage_hours = Decimal(
+        str(payload.get("cold_chain_outage_hours") or _GOLDEN_STORY_OUTAGE_HOURS)
+    )
+    average_temp_c = Decimal(
+        str(payload.get("cold_chain_average_temp_c") or _GOLDEN_STORY_AVERAGE_TEMP_C)
+    )
+    payday_multiplier = Decimal(
+        str(payload.get("payday_multiplier") or _GOLDEN_STORY_PAYDAY_MULTIPLIER)
+    )
     source_outage = SourceRef.dataset(source_dataset, f"{scenario.location}:{cold_area}")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
@@ -154,6 +178,10 @@ def run_golden_cascade(
     spans.append(_span("decision_science.score_expiry_risk", started, {"risk": str(expiry.risk)}))
 
     started = perf_counter()
+    # The candidate markdown is a per-family business rule owned by the product-policy
+    # layer, never an inline literal in decision logic.
+    product_policy = resolve_product_policy(scenario.category)
+    markdown_discount = Decimal(product_policy.markdown_discount_pct)
     simulation = simulate_markdown(
         sku=sku,
         units_on_hand=Decimal(scenario.units_on_hand),
@@ -161,9 +189,11 @@ def run_golden_cascade(
         base_daily_units=demand.daily_units,
         unit_price=scenario.unit_price,
         unit_cost=scenario.unit_cost,
-        discount_pct=Decimal("0.20"),
+        discount_pct=markdown_discount,
     )
-    markdown_margin = (scenario.unit_price * Decimal("0.80")) - scenario.unit_cost
+    markdown_margin = (
+        scenario.unit_price * (Decimal("1") - markdown_discount)
+    ) - scenario.unit_cost
     spans.append(
         _span(
             "decision_science.simulate_markdown",
@@ -175,7 +205,11 @@ def run_golden_cascade(
     monitor = _monitor_action(sku)
     markdown = RecommendedAction(
         "apply_markdown",
-        {"sku": sku, "discount_pct": "0.20", "duration_hours": 24},
+        {
+            "sku": sku,
+            "discount_pct": product_policy.markdown_discount_pct,
+            "duration_hours": product_policy.markdown_duration_hours,
+        },
         RiskTier.HIGH,
     )
 
@@ -1036,11 +1070,15 @@ def run_cold_chain_cascade(
         payload.get("asset_id") or f"cold-chain:{scenario.location}:{scenario.category}"
     )
     category = str(payload.get("category") or scenario.category)
-    diagnosis = str(payload.get("diagnosis") or "generator_failed")
-    severity = _int_payload(payload, "severity", 2)
-    predicted_minutes = _decimal_payload(payload, "predicted_minutes_to_unsafe", Decimal("18"))
-    measured_outage_hours = _decimal_payload(payload, "measured_outage_hours", Decimal("4"))
-    average_temp_c = _decimal_payload(payload, "temp_c", Decimal("8.2"))
+    diagnosis = str(payload.get("diagnosis") or _COLD_CHAIN_STORY_DIAGNOSIS)
+    severity = _int_payload(payload, "severity", _COLD_CHAIN_STORY_SEVERITY)
+    predicted_minutes = _decimal_payload(
+        payload, "predicted_minutes_to_unsafe", _COLD_CHAIN_STORY_MINUTES_TO_UNSAFE
+    )
+    measured_outage_hours = _decimal_payload(
+        payload, "measured_outage_hours", _COLD_CHAIN_STORY_OUTAGE_HOURS
+    )
+    average_temp_c = _decimal_payload(payload, "temp_c", _COLD_CHAIN_STORY_AVERAGE_TEMP_C)
     stock_at_risk = _money_payload(
         payload.get("stock_at_risk"),
         default=scenario.unit_price * scenario.units_on_hand,

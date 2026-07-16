@@ -6,6 +6,8 @@ import time
 from contextlib import suppress
 from typing import Any
 
+from shelfwise_backend.event_bus import stale_consumer_idle_ms
+
 from .worker import CascadeWorker, WorkerResult
 
 
@@ -16,14 +18,27 @@ class WorkerLoopService:
         self,
         worker: CascadeWorker,
         *,
-        poll_s: float = 0.25,
-        reclaim_interval_s: float = 30.0,
-        reclaim_idle_ms: int = 30_000,
+        poll_s: float | None = None,
+        reclaim_interval_s: float | None = None,
+        reclaim_idle_ms: int | None = None,
     ) -> None:
         self._worker = worker
-        self._poll_s = max(0.01, poll_s)
-        self._reclaim_interval_s = max(0.01, reclaim_interval_s)
-        self._reclaim_idle_ms = max(0, reclaim_idle_ms)
+        self._poll_s = max(0.01, _float_env("SHELFWISE_WORKER_POLL_SECONDS", 0.25)
+                           if poll_s is None else poll_s)
+        # How often the sweep LOOKS for stale messages (a cheap read; frequent is fine).
+        # How long a message must sit idle before it counts as stale is a different
+        # question entirely and is budget-derived, not fixed: see
+        # `stale_consumer_idle_ms()` - a threshold below the per-request work budget
+        # steals live messages from healthy workers and double-runs them.
+        self._reclaim_interval_s = max(
+            0.01,
+            _float_env("SHELFWISE_WORKER_RECLAIM_INTERVAL_SECONDS", 30.0)
+            if reclaim_interval_s is None
+            else reclaim_interval_s,
+        )
+        self._reclaim_idle_ms = (
+            stale_consumer_idle_ms() if reclaim_idle_ms is None else max(0, reclaim_idle_ms)
+        )
         self._task: asyncio.Task | None = None
         self._processed = 0
         self._reclaimed = 0
@@ -111,3 +126,10 @@ class WorkerLoopService:
 
 def worker_enabled() -> bool:
     return os.getenv("WORKER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default

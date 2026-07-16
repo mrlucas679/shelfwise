@@ -141,6 +141,13 @@ properties an operator must know:
 - **The real inference bound lives in the LLM client**, whose per-call budgets
   (`LLM_TIMEOUT_SECONDS`, per-turn deadline math in the orchestrator) expire earlier and
   fail closed. The middleware is the outer safety net, not the primary control.
+- **Worker reclaim is budget-derived, never a bare constant.** A queued message is only
+  presumed abandoned after being idle for the full request budget plus persistence margin
+  (`stale_consumer_idle_ms()`; default 240s at a 120s request budget).
+  `SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS` can raise this but is clamped up to the derived
+  floor — a threshold inside the work budget would steal live messages from healthy
+  workers and double-run cascades, the same arbitrary-30-seconds mistake as the retired
+  submission gate.
 
 ## Application Shakedown
 

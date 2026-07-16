@@ -139,7 +139,17 @@ def _has_partial_catalog_price(event: Event) -> bool:
 
 
 def _require_operational_context(event: Event) -> None:
-    """Reject demo-only assumptions that are not present in a live event or twin."""
+    """Reject demo-only assumptions that are not present in a live event or twin.
+
+    Every field listed here is one the downstream cascade actually consumes: if a live
+    event omits it, the only alternatives are fabricating a value (a decision built on
+    invented facts) or failing closed - and this platform always fails closed. The
+    cold-chain list mirrors what the edge/resilience layer genuinely computes and emits
+    (diagnose() and predict_time_to_unsafe() run at the edge where the full telemetry
+    lives); before 2026-07-15 only temp_c was required and the cascade silently invented
+    the rest (diagnosis "generator_failed", severity 2, 18 minutes-to-unsafe, a 4h
+    outage) into real operational decision evidence.
+    """
     required: tuple[str, ...] = ()
     if event.type is EventType.SCAN:
         required = (
@@ -149,7 +159,13 @@ def _require_operational_context(event: Event) -> None:
             "cold_chain_average_temp_c",
         )
     elif event.type is EventType.COLD_CHAIN_ALERT:
-        required = ("temp_c",)
+        required = (
+            "temp_c",
+            "diagnosis",
+            "severity",
+            "predicted_minutes_to_unsafe",
+            "measured_outage_hours",
+        )
     missing = [field for field in required if event.payload.get(field) is None]
     if missing:
         raise MissingOperationalFacts(missing)

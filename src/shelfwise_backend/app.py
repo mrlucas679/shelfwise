@@ -2923,8 +2923,28 @@ def _record_pipeline_event(event: Event) -> dict[str, Any]:
     }
 
 
-_DEMO_DRILL_WAIT_S = 15.0
-_DEMO_DRILL_POLL_S = 0.2
+def _scenario_drill_wait_seconds() -> float:
+    """How long a scenario drill route waits for the async worker before an honest 503.
+
+    DERIVED from the request budget, not picked: the wait must be long enough to cover
+    real queue depth (a fixed 15s guess starves under load) while still answering
+    before the deadline middleware's 504 pre-empts the route's own honest 503 - so it
+    is the request budget minus a response margin, overridable via
+    SHELFWISE_SCENARIO_DRILL_WAIT_SECONDS but always capped below the budget.
+    """
+    budget = float(_request_timeout_seconds())
+    ceiling = max(1.0, budget - 10.0)
+    raw = os.getenv("SHELFWISE_SCENARIO_DRILL_WAIT_SECONDS", "").strip()
+    try:
+        configured = float(raw) if raw else ceiling
+    except ValueError:
+        configured = ceiling
+    # Shorter is always safe here (an early 503 is honest and retryable; no work is
+    # stolen) - only the ceiling is load-bearing, so clamp up is not needed.
+    return min(max(0.1, configured), ceiling)
+
+
+_DEMO_DRILL_POLL_S = 0.2  # poll frequency while waiting (how often we look, not a bound)
 
 
 def _await_worker_cascade(event: Event, ctx: TenantContext) -> dict[str, Any]:
@@ -2939,7 +2959,7 @@ def _await_worker_cascade(event: Event, ctx: TenantContext) -> dict[str, Any]:
     truthful still-processing signal if the wait bound is exceeded - never a fabricated
     failure for a submission that in fact succeeded.
     """
-    deadline = monotonic() + _DEMO_DRILL_WAIT_S
+    deadline = monotonic() + _scenario_drill_wait_seconds()
     while monotonic() < deadline:
         for row in decision_store.list():
             caused_by = row.get("caused_by")

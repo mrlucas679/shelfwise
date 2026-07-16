@@ -179,7 +179,7 @@ def test_recall_demo_returns_a_truthful_still_processing_signal_not_a_fake_500(
     from shelfwise_backend import app as app_module
 
     monkeypatch.setenv("WORKER_ENABLED", "true")
-    monkeypatch.setattr(app_module, "_DEMO_DRILL_WAIT_S", 0.3)
+    monkeypatch.setenv("SHELFWISE_SCENARIO_DRILL_WAIT_SECONDS", "0.3")
     monkeypatch.setattr(app_module, "_DEMO_DRILL_POLL_S", 0.05)
     client = TestClient(app)
 

@@ -13,6 +13,44 @@ DEFAULT_EVENT_STREAM_MAXLEN = 10_000
 MIN_EVENT_STREAM_MAXLEN = 100
 MAX_EVENT_STREAM_MAXLEN = 1_000_000
 
+# Margin added on top of the full per-request work budget before a pending message may
+# be presumed abandoned: covers decision/journal persistence (each Postgres pool
+# checkout can wait up to its own 30s timeout under contention) plus scheduling slack.
+_RECLAIM_MARGIN_SECONDS = 120
+
+
+def stale_consumer_idle_ms() -> int:
+    """Idle threshold before a pending message may be reclaimed from its consumer.
+
+    DERIVED, never hardcoded: a consumer holding a message is only presumed dead once
+    it has been idle for the whole budget the system itself grants one unit of work -
+    SHELFWISE_REQUEST_TIMEOUT_SECONDS (the same bound the HTTP deadline middleware and
+    the cascade/LLM deadline math run under, default 120s) - plus persistence margin.
+    The previous fixed 30_000ms sat INSIDE that budget, so a healthy worker still
+    mid-cascade at second 31 could have its live message stolen and double-run by the
+    reclaim sweep: the exact arbitrary-30-seconds failure mode that the retired
+    submission gate already demonstrated (see docs/mi300x-recreate-runbook.md).
+
+    SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS overrides for operators, but is clamped UP
+    to the derived floor - a sub-budget value silently reintroduces live-work theft,
+    so it must not be expressible through configuration either.
+    """
+    floor_seconds = _request_budget_seconds() + _RECLAIM_MARGIN_SECONDS
+    raw = os.getenv("SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS", "").strip()
+    try:
+        configured = int(raw) if raw else floor_seconds
+    except ValueError:
+        configured = floor_seconds
+    return max(configured, floor_seconds) * 1_000
+
+
+def _request_budget_seconds() -> int:
+    raw = os.getenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 120
+
 
 class InMemoryEventBus:
     def __init__(self, *, max_retries: int = 3) -> None:
@@ -87,7 +125,7 @@ class InMemoryEventBus:
         *,
         group: str = "cascade",
         consumer: str = "worker-1",
-        min_idle_ms: int = 30_000,
+        min_idle_ms: int | None = None,
     ) -> int:
         """Keep the worker recovery seam compatible without tracking idle memory entries."""
         del stream, group, consumer, min_idle_ms
@@ -218,15 +256,21 @@ class RedisStreamsEventBus:
         *,
         group: str = "cascade",
         consumer: str = "worker-1",
-        min_idle_ms: int = 30_000,
+        min_idle_ms: int | None = None,
     ) -> int:
-        """Reclaim stale pending messages so the current worker can retry them."""
+        """Reclaim pending messages whose consumer has been idle past the work budget.
+
+        The idle threshold defaults to `stale_consumer_idle_ms()` - derived from the
+        request/cascade budget, never a bare constant - so a healthy consumer that is
+        simply still working can never have its live message stolen and double-run.
+        """
+        resolved_idle_ms = stale_consumer_idle_ms() if min_idle_ms is None else min_idle_ms
         streams = [stream] if stream else self._source_streams()
         reclaimed = 0
         for item in streams:
             self._ensure_group(item, group)
             result = self._client.xautoclaim(
-                item, group, consumer, min_idle_ms, start_id="0-0", count=50
+                item, group, consumer, resolved_idle_ms, start_id="0-0", count=50
             )
             claimed = result[1] if len(result) > 1 else []
             reclaimed += len(claimed)

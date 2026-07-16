@@ -140,3 +140,56 @@ def test_redis_stats_treats_missing_consumer_group_as_empty() -> None:
 
 def test_in_memory_reclaim_is_a_no_op() -> None:
     assert InMemoryEventBus().reclaim_stale() == 0
+
+
+def test_stale_consumer_idle_threshold_is_derived_from_the_work_budget(monkeypatch) -> None:
+    """The reclaim idle threshold must always exceed the full per-request work budget.
+
+    A fixed 30s threshold sat INSIDE the 120s cascade budget, so the reclaim sweep
+    could steal a live message from a healthy worker mid-cascade and double-run it -
+    the same arbitrary-30-seconds mistake as the retired submission gate. "Stale" must
+    mean "idle past everything one unit of work is allowed to take", derived, never
+    picked.
+    """
+    from shelfwise_backend.event_bus import stale_consumer_idle_ms
+
+    monkeypatch.delenv("SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS", raising=False)
+    monkeypatch.setenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
+    assert stale_consumer_idle_ms() >= 120_000 + 60_000, (
+        "threshold must cover the whole request budget plus persistence margin"
+    )
+
+    # A larger budget must push the floor up with it automatically.
+    monkeypatch.setenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "300")
+    assert stale_consumer_idle_ms() >= 300_000
+
+
+def test_reclaim_idle_override_cannot_be_configured_below_the_budget_floor(monkeypatch) -> None:
+    """A sub-budget override silently reintroduces live-work theft, so it must clamp UP."""
+    from shelfwise_backend.event_bus import stale_consumer_idle_ms
+
+    monkeypatch.setenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
+    monkeypatch.setenv("SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS", "30")
+    floor = 120_000
+    assert stale_consumer_idle_ms() > floor, "30s override must be clamped up to the floor"
+
+    # Raising above the floor is allowed - operators may only be MORE patient.
+    monkeypatch.setenv("SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS", "600")
+    assert stale_consumer_idle_ms() == 600_000
+
+
+def test_worker_loop_service_defaults_to_the_derived_idle_threshold(monkeypatch) -> None:
+    from shelfwise_action import create_decision_store
+    from shelfwise_backend.event_bus import InMemoryEventBus, stale_consumer_idle_ms
+    from shelfwise_backend.worker.journal import InMemoryJournal
+    from shelfwise_backend.worker.service import WorkerLoopService
+    from shelfwise_backend.worker.worker import CascadeWorker
+
+    monkeypatch.delenv("SHELFWISE_WORKER_RECLAIM_IDLE_SECONDS", raising=False)
+    monkeypatch.setenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
+    worker = CascadeWorker(
+        bus=InMemoryEventBus(), journal=InMemoryJournal(), decision_store=create_decision_store()
+    )
+    service = WorkerLoopService(worker)
+    assert service._reclaim_idle_ms == stale_consumer_idle_ms()
+    assert service._reclaim_idle_ms >= 120_000

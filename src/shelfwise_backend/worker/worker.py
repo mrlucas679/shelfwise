@@ -13,6 +13,7 @@ from shelfwise_backend.cascade import (
     run_procurement_cascade,
     run_sales_cascade,
 )
+from shelfwise_backend.event_bus import stale_consumer_idle_ms
 from shelfwise_contracts import Event, EventType
 from shelfwise_runtime import DataDomain
 from shelfwise_storage import bind_tenant_context, reset_tenant_context
@@ -77,7 +78,8 @@ class CascadeWorker:
         # would re-deliver messages another replica is actively processing, double-
         # running cascades. A per-process identity keeps pending entries owned by the
         # process that read them; a crashed process's pending messages are recovered by
-        # the 30s reclaim_stale sweep in WorkerLoopService, not by identity reuse.
+        # WorkerLoopService's periodic reclaim_stale sweep (idle threshold derived from
+        # the per-request work budget - see stale_consumer_idle_ms), not identity reuse.
         self._consumer = consumer or _process_consumer_name()
 
     def process_one(self, stream: str | None = None) -> WorkerResult:
@@ -164,18 +166,24 @@ class CascadeWorker:
         except TypeError:
             return bool(self._bus.nack(stream, message_id))
 
-    def reclaim_stale(self, *, min_idle_ms: int = 30_000) -> int:
-        """Reclaim stale bus entries through the configured bus implementation."""
+    def reclaim_stale(self, *, min_idle_ms: int | None = None) -> int:
+        """Reclaim stale bus entries through the configured bus implementation.
+
+        The idle threshold defaults to the budget-derived `stale_consumer_idle_ms()`
+        rather than a fixed constant, so "stale" always means "idle past everything the
+        system allows one unit of work to legitimately take", not an arbitrary number.
+        """
         reclaim = getattr(self._bus, "reclaim_stale", None)
         if not callable(reclaim):
             return 0
+        resolved_idle_ms = stale_consumer_idle_ms() if min_idle_ms is None else min_idle_ms
         try:
             return int(
                 reclaim(
                     None,
                     group=self._group,
                     consumer=self._consumer,
-                    min_idle_ms=min_idle_ms,
+                    min_idle_ms=resolved_idle_ms,
                 )
             )
         except TypeError:

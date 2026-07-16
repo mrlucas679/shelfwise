@@ -94,12 +94,20 @@ class ConnectorPollService:
         cursors: CursorStore,
         process_record: ProcessRecord,
         tenant_id: str,
-        interval_s: float = 60.0,
+        interval_s: float | None = None,
         connector_factory: Callable[[], list[PollingConnector]] | None = None,
     ) -> None:
         self._process_record = process_record
         self._tenant_id = tenant_id
-        self._interval_s = max(5.0, interval_s)
+        # Poll cadence is deployment-specific (source-system rate limits vs freshness),
+        # so it is configuration, not a code constant. Floor of 5s protects the source
+        # systems from an accidental hot loop.
+        resolved_interval = (
+            _float_env("CONNECTOR_POLL_INTERVAL_SECONDS", 60.0)
+            if interval_s is None
+            else interval_s
+        )
+        self._interval_s = max(5.0, resolved_interval)
         self._connector_factory = connector_factory or (
             lambda: build_configured_connectors(cursors=cursors, tenant_id=tenant_id)
         )
@@ -171,3 +179,10 @@ class ConnectorPollService:
         self._last_status = "ok"
         self._last_error = None
         return pulled
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default

@@ -43,6 +43,7 @@ from .cascade import (
     _monitor_action,
 )
 from .cascade import _event_tenant_id as _tenant_id
+from .product_policies import resolve_product_policy
 from .tools.mcp_surface import AuditLog, PlatformTool, build_platform_tools
 from .tools.model_runtime import OpenAIModelRuntime, architecture_from_inference_config
 from .world_facts import WorldFactsProvider
@@ -272,6 +273,13 @@ async def _run(
         )
     )
 
+    # The candidate markdown the agents evaluate comes from the product-policy layer,
+    # exactly like the deterministic cascade - both paths must argue about the SAME
+    # candidate, and neither may bury it as a literal in prompts or routing.
+    product_policy = resolve_product_policy(scenario.category)
+    discount_pct = product_policy.markdown_discount_pct
+    discount_display = f"{int(Decimal(discount_pct) * 100)}%"
+
     try:
         critic_run = await orchestrator.run(
             role="critic",
@@ -279,16 +287,17 @@ async def _run(
                 "You are the ShelfWise Critic agent. You must call the get_stock and "
                 "simulate_markdown tools to gather the real facts for this SKU before "
                 "deciding. Never invent numbers - the tools are your calculator; use the "
-                "exact figures they return. A 20% markdown is only sound if the simulated "
-                "incremental profit is positive and the stock/expiry facts support it. Your "
-                "conclusion must explain the math: state the specific numbers you computed "
-                "(e.g. units on hand, incremental profit) and how they lead to your verdict, "
-                "not just the verdict itself."
+                f"exact figures they return. A {discount_display} markdown is only sound "
+                "if the simulated incremental profit is positive and the stock/expiry "
+                "facts support it. Your conclusion must explain the math: state the "
+                "specific numbers you computed (e.g. units on hand, incremental profit) "
+                "and how they lead to your verdict, not just the verdict itself."
             ),
             user=(
-                f"Evaluate whether a 20% markdown is justified for SKU {sku} ({product}). "
-                "Call get_stock, then call simulate_markdown with discount_pct=0.2, then "
-                "return your verdict, citing the exact numbers from those tool results."
+                f"Evaluate whether a {discount_display} markdown is justified for SKU "
+                f"{sku} ({product}). Call get_stock, then call simulate_markdown with "
+                f"discount_pct={discount_pct}, then return your verdict, citing the "
+                "exact numbers from those tool results."
             ),
             final_schema=_CRITIC_SCHEMA,
             final_schema_name="critic_verdict",
@@ -343,6 +352,7 @@ async def _run(
         critic_answer=critic_answer,
         executive_run=executive_run,
         executive_answer=executive_answer,
+        product_policy=product_policy,
     )
 
 
@@ -515,6 +525,7 @@ def _build_result(
     critic_answer: dict[str, Any],
     executive_run: AgentRunResult,
     executive_answer: dict[str, Any],
+    product_policy: Any,
 ) -> dict[str, Any]:
     correlation_id = (
         event.correlation_id if event is not None else critic_run.correlation_id
@@ -524,7 +535,11 @@ def _build_result(
     action_type = executive_answer["recommended_action_type"]
     markdown = RecommendedAction(
         "apply_markdown",
-        {"sku": scenario_sku, "discount_pct": "0.20", "duration_hours": 24},
+        {
+            "sku": scenario_sku,
+            "discount_pct": product_policy.markdown_discount_pct,
+            "duration_hours": product_policy.markdown_duration_hours,
+        },
         RiskTier.HIGH,
     )
     monitor = _monitor_action(scenario_sku)
