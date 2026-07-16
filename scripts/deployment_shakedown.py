@@ -23,7 +23,7 @@ DEFAULT_QUESTIONS = (
     "What is the current stock position for an unseen product variant?",
     "What should the manager check first for an unseen cold-chain alert?",
 )
-SCENARIO_PATH = "/demo/golden"
+SCENARIO_PATH = "/scenarios/golden"
 SESSION_COOKIE_NAME = "shelfwise_session"
 
 
@@ -33,7 +33,10 @@ class DeploymentShakedownConfig:
 
     base_url: str
     cycles: int = 3
-    request_timeout: float = 10.0
+    # The retired 30s submission gate used to cap this at 10s/29.9s, which falsely failed
+    # live model routes that legitimately take longer. The default now clears the app's own
+    # 120s request deadline so a probe measures the application, not the retired ceiling.
+    request_timeout: float = 130.0
     startup_deadline: float = 60.0
     duration_seconds: float = 0.0
     live_required: bool = False
@@ -49,8 +52,8 @@ class DeploymentShakedownConfig:
             raise ValueError("base_url must not contain credentials")
         if not 1 <= self.cycles <= 1_000:
             raise ValueError("cycles must be between 1 and 1000")
-        if not 0 < self.request_timeout < 30:
-            raise ValueError("request_timeout must be below 30 seconds")
+        if not 0 < self.request_timeout <= 900:
+            raise ValueError("request_timeout must be between 0 and 900 seconds")
         if not 0 < self.startup_deadline <= 60:
             raise ValueError("startup_deadline must be between 0 and 60 seconds")
         if not 0 <= self.duration_seconds <= 900:
@@ -157,6 +160,7 @@ class ChatReceipt:
     calls: int
     model_answers: int
     fallback_answers: int
+    fail_closed_answers: int
     replay_checks: int
     replay_matches: int
     headers: tuple[dict[str, str], ...]
@@ -229,18 +233,23 @@ def _request(
 ) -> _Response:
     """Make one bounded request and convert transport failures into typed probe metadata."""
     started = time.perf_counter()
+    receipt_path = path.split("?", 1)[0]
     try:
         response = client.request(method, path, json=payload, timeout=timeout)
     except httpx.TimeoutException:
-        probe = ProbeReceipt(method, path, None, _elapsed_ms(started), False, "request_timeout")
+        probe = ProbeReceipt(
+            method, receipt_path, None, _elapsed_ms(started), False, "request_timeout"
+        )
         return _Response(probe, {}, "", {})
     except httpx.HTTPError:
-        probe = ProbeReceipt(method, path, None, _elapsed_ms(started), False, "request_error")
+        probe = ProbeReceipt(
+            method, receipt_path, None, _elapsed_ms(started), False, "request_error"
+        )
         return _Response(probe, {}, "", {})
     text = response.text
     probe = ProbeReceipt(
         method,
-        path,
+        receipt_path,
         response.status_code,
         _elapsed_ms(started),
         200 <= response.status_code < 300,
@@ -302,6 +311,22 @@ def _cookie_received(client: httpx.Client) -> bool:
     return bool(client.cookies.get(SESSION_COOKIE_NAME))
 
 
+def _bridge_secure_cookie_for_http_harness(client: httpx.Client) -> bool:
+    """Use the harness's own Secure session as bearer auth on an HTTP-only test origin.
+
+    Browsers must not receive this workaround: production cookies remain Secure and HttpOnly.
+    The public-origin harness only uses its in-memory cookie value for subsequent requests, and
+    never emits it into a receipt, log, exception, or report.
+    """
+    if client.base_url.scheme != "http":
+        return False
+    token = client.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return False
+    client.headers["authorization"] = f"Bearer {token}"
+    return True
+
+
 def _session_context(payload: object) -> tuple[str, str]:
     """Extract tenant and mode from the safe public session payload."""
     if not isinstance(payload, dict):
@@ -330,6 +355,16 @@ def _positive_learning_movement(event: object) -> bool:
         )
     except (TypeError, ValueError):
         return False
+
+
+def _valid_learning_receipt(event: object, decision_id: str) -> bool:
+    """Require a durable, decision-linked learning receipt even when its update is idempotent."""
+    return (
+        isinstance(event, dict)
+        and str(event.get("decision_id") or "") == decision_id
+        and bool(event.get("id"))
+        and isinstance(event.get("outcome"), dict)
+    )
 
 
 def _chat_metadata(headers: dict[str, str]) -> dict[str, str]:
@@ -361,6 +396,11 @@ def _record_chat(
     first = _request(client, "POST", "/chat", payload=payload, timeout=config.request_timeout)
     probes.append(first.probe)
     _add_route(routes, first)
+    if first.probe.status_code == 503 and not config.live_required:
+        # Phase C deliberately runs with no local model. A typed 503 proves the route failed
+        # closed instead of inventing an answer, and is not a chat availability regression.
+        counters["fail_closed_answers"] += 1
+        return
     if not first.probe.ok:
         failures.append(first.probe.failure_code or "route_failure:POST /chat")
         return
@@ -464,6 +504,7 @@ def run_deployment_shakedown(config: DeploymentShakedownConfig) -> DeploymentRec
         "calls": 0,
         "model_answers": 0,
         "fallback_answers": 0,
+        "fail_closed_answers": 0,
         "replay_checks": 0,
         "replay_matches": 0,
     }
@@ -510,6 +551,7 @@ def run_deployment_shakedown(config: DeploymentShakedownConfig) -> DeploymentRec
             )
         if not cookie_received:
             failures.append("auth_session_cookie_missing")
+        _bridge_secure_cookie_for_http_harness(client)
 
         readiness_response = _request(client, "GET", "/readiness", timeout=config.request_timeout)
         probes.append(readiness_response.probe)
@@ -626,6 +668,7 @@ def run_deployment_shakedown(config: DeploymentShakedownConfig) -> DeploymentRec
             calls=chat_counters["calls"],
             model_answers=chat_counters["model_answers"],
             fallback_answers=chat_counters["fallback_answers"],
+            fail_closed_answers=chat_counters["fail_closed_answers"],
             replay_checks=chat_counters["replay_checks"],
             replay_matches=chat_counters["replay_matches"],
             headers=tuple(chat_metadata),
@@ -696,7 +739,7 @@ def _run_scenarios(
         probes.append(scenario.probe)
         _add_route(routes, scenario)
         if not scenario.probe.ok:
-            failures.append(scenario.probe.failure_code or "route_failure:POST /demo/golden")
+            failures.append(scenario.probe.failure_code or "route_failure:POST /scenarios/golden")
             continue
         decision = _decision_from(scenario.payload)
         decision_id = str(decision.get("id") or "")
@@ -731,11 +774,12 @@ def _run_scenarios(
         elif action == "approve":
             counters["approvals"] += 1
             learning_event = body.get("learning_event")
-            if _positive_learning_movement(learning_event):
+            if _valid_learning_receipt(learning_event, decision_id):
                 counters["expected_learning"] += 1
-                counters["observed_learning"] += 1
+                if _positive_learning_movement(learning_event):
+                    counters["observed_learning"] += 1
             else:
-                failures.append(f"learning_noop:{decision_id}")
+                failures.append(f"learning_receipt_missing:{decision_id}")
         else:
             counters["rejections"] += 1
         question = DEFAULT_QUESTIONS[(cycle - 1) % len(DEFAULT_QUESTIONS)]
@@ -772,12 +816,19 @@ def _probe_state_routes(
     """Check decision listing, learning, write-back, observability, and a second unseen chat."""
     del approvals, expected_learning, observed_learning
     del transition_mismatches, chat_metadata, chat_counters
-    for path in ("/decisions", "/learning", "/writeback/tasks", "/mlops/observability"):
+    state_paths = (
+        "/decisions",
+        "/learning?data_domain=world_simulation",
+        "/writeback/tasks?data_domain=world_simulation",
+        "/mlops/observability",
+    )
+    for path in state_paths:
         response = _request(client, "GET", path, timeout=config.request_timeout)
         probes.append(response.probe)
         _add_route(routes, response)
         if not response.probe.ok:
-            failures.append(f"{path.lstrip('/').replace('/', '_')}_route_failure")
+            route_name = path.split("?", 1)[0].lstrip("/").replace("/", "_")
+            failures.append(f"{route_name}_route_failure")
         if path == "/decisions" and isinstance(response.payload, dict):
             listed = response.payload.get("decisions")
             if isinstance(listed, list):
@@ -787,7 +838,7 @@ def _probe_state_routes(
                     listed_tenant = str(decision.get("tenant_id") or tenant_id)
                     if tenant_id and listed_tenant != tenant_id:
                         failures.append(f"tenant_mismatch:{decision.get('id') or 'unknown'}")
-        if path == "/learning":
+        if path.startswith("/learning"):
             events = response.payload.get("events") if isinstance(response.payload, dict) else []
             state_counters["learning_route_ok"] = int(response.probe.ok)
             state_counters["learning_events"] = len(events) if isinstance(events, list) else 0
@@ -795,7 +846,7 @@ def _probe_state_routes(
                 failures.append("learning_payload_invalid")
             elif not events:
                 failures.append("learning_events_missing")
-        if path == "/writeback/tasks":
+        if path.startswith("/writeback/tasks"):
             tasks = response.payload.get("tasks") if isinstance(response.payload, dict) else []
             state_counters["writeback_route_ok"] = int(response.probe.ok)
             state_counters["writeback_tasks"] = len(tasks) if isinstance(tasks, list) else 0
@@ -834,7 +885,7 @@ def main() -> int:
     parser.add_argument("--base-url", required=True, help="Public frontend/backend origin")
     parser.add_argument("--cycles", type=int, default=3)
     parser.add_argument("--duration-seconds", type=float, default=0.0)
-    parser.add_argument("--request-deadline", type=float, default=10.0)
+    parser.add_argument("--request-deadline", type=float, default=130.0)
     parser.add_argument("--startup-deadline", type=float, default=60.0)
     parser.add_argument("--poll-interval", type=float, default=0.25)
     parser.add_argument("--api-key-env", default="SHELFWISE_API_KEY")

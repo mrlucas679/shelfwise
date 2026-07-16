@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import (
     app,
-    cold_chain_demo,
+    cold_chain_feed,
     decision_store,
     event_bus,
     event_store,
@@ -90,12 +90,12 @@ def run_backend_eval(*, token_ceiling: int = 24_000) -> EvalReport:
         _status_detail(readiness),
     )
 
-    golden = client.post("/demo/golden", headers=_write_headers())
+    golden = client.post("/scenarios/golden", headers=_write_headers())
     _record(checks, "golden_http", golden.status_code == 200, _status_detail(golden))
     golden_body = golden.json() if golden.status_code == 200 else {}
     _check_golden_cascade(checks, client, golden_body, token_ceiling=token_ceiling)
 
-    critic = client.post("/demo/critic-rejection", headers=_write_headers())
+    critic = client.post("/scenarios/critic-rejection", headers=_write_headers())
     _record(checks, "critic_rejection_http", critic.status_code == 200, _status_detail(critic))
     if critic.status_code == 200:
         _check_critic_rejection(checks, critic.json())
@@ -493,8 +493,8 @@ def _check_inference_and_submission(checks: list[EvalCheck], client: TestClient)
         timeout = float(details.get("timeout_seconds") or 0)
         _record(
             checks,
-            "inference_timeout_submission_safe",
-            0 < timeout < 30,
+            "inference_timeout_configured",
+            timeout > 0,
             f"timeout={timeout}",
         )
 
@@ -547,7 +547,7 @@ def _reset_in_memory_demo_state() -> None:
         writeback_sink,
         worldgen_run_store,
         world_snapshot_store,
-        cold_chain_demo,
+        cold_chain_feed,
     ):
         clear = getattr(store, "clear", None)
         if callable(clear):

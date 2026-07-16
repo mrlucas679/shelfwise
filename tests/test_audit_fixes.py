@@ -9,7 +9,7 @@ from shelfwise_backend.app import app
 
 def _drill_decision_ids(client: TestClient, seed: int) -> list[str]:
     response = client.get(
-        "/demo/worldgen/stage4_payday_coldchain",
+        "/scenarios/worldgen/stage4_payday_coldchain",
         params={"limit": 300, "assortment_size": 300, "seed_override": seed},
     )
     assert response.status_code == 200
@@ -102,7 +102,7 @@ def test_price_exception_learning_uses_exposure_metric_with_varied_score() -> No
 def test_chat_answers_mention_the_asked_product() -> None:
     """Audit finding 4: every answer cited the same unrelated SKU."""
     client = TestClient(app)
-    client.get("/demo/golden")
+    client.get("/scenarios/golden")
 
     response = client.post(
         "/chat", json={"question": "Why might Amasi 2L in Dairy need attention right now?"}

@@ -591,6 +591,10 @@ def run_procurement_cascade(
         "supplier_coverage": str(ranking.coverage),
         "stockout_exposure": policy.zar_exposure.to_dict(),
         "stockout_exposure_minor_units": policy.zar_exposure.minor_units,
+        # `/mlops`'s decision-economics dashboard (`_attach_decision_governance`) reads only
+        # `incremental_profit_minor_units` - without it every approved reorder displayed
+        # "R0.00 recovered" despite the real, computed stockout exposure above.
+        "incremental_profit_minor_units": policy.zar_exposure.minor_units,
     }
 
     return {

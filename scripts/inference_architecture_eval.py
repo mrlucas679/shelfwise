@@ -379,7 +379,7 @@ def workflow_once(
 
     record("health", "GET", "/health")
     record("readiness", "GET", "/readiness")
-    golden = record("golden_cascade", "GET", "/demo/golden")
+    golden = record("golden_cascade", "GET", "/scenarios/golden")
     decision_id = (
         golden.get("decision", {}).get("id")
         if isinstance(golden, dict)
@@ -394,7 +394,7 @@ def workflow_once(
     record("decision_detail", "GET", f"/decisions/{decision_id}")
     record("approve_decision", "POST", f"/decisions/{decision_id}/approve")
     record("learning", "GET", "/learning")
-    rejection = record("critic_rejection", "GET", "/demo/critic-rejection")
+    rejection = record("critic_rejection", "GET", "/scenarios/critic-rejection")
     context["critic_rejection_agents"] = [
         item.get("agent") for item in rejection.get("evidence", [])
     ] if isinstance(rejection, dict) else []

@@ -207,8 +207,8 @@ def test_jwt_auth_mode_assigns_demo_outputs_to_authenticated_tenant(
     monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
     tenant = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_demo')}"}
 
-    golden = client.post("/demo/golden", headers=tenant)
-    rejection = client.post("/demo/critic-rejection", headers=tenant)
+    golden = client.post("/scenarios/golden", headers=tenant)
+    rejection = client.post("/scenarios/critic-rejection", headers=tenant)
 
     assert golden.status_code == 200
     assert golden.json()["decision"]["tenant_id"] == "tenant_demo"

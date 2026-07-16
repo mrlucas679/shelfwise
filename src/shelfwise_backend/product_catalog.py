@@ -34,13 +34,14 @@ def product_attention_queue(
     to_order = [item for item in ordered if "low_stock" in item["attention_reasons"]]
     expiring = [item for item in ordered if "expiring" in item["attention_reasons"]]
     deliveries = [_delivery_exception(item) for item in to_order]
-    candidates = generate_fleet_candidates(
+    all_candidates = generate_fleet_candidates(
         ordered,
         tenant_id=tenant_id,
         as_of=(now or datetime.now(UTC)).date(),
-        limit=bounded_limit,
+        limit=500,
         open_orders=open_orders,
     )
+    candidates = _bounded_candidate_mix(all_candidates, limit=bounded_limit)
 
     candidate_records = (
         candidate_store.upsert_many(candidates, now=now)
@@ -77,6 +78,32 @@ def product_attention_queue(
         "deliveries": deliveries[:bounded_limit],
         "candidates": candidate_records,
     }
+
+
+def _bounded_candidate_mix(candidates: list[Any], *, limit: int) -> list[Any]:
+    """Keep the highest-value candidate of every observed type before score filling.
+
+    A pure global score cut allowed numerous supplier-delay rows to starve low-stock
+    candidates from the bounded API response, even while `to_order_products` was non-zero.
+    """
+    representatives: list[Any] = []
+    seen_types: set[str] = set()
+    for candidate in candidates:
+        candidate_type = str(candidate.candidate_type)
+        if candidate_type in seen_types:
+            continue
+        seen_types.add(candidate_type)
+        representatives.append(candidate)
+        if len(representatives) == limit:
+            return representatives
+
+    selected_keys = {candidate.candidate_key for candidate in representatives}
+    representatives.extend(
+        candidate
+        for candidate in candidates
+        if candidate.candidate_key not in selected_keys
+    )
+    return representatives[:limit]
 
 
 def get_delivery_exception(

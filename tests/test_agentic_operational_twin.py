@@ -121,7 +121,7 @@ def _cleanup():
 def test_golden_agentic_route_resolves_operational_twin_facts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`/demo/golden/agentic?data_domain=operational_twin` must ground the Critic/Executive
+    """`/scenarios/golden/agentic?data_domain=operational_twin` must ground the Critic/Executive
     tool-calling loop in reported twin state, not the generated world - the central gap this
     fix closes."""
     _seed_catalog_and_twin()
@@ -141,7 +141,7 @@ def test_golden_agentic_route_resolves_operational_twin_facts(
 
     client = TestClient(app)
     response = client.post(
-        "/demo/golden/agentic",
+        "/scenarios/golden/agentic",
         params={"data_domain": "operational_twin", "store_id": _STORE_ID},
     )
 
@@ -160,7 +160,7 @@ def test_golden_agentic_route_422s_when_twin_has_no_measured_facts() -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/demo/golden/agentic",
+        "/scenarios/golden/agentic",
         params={"data_domain": "operational_twin", "store_id": "store_never_onboarded"},
     )
 

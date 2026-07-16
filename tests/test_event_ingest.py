@@ -151,6 +151,38 @@ def test_ingest_records_event_runs_supported_scan_once() -> None:
     assert [message["event"]["id"] for message in bus.json()["messages"]] == ["evt_scan_hero"]
 
 
+def test_duplicate_event_id_with_different_content_is_rejected_without_side_effects() -> None:
+    client = TestClient(app)
+    event = _scan_event("evt_collision")
+    first = client.post("/ingest", json=event)
+    before_events = client.get("/events").json()["events"]
+    before_decisions = client.get("/decisions").json()
+
+    collision = client.post(
+        "/ingest",
+        json={**event, "payload": {"sku": "DIFFERENT", "location": "store_99"}},
+    )
+
+    assert first.status_code == 200
+    assert collision.status_code == 409
+    assert client.get("/events").json()["events"] == before_events
+    assert client.get("/decisions").json() == before_decisions
+
+
+def test_implausibly_stale_operational_event_is_rejected() -> None:
+    client = TestClient(app)
+    event = {
+        **_scan_event("evt_stale"),
+        "ts": "2000-01-01T00:00:00Z",
+        "data_domain": "operational_twin",
+    }
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Event timestamp is too stale"
+
+
 def test_complete_operational_scan_uses_only_measured_twin_sources() -> None:
     client = TestClient(app)
     event = {

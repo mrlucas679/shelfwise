@@ -4,17 +4,36 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import app, decision_store, learning_store, tool_audit, world_facts
+from shelfwise_backend.app import (
+    _demo_event,
+    app,
+    decision_store,
+    learning_store,
+    tool_audit,
+    world_facts,
+)
+from shelfwise_backend.tenant import default_tenant_context
 from shelfwise_backend.tools.mcp_surface import (
     PlatformTool,
     build_platform_tools,
     register_platform_mcp,
 )
+from shelfwise_contracts import EventType
+
+
+def test_agentic_demo_event_uses_a_distinct_decision_namespace() -> None:
+    ctx = default_tenant_context()
+
+    deterministic = _demo_event(ctx, EventType.COLD_CHAIN_ALERT)
+    agentic = _demo_event(ctx, EventType.COLD_CHAIN_ALERT, variant="agentic")
+
+    assert deterministic.id != agentic.id
+    assert "evt_demo_agentic_cold_chain_alert" in agentic.id
 
 
 def test_trace_endpoint_returns_recorded_demo_trace() -> None:
     client = TestClient(app)
-    run = client.post("/demo/golden")
+    run = client.post("/scenarios/golden")
     correlation_id = run.json()["correlation_id"]
 
     response = client.get(f"/trace/{correlation_id}")
@@ -53,7 +72,7 @@ def test_chat_is_bounded_streaming_and_write_guarded(monkeypatch) -> None:
 
 def test_platform_tools_are_read_only_grounded_and_audited() -> None:
     client = TestClient(app)
-    decision = client.post("/demo/golden").json()["decision"]
+    decision = client.post("/scenarios/golden").json()["decision"]
     hero_sku = client.get("/data/seed/summary").json()["seed_data"]["sku"]
     tools = {
         tool.name: tool
@@ -67,14 +86,22 @@ def test_platform_tools_are_read_only_grounded_and_audited() -> None:
     }
 
     stock = asyncio.run(tools["get_stock"].fn(sku=hero_sku))
+    missing_stock = asyncio.run(tools["get_stock"].fn(sku="ZZZ-404"))
     open_decisions = asyncio.run(tools["list_open_decisions"].fn())
     explanation = asyncio.run(tools["explain_decision"].fn(decision_id=decision["id"]))
     simulation = asyncio.run(tools["simulate_markdown"].fn(sku=hero_sku, discount_pct=0.2))
 
     assert all(tool.read_only for tool in tools.values())
     assert stock["on_hand"] > 0
+    assert missing_stock == {
+        "data_domain": "world_simulation",
+        "requested_sku": "ZZZ-404",
+        "available": False,
+        "message": "No stock record exists for the requested SKU.",
+    }
     assert any(item["id"] == decision["id"] for item in open_decisions["decisions"])
     assert explanation["critic_verdict"] == "approved"
+    assert "trace" not in explanation["decision"]
     assert simulation["incremental_profit"]["minor_units"] > 0
     assert {event["tool"] for event in tool_audit.list()} >= {
         "get_stock",

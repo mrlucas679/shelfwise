@@ -11,7 +11,7 @@ os.environ["SHELFWISE_TENANT_ID"] = "sa_retail_demo"
 from shelfwise_backend.app import (
     candidate_store,
     chat_store,
-    cold_chain_demo,
+    cold_chain_feed,
     decision_store,
     event_bus,
     event_store,
@@ -63,7 +63,7 @@ def _reset_demo_stores() -> None:
     tenant_profile_store.clear()
     writeback_sink.clear()
     worldgen_run_store.clear()
-    cold_chain_demo.clear()
+    cold_chain_feed.clear()
     chat_store.clear()
     candidate_store.clear()
     open_order_store.clear()

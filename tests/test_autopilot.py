@@ -20,6 +20,16 @@ def test_critic_approved_pending_decision_is_approved() -> None:
     assert verdict["reviewer"] == "autopilot"
 
 
+def test_forced_dissent_rejects_an_otherwise_approvable_decision() -> None:
+    verdict = review_decision(
+        {"status": "pending", "critic_verdict": "approved", "expected_outcome": {}},
+        force_dissent=True,
+    )
+
+    assert verdict["action"] == REJECT
+    assert "dissent" in verdict["reason"]
+
+
 def test_small_exposure_review_is_approved_and_large_is_rejected() -> None:
     small = review_decision(
         {
@@ -49,7 +59,7 @@ def test_resolved_decisions_are_skipped_and_unknown_verdicts_rejected() -> None:
 
 def test_autopilot_drives_the_real_hitl_endpoints_end_to_end() -> None:
     client = TestClient(app)
-    golden = client.post("/demo/golden")
+    golden = client.post("/scenarios/golden")
     decision = golden.json()["decision"]
     verdict = review_decision(decision)
     assert verdict["action"] == APPROVE

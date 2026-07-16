@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -63,14 +65,20 @@ class CascadeWorker:
         decision_store: Any,
         handler: CascadeHandler | None = None,
         group: str = "cascade",
-        consumer: str = "worker-1",
+        consumer: str | None = None,
     ) -> None:
         self._bus = bus
         self._journal = journal
         self._decision_store = decision_store
         self._handler = handler or default_cascade_handler
         self._group = group
-        self._consumer = consumer
+        # A fixed consumer name shared by every replica would make Redis treat all
+        # replicas as ONE consumer: each replica's pending-history read ("0" cursor)
+        # would re-deliver messages another replica is actively processing, double-
+        # running cascades. A per-process identity keeps pending entries owned by the
+        # process that read them; a crashed process's pending messages are recovered by
+        # the 30s reclaim_stale sweep in WorkerLoopService, not by identity reuse.
+        self._consumer = consumer or _process_consumer_name()
 
     def process_one(self, stream: str | None = None) -> WorkerResult:
         message = self._consume(stream)
@@ -213,6 +221,10 @@ def default_cascade_handler(event: Event) -> dict[str, Any]:
         "trace": [],
         "status": "ignored",
     }
+
+
+def _process_consumer_name() -> str:
+    return f"worker-{socket.gethostname()}-{os.getpid()}"
 
 
 def _run_id_from_message(message: dict[str, Any]) -> str | None:

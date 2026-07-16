@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from shelfwise_contracts import (
@@ -20,6 +20,7 @@ from shelfwise_inference.orchestration import (
     AgentOrchestrationError,
     AgentOrchestrator,
     AgentRunResult,
+    CascadeDeadlineExceeded,
     ExecutionMode,
 )
 from shelfwise_inference.tool_calling import (
@@ -189,6 +190,20 @@ class AgenticCascadeError(RuntimeError):
     """Raised when the live agentic golden cascade cannot produce a valid decision."""
 
 
+class AgenticCascadeDeadlineError(AgenticCascadeError):
+    """Raised when a cascade is stopped early because it could not finish before its deadline.
+
+    Carries enough of `CascadeDeadlineExceeded`'s evidence for the route handler to return a
+    typed 503 instead of letting `enforce_request_deadline` middleware cut the connection while
+    the cascade (and its GPU cost) keeps running - see orchestration.CascadeDeadlineExceeded.
+    """
+
+    def __init__(self, message: str, *, completed_model_calls: int, elapsed_ms: int) -> None:
+        super().__init__(message)
+        self.completed_model_calls = completed_model_calls
+        self.elapsed_ms = elapsed_ms
+
+
 def run_golden_cascade_via_agents(
     event: Event | None = None,
     *,
@@ -199,6 +214,7 @@ def run_golden_cascade_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Run the golden scenario's Critic + Executive reasoning through real Gemma tool calls."""
     return _scope_result(
@@ -212,6 +228,7 @@ def run_golden_cascade_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -228,6 +245,7 @@ async def _run(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
     tenant_id = _tenant_id(event)
@@ -277,7 +295,9 @@ async def _run(
             correlation_id=correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -294,17 +314,26 @@ async def _run(
             ),
             user=(
                 f"SKU {sku} ({product}). Critic verdict: passed={critic_answer['critic_passed']}, "
-                f"conclusion={critic_answer['conclusion']!r}. Decide the routing action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Decide the routing action."
             ),
             final_schema=_EXECUTIVE_SCHEMA,
             final_schema_name="executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic golden cascade failed: {exc}") from exc
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic golden cascade could not finish inside the response deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
 
     return _build_result(
         event=event,
@@ -357,6 +386,108 @@ def _scoped_recorder(
     return record
 
 
+_EXECUTIVE_VERDICT_MAX_TOKENS = 400
+"""Cap on every critic/executive final-verdict call (audit-measured ~19 effective tok/s
+across both tiers made the prior default of 800 arithmetically unable to finish inside the
+30s hackathon ceiling for the largest-evidence cascades - a decision plus cited figures does
+not need an 800-token budget)."""
+
+_EXECUTIVE_CONCLUSION_CHAR_BUDGET = 200
+
+
+def _bounded_conclusion(conclusion: str, *, limit: int = _EXECUTIVE_CONCLUSION_CHAR_BUDGET) -> str:
+    """Cap the critic conclusion text forwarded into the executive's strong-tier prompt.
+
+    The critic schema allows up to 600 characters of prose. Quoting the full string into the
+    executive's user message duplicates that prose into a second strong-tier prompt for no
+    decision-relevant gain - the executive needs enough of the critic's reasoning to decide,
+    not the whole essay (2026-07-14 forensic audit, SLO-fit finding).
+    """
+    if len(conclusion) <= limit:
+        return conclusion
+    return f"{conclusion[: limit - 1].rstrip()}…"
+
+
+def _tool_result(tool_calls: tuple[Any, ...], name: str) -> dict[str, Any]:
+    """Return the result payload of the first execution of a named tool, or `{}`.
+
+    `Decision` objects built by these agentic cascades never carried `expected_outcome`,
+    so `shelfwise_memory.record_approved_decision` always computed zero exposure and the
+    harness's own `_learning_target` silently returned `None` for every one of them -
+    every approved agentic decision produced zero learning movement, invisibly, because
+    nothing ever checked a metric that was never populated (found 2026-07-15 by
+    distrusting a run that reported 0 failures). The fix pulls the real number the tool
+    already computed - never a fabricated or re-derived one - into `expected_outcome`.
+    """
+    for execution in tool_calls:
+        if execution.name == name and isinstance(execution.result, dict):
+            return execution.result
+    return {}
+
+
+def _decimal_from_tool_field(payload: dict[str, Any], key: str) -> Decimal | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _token_budget(*runs: AgentRunResult) -> dict[str, int]:
+    """Summarize prompt/completion token cost across every model call in a cascade run.
+
+    A `token_budget` receipt on every agentic response makes SLO regressions visible in every
+    future run's evidence, not just the ones that time out.
+    """
+    calls = [call for run in runs for call in run.model_calls]
+    return {
+        "prompt_tokens": sum(call.input_tokens for call in calls),
+        "completion_tokens": sum(call.output_tokens for call in calls),
+        "calls": len(calls),
+    }
+
+
+def _enforce_critic_verdict(
+    *,
+    critic_passed: bool,
+    executive_action: RecommendedAction,
+    safe_action: RecommendedAction,
+) -> tuple[RecommendedAction, bool]:
+    """Make the critic's verdict binding on the executive's routing, not advisory.
+
+    The critic's verdict reaches the executive only as prose inside a prompt, and prose
+    is not enforcement: a hallucinating executive can answer with the escalating action
+    even though the critic failed the work. The two guardrail cascades (catalog-price,
+    expiry) already fail closed on such a downgrade; the four routing cascades silently
+    trusted the executive. This gate closes that gap in the deterministic layer where a
+    model cannot argue with it: a failed critic verdict always routes the safe action,
+    and choosing the safe action is always allowed regardless of the critic (an
+    executive may be more conservative than the critic, never less).
+
+    Returns (final_action, override_applied) so callers can put the override on the
+    decision record for auditability instead of hiding the disagreement.
+    """
+    if critic_passed or executive_action.type == safe_action.type:
+        return executive_action, False
+    return safe_action, True
+
+
+def _critic_gate_receipt(
+    *,
+    critic_passed: bool,
+    executive_action_type: str,
+    override_applied: bool,
+) -> dict[str, Any]:
+    """One auditable record of what each agent said and what the gate did about it."""
+    return {
+        "critic_passed": critic_passed,
+        "executive_action_type": executive_action_type,
+        "override_applied": override_applied,
+    }
+
+
 def _scope_result(
     result: dict[str, Any] | None,
     event: Event | None,
@@ -397,7 +528,11 @@ def _build_result(
         RiskTier.HIGH,
     )
     monitor = _monitor_action(scenario_sku)
-    routed_action = markdown if action_type == "apply_markdown" else monitor
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=markdown if action_type == "apply_markdown" else monitor,
+        safe_action=monitor,
+    )
 
     tool_sources = tuple(
         SourceRef.tool(execution.name)
@@ -454,6 +589,25 @@ def _build_result(
     decision_payload["scenario_id"] = _GOLDEN_SCENARIO_ID
     decision_payload["role"] = "store_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=str(action_type),
+        override_applied=gate_override,
+    )
+    markdown_sim = _tool_result(critic_run.tool_calls, "simulate_markdown")
+    predicted_units = _decimal_from_tool_field(markdown_sim, "markdown_units_sold")
+    if predicted_units is not None:
+        expected_outcome: dict[str, Any] = {"predicted_sell_through_units": int(predicted_units)}
+        incremental_profit = markdown_sim.get("incremental_profit")
+        if isinstance(incremental_profit, dict) and "minor_units" in incremental_profit:
+            # `/mlops`'s decision-economics dashboard (`_attach_decision_governance`) only
+            # ever reads `incremental_profit_minor_units` - a decision missing it always
+            # displayed "R0.00 recovered" for a real, successful markdown, independent of
+            # (and undetected by) the learning-store fix above, which reads a different key.
+            expected_outcome["incremental_profit_minor_units"] = int(
+                incremental_profit["minor_units"]
+            )
+        decision_payload["expected_outcome"] = expected_outcome
 
     return {
         "correlation_id": correlation_id,
@@ -469,6 +623,7 @@ def _build_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }
 
 
@@ -482,6 +637,7 @@ def run_procurement_cascade_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Run the procurement reorder/supplier decision through real Gemma tool calls."""
     return _scope_result(
@@ -495,6 +651,7 @@ def run_procurement_cascade_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -511,6 +668,7 @@ async def _run_procurement(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
     tenant_id = _tenant_id(event)
@@ -558,7 +716,9 @@ async def _run_procurement(
             correlation_id=correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -576,17 +736,27 @@ async def _run_procurement(
             user=(
                 f"SKU {sku} ({product}). Critic verdict: passed={critic_answer['critic_passed']}, "
                 f"supplier={critic_answer['supplier_id']!r}, "
-                f"conclusion={critic_answer['conclusion']!r}. Decide the routing action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Decide the routing action."
             ),
             final_schema=_PROCUREMENT_EXECUTIVE_SCHEMA,
             final_schema_name="procurement_executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic procurement cascade failed: {exc}") from exc
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic procurement cascade could not finish inside the response "
+            f"deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
 
     return _build_procurement_result(
         event=event,
@@ -622,7 +792,11 @@ def _build_procurement_result(
         RiskTier.MEDIUM,
     )
     monitor = _monitor_action(scenario_sku)
-    routed_action = reorder if action_type == "reorder" else monitor
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=reorder if action_type == "reorder" else monitor,
+        safe_action=monitor,
+    )
 
     tool_sources = tuple(
         SourceRef.tool(execution.name)
@@ -679,6 +853,24 @@ def _build_procurement_result(
     decision_payload["scenario_id"] = _PROCUREMENT_SCENARIO_ID
     decision_payload["role"] = "procurement_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=str(action_type),
+        override_applied=gate_override,
+    )
+    reorder_policy = _tool_result(critic_run.tool_calls, "get_reorder_policy")
+    stockout_exposure = _decimal_from_tool_field(reorder_policy, "stockout_exposure_minor_units")
+    if stockout_exposure is not None:
+        # Procurement decisions had no learning-metric route at all (not degraded, entirely
+        # absent) - approving a reorder never built organizational memory or showed real
+        # recovered value on the `/mlops` economics dashboard, so the app could never
+        # legitimately claim continuous learning for procurement, one of the store
+        # positions the product is required to cover for real, not as a demo slice.
+        exposure_minor_units = int(stockout_exposure)
+        decision_payload["expected_outcome"] = {
+            "stockout_exposure_minor_units": exposure_minor_units,
+            "incremental_profit_minor_units": exposure_minor_units,
+        }
 
     return {
         "correlation_id": correlation_id,
@@ -694,6 +886,7 @@ def _build_procurement_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }
 
 
@@ -707,6 +900,7 @@ def run_sales_cascade_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Run the POS price-integrity verdict through real Gemma tool calls."""
     return _scope_result(
@@ -720,6 +914,7 @@ def run_sales_cascade_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -736,6 +931,7 @@ async def _run_sales(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
     tenant_id = _tenant_id(event)
@@ -787,7 +983,9 @@ async def _run_sales(
             correlation_id=correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -804,17 +1002,26 @@ async def _run_sales(
             ),
             user=(
                 f"SKU {sku} ({product}). Critic verdict: passed={critic_answer['critic_passed']}, "
-                f"conclusion={critic_answer['conclusion']!r}. Decide the routing action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Decide the routing action."
             ),
             final_schema=_SALES_EXECUTIVE_SCHEMA,
             final_schema_name="sales_executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic sales cascade failed: {exc}") from exc
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic sales cascade could not finish inside the response deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
 
     return _build_sales_result(
         event=event,
@@ -847,7 +1054,13 @@ def _build_sales_result(
     review_exception = RecommendedAction(
         "review_price_exception", {"sku": scenario_sku}, RiskTier.MEDIUM
     )
-    routed_action = record_sale if action_type == "record_sale" else review_exception
+    # Safe direction here is escalation to a human: a failed price-integrity critic must
+    # never be waved through as a clean recorded sale by the executive.
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=record_sale if action_type == "record_sale" else review_exception,
+        safe_action=review_exception,
+    )
 
     tool_sources = tuple(
         SourceRef.tool(execution.name)
@@ -904,6 +1117,25 @@ def _build_sales_result(
     decision_payload["scenario_id"] = _SALES_SCENARIO_ID
     decision_payload["role"] = "sales_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "review_required"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=str(action_type),
+        override_applied=gate_override,
+    )
+    price_check = _tool_result(critic_run.tool_calls, "check_price_integrity")
+    price_delta = _decimal_from_tool_field(price_check, "price_delta")
+    # Key economics off the FINAL routed action, not the executive's raw answer - the
+    # critic gate can turn an executive "record_sale" into a review_price_exception, and
+    # that overridden decision still carries real revenue exposure.
+    if price_delta is not None and routed_action.type != "record_sale":
+        exposure_minor_units = int((abs(price_delta) * 100).to_integral_value())
+        # `/mlops`'s decision-economics dashboard reads only `incremental_profit_minor_units`
+        # - without it every agentic price exception displayed "R0.00 recovered" regardless
+        # of the learning-store fix above, which reads a different key.
+        decision_payload["expected_outcome"] = {
+            "revenue_exposure_minor_units": exposure_minor_units,
+            "incremental_profit_minor_units": exposure_minor_units,
+        }
 
     return {
         "correlation_id": correlation_id,
@@ -919,6 +1151,7 @@ def _build_sales_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }
 
 
@@ -932,6 +1165,7 @@ def run_catalog_price_check_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Run a POS price-outlier event through real Gemma tool calls."""
     return _scope_result(
@@ -945,6 +1179,7 @@ def run_catalog_price_check_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -961,6 +1196,7 @@ async def _run_catalog_price_check(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     payload = event.payload
     try:
@@ -1025,7 +1261,9 @@ async def _run_catalog_price_check(
             correlation_id=event.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -1045,17 +1283,26 @@ async def _run_catalog_price_check(
             user=(
                 f"SKU {sku} ({scenario.product_name}). Critic verdict: "
                 f"passed={critic_answer['critic_passed']}, "
-                f"conclusion={critic_answer['conclusion']!r}. Route the guardrail action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Route the guardrail action."
             ),
             final_schema=_SALES_EXECUTIVE_SCHEMA,
             final_schema_name="catalog_price_executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
         if executive_answer["recommended_action_type"] != "review_price_exception":
             raise AgenticCascadeError("catalog price outlier was downgraded by executive agent")
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic catalog-price cascade could not finish before the deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic catalog-price guardrail failed: {exc}") from exc
 
@@ -1153,6 +1400,13 @@ def _build_catalog_price_check_result(
     decision_payload["scenario_id"] = _PRICE_OUTLIER_SCENARIO_ID
     decision_payload["role"] = "sales_manager"
     decision_payload["critic_verdict"] = "review_required"
+    price_exposure_minor_units = int((abs(observed - catalog) * units * 100).to_integral_value())
+    decision_payload["expected_outcome"] = {
+        "revenue_exposure_minor_units": price_exposure_minor_units,
+        # `/mlops`'s decision-economics dashboard reads only `incremental_profit_minor_units`
+        # - without it this displayed "R0.00 recovered" regardless of the learning-store fix.
+        "incremental_profit_minor_units": price_exposure_minor_units,
+    }
 
     return {
         "correlation_id": event.correlation_id,
@@ -1168,6 +1422,7 @@ def _build_catalog_price_check_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }
 
 
@@ -1181,6 +1436,7 @@ def run_expiry_risk_check_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Run an imminent-expiry event through real Gemma tool calls."""
     return _scope_result(
@@ -1194,6 +1450,7 @@ def run_expiry_risk_check_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -1210,6 +1467,7 @@ async def _run_expiry_risk_check(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     payload = event.payload
     try:
@@ -1265,7 +1523,10 @@ async def _run_expiry_risk_check(
             correlation_id=event.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            required_tool_names=("get_expiry_risk",),
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -1285,17 +1546,26 @@ async def _run_expiry_risk_check(
             user=(
                 f"Batch {batch_id}, SKU {sku}. Critic verdict: "
                 f"passed={critic_answer['critic_passed']}, "
-                f"conclusion={critic_answer['conclusion']!r}. Route the guardrail action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Route the guardrail action."
             ),
             final_schema=_EXPIRY_EXECUTIVE_SCHEMA,
             final_schema_name="expiry_executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=tenant_id,
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
         if executive_answer["recommended_action_type"] != "review_expiry_markdown":
             raise AgenticCascadeError("expiry risk event was downgraded by executive agent")
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic expiry cascade could not finish inside the response deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic expiry guardrail failed: {exc}") from exc
 
@@ -1382,10 +1652,17 @@ def _build_expiry_risk_check_result(
     decision_payload["scenario_id"] = _EXPIRY_SCENARIO_ID
     decision_payload["role"] = "inventory_manager"
     decision_payload["critic_verdict"] = "review_required"
-    decision_payload["expected_outcome"] = {
+    expected_outcome: dict[str, Any] = {
         "days_to_expiry": days_to_expiry,
         "batch_id": batch_id,
     }
+    expiry_risk = _tool_result(critic_run.tool_calls, "get_expiry_risk")
+    zar_at_risk = expiry_risk.get("zar_at_risk")
+    if isinstance(zar_at_risk, dict) and "minor_units" in zar_at_risk:
+        # `/mlops`'s decision-economics dashboard reads only `incremental_profit_minor_units`
+        # - without it every agentic expiry review displayed "R0.00 recovered".
+        expected_outcome["incremental_profit_minor_units"] = int(zar_at_risk["minor_units"])
+    decision_payload["expected_outcome"] = expected_outcome
 
     return {
         "correlation_id": event.correlation_id,
@@ -1401,6 +1678,7 @@ def _build_expiry_risk_check_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }
 
 
@@ -1414,6 +1692,7 @@ def run_cold_chain_cascade_via_agents(
     orchestrator_factory: Any = None,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Run the cold-chain facilities-escalation verdict through real Gemma tool calls."""
     return _scope_result(
@@ -1427,6 +1706,7 @@ def run_cold_chain_cascade_via_agents(
                 orchestrator_factory=orchestrator_factory,
                 audit=audit,
                 model_run_recorder=model_run_recorder,
+                deadline=deadline,
             )
         ),
         event,
@@ -1443,6 +1723,7 @@ async def _run_cold_chain(
     orchestrator_factory: Any,
     audit: AuditLog | None = None,
     model_run_recorder: RunRecorder | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     resolved_facts = facts or _default_facts()
     payload = event.payload if event is not None else {}
@@ -1496,7 +1777,10 @@ async def _run_cold_chain(
             correlation_id=correlation_id,
             tenant_id=_tenant_id(event),
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
             require_tool_call_first=True,
+            required_tool_names=("get_cold_chain_status",),
+            deadline=deadline,
         )
         critic_answer = critic_run.answer
         assert_conclusion_grounded_in_tool_results(
@@ -1513,21 +1797,31 @@ async def _run_cold_chain(
             ),
             user=(
                 f"{asset_id}. Critic verdict: passed={critic_answer['critic_passed']}, "
-                f"conclusion={critic_answer['conclusion']!r}. Decide the routing action."
+                f"conclusion={_bounded_conclusion(str(critic_answer['conclusion']))!r}. "
+                "Decide the routing action."
             ),
             final_schema=_COLD_CHAIN_EXECUTIVE_SCHEMA,
             final_schema_name="cold_chain_executive_verdict",
             correlation_id=critic_run.correlation_id,
             tenant_id=_tenant_id(event),
             temperature=0.0,
+            max_tokens=_EXECUTIVE_VERDICT_MAX_TOKENS,
+            deadline=deadline,
         )
         executive_answer = executive_run.answer
+    except CascadeDeadlineExceeded as exc:
+        raise AgenticCascadeDeadlineError(
+            f"live agentic cold-chain cascade could not finish inside the response deadline: {exc}",
+            completed_model_calls=exc.completed_model_calls,
+            elapsed_ms=exc.elapsed_ms,
+        ) from exc
     except (AgentOrchestrationError, ToolCallingError) as exc:
         raise AgenticCascadeError(f"live agentic cold-chain cascade failed: {exc}") from exc
 
     return _build_cold_chain_result(
         event=event,
         asset_id=asset_id,
+        stock_at_risk_minor_units=(scenario.unit_price * scenario.units_on_hand).minor_units,
         critic_run=critic_run,
         critic_answer=critic_answer,
         executive_run=executive_run,
@@ -1539,6 +1833,7 @@ def _build_cold_chain_result(
     *,
     event: Event | None,
     asset_id: str,
+    stock_at_risk_minor_units: int,
     critic_run: AgentRunResult,
     critic_answer: dict[str, Any],
     executive_run: AgentRunResult,
@@ -1553,7 +1848,11 @@ def _build_cold_chain_result(
         "dispatch_facilities_check", {"asset_id": asset_id}, RiskTier.HIGH
     )
     monitor = RecommendedAction("monitor_cold_chain", {"asset_id": asset_id}, RiskTier.LOW)
-    routed_action = dispatch if action_type == "dispatch_facilities_check" else monitor
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=dispatch if action_type == "dispatch_facilities_check" else monitor,
+        safe_action=monitor,
+    )
 
     tool_sources = tuple(
         SourceRef.tool(execution.name)
@@ -1610,6 +1909,17 @@ def _build_cold_chain_result(
     decision_payload["scenario_id"] = _COLD_CHAIN_SCENARIO_ID
     decision_payload["role"] = "facilities_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=str(action_type),
+        override_applied=gate_override,
+    )
+    decision_payload["expected_outcome"] = {
+        "stock_at_risk_minor_units": stock_at_risk_minor_units,
+        # `/mlops`'s decision-economics dashboard reads only `incremental_profit_minor_units`
+        # - without it every agentic cold-chain dispatch displayed "R0.00 recovered".
+        "incremental_profit_minor_units": stock_at_risk_minor_units,
+    }
 
     return {
         "correlation_id": correlation_id,
@@ -1625,4 +1935,5 @@ def _build_cold_chain_result(
             for call in (*critic_run.tool_calls, *executive_run.tool_calls)
         ],
         "inference": load_inference_config().to_public_dict(),
+        "token_budget": _token_budget(critic_run, executive_run),
     }

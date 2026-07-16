@@ -1,0 +1,4 @@
+{"agentic": {"max_ms": 24919, "over_29s": 0, "p50_ms": 15409, "p95_ms": 24919, "requests": 5, "statuses": {"200": 5}}, "chat": {"max_ms": 11613, "over_29s": 0, "p50_ms": 6975, "p95_ms": 11613, "requests": 5, "statuses": {"200": 2, "503": 3}}, "users": 1}
+{"agentic": {"max_ms": 28190, "over_29s": 0, "p50_ms": 18853, "p95_ms": 28163, "requests": 18, "statuses": {"200": 18}}, "chat": {"max_ms": 16233, "over_29s": 0, "p50_ms": 6619, "p95_ms": 14462, "requests": 20, "statuses": {"200": 7, "503": 13}}, "users": 4}
+{"agentic": {"max_ms": 29029, "over_29s": 4, "p50_ms": 22268, "p95_ms": 29009, "requests": 26, "statuses": {"200": 17, "503": 5, "504": 4}}, "chat": {"max_ms": 20838, "over_29s": 0, "p50_ms": 12418, "p95_ms": 17987, "requests": 32, "statuses": {"200": 14, "503": 18}}, "users": 8}
+D3 DONE

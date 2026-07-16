@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
+from shelfwise_backend.state import cascade_worker
 
 
 def _event(exception_type: str, **extra: object) -> dict[str, object]:
@@ -102,7 +106,7 @@ def test_invalid_inventory_exceptions_fail_before_persistence(
 def test_inventory_exception_demo_registers_trace_and_approval_task() -> None:
     client = TestClient(app)
 
-    response = client.post("/demo/inventory-exception")
+    response = client.post("/scenarios/inventory-exception")
     body = response.json()
     decision_id = body["decision"]["id"]
     trace = client.get(f"/trace/{body['correlation_id']}")
@@ -132,6 +136,85 @@ def test_inventory_exception_demo_registers_trace_and_approval_task() -> None:
         "source_reference"
     ]
     assert replayed.json()["task"] == completed.json()["task"]
+
+
+def test_inventory_exception_demo_waits_for_the_real_async_worker(monkeypatch) -> None:
+    """Real production topology (`WORKER_ENABLED=true`) defers cascade computation to the
+    async worker queue - before this fix, `/scenarios/inventory-exception` treated that correct
+    async behavior as a hard 500. The route must wait for the worker - which really does
+    process the event on its own thread here - and return the decision it actually produces.
+    """
+    monkeypatch.setenv("WORKER_ENABLED", "true")
+    client = TestClient(app)
+    stop = threading.Event()
+
+    def drive_worker() -> None:
+        while not stop.is_set():
+            cascade_worker.process_one()
+            time.sleep(0.02)
+
+    worker_thread = threading.Thread(target=drive_worker, daemon=True)
+    worker_thread.start()
+    try:
+        response = client.post("/scenarios/inventory-exception")
+    finally:
+        stop.set()
+        worker_thread.join(timeout=5)
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    assert decision["action"]["type"] == "investigate_shrink"
+    assert decision["status"] == "pending"
+
+
+def test_inventory_exception_demo_resubmission_looks_up_existing_decision(
+    monkeypatch,
+) -> None:
+    """A repeat drill click resubmits the same deterministic event id. Under the real async
+    worker, the second submission's own `_record_pipeline_event` call returns
+    `status: "duplicate", cascade: None` - the route must look up the decision the worker
+    already produced for the first submission, not treat a legitimate idempotent
+    resubmission as a timeout or a failure. (Root cause of the original bug: `Event.ts` was
+    generated fresh via `datetime.now(UTC)` on every call despite the id being deterministic,
+    so the resubmission's differing timestamp tripped a 409 "different content" instead of
+    being recognized as the same event.)
+    """
+    monkeypatch.setenv("WORKER_ENABLED", "true")
+    client = TestClient(app)
+    scope = "resubmission-probe"
+    stop = threading.Event()
+
+    def drive_worker() -> None:
+        while not stop.is_set():
+            cascade_worker.process_one()
+            time.sleep(0.02)
+
+    worker_thread = threading.Thread(target=drive_worker, daemon=True)
+    worker_thread.start()
+    try:
+        first = client.post("/scenarios/inventory-exception", params={"run_scope": scope})
+    finally:
+        stop.set()
+        worker_thread.join(timeout=5)
+
+    assert first.status_code == 200
+    first_decision_id = first.json()["decision"]["id"]
+
+    second = client.post("/scenarios/inventory-exception", params={"run_scope": scope})
+
+    assert second.status_code == 200
+    assert second.json()["decision"]["id"] == first_decision_id
+
+
+def test_inventory_exception_demo_run_scopes_do_not_collide() -> None:
+    client = TestClient(app)
+
+    first = client.post("/scenarios/inventory-exception", params={"run_scope": "campaign-a"})
+    second = client.post("/scenarios/inventory-exception", params={"run_scope": "campaign-b"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["decision"]["id"] != second.json()["decision"]["id"]
 
 
 def test_completed_relocation_updates_physical_position_ledger() -> None:

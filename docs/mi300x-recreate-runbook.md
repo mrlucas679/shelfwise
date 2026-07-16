@@ -125,22 +125,70 @@ PYTHONPATH=src python -m shelfwise_benchmark.cli --validate-config
 # expected: valid workflow=shelfwise_eleven_role_cascade agents=11 strategies=4 kinds=[shared, replicated, per_agent, hybrid]
 ```
 
+## Request-Deadline Semantics (operator note)
+
+The backend's `enforce_request_deadline` middleware bounds every HTTP request at
+`SHELFWISE_REQUEST_TIMEOUT_SECONDS` (default 120s) and returns a 504 when exceeded. Two
+properties an operator must know:
+
+- **The 504 cancels the wait, not the work.** Synchronous route handlers run on a thread
+  pool; `asyncio.wait_for` cancels the awaiting coroutine, but the worker thread keeps
+  running to completion in the background. Store writes are individually transactional and
+  idempotent (scenario-stable decision IDs, `ON CONFLICT` learning inserts), so the
+  finished-late work lands consistently rather than corrupting state - but CPU/DB capacity
+  is still consumed. A burst of 504s under load therefore does NOT mean the work stopped;
+  check DB/CPU pressure before assuming capacity is free.
+- **The real inference bound lives in the LLM client**, whose per-call budgets
+  (`LLM_TIMEOUT_SECONDS`, per-turn deadline math in the orchestrator) expire earlier and
+  fail closed. The middleware is the outer safety net, not the primary control.
+
 ## Application Shakedown
 
 Run the local ShelfWise backend with MI300X environment values, then run the receipt-driven
 world harness. It fails on route errors, offline answers, chat failures, decision-ID reuse,
 HITL mismatches, and no-op learning.
 
+**Always use a fresh, timestamped `--output-dir` for a real droplet run - never a static name
+like `reports/soak_15m`.** A static name is exactly what produced the pile of
+`reports/soak_final`/`soak_final2`/`soak_final3`/`soak_final4`/`soak_15m_retry`/
+`soak_postfix_final` directories from earlier attempts: every retry after an interruption
+collided with the previous attempt's directory. As of 2026-07-14, a collision now fails fast
+with a clear error instead of silently overwriting the previous run's data (pass
+`--overwrite-artifacts` only if you genuinely want to discard the old run) - but a fresh
+timestamp avoids the question entirely and keeps every attempt's data.
+
+Also as of 2026-07-14, an interrupted run (SSH drop, droplet timeout, Ctrl+C, any unhandled
+exception) still writes a best-effort `manifest.json`/`feature_receipts.json`/etc reflecting
+everything accumulated up to the interruption - only `decision_trail.jsonl`/`cycles.jsonl` used
+to survive a crash before this fix; the summarized report was previously lost entirely.
+
+Run the first 15 minutes and inspect the result before deciding whether to run 30 minutes - do
+not queue both back to back:
+
 ```bash
+RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 python -m shelfwise_eval.full_system \
   --duration-seconds 900 --live-required \
-  --output-dir reports/soak_15m \
-  --run-id mi300x_live_15m
+  --output-dir "reports/soak_15m_${RUN_STAMP}" \
+  --run-id "mi300x_live_15m_${RUN_STAMP}"
 ```
 
-The known-good 15-minute run produced 20 feature receipts, 14,341 route receipts, 158 live
-model chat answers, 1,520 unique decisions, zero HITL mismatches, and 381 expected learning
-movements.
+Inspect `reports/soak_15m_${RUN_STAMP}/manifest.json`'s `passed`/`failures`/`totals` fields (or
+run `python scripts/validate_full_system_artifact.py "reports/soak_15m_${RUN_STAMP}"`) before
+deciding to continue. Only once that looks right, run the 30-minute follow-up with its own fresh
+timestamp:
+
+```bash
+RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+python -m shelfwise_eval.full_system \
+  --duration-seconds 1800 --live-required \
+  --output-dir "reports/soak_30m_${RUN_STAMP}" \
+  --run-id "mi300x_live_30m_${RUN_STAMP}"
+```
+
+The known-good 15-minute run (`reports/soak_15min_20260711T042648Z/`) produced 20 feature
+receipts, 14,341 route receipts, 158 live model chat answers, 1,520 unique decisions, zero HITL
+mismatches, and 381 expected learning movements - use that as the rough shape of a healthy run.
 
 ## Training Boundary
 

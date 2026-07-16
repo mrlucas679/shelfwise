@@ -32,7 +32,8 @@ class InMemoryDecisionStore:
             if existing and existing.get("status") in {"approved", "rejected"}:
                 return deepcopy(existing)
 
-            record = deepcopy(decision)
+            record = deepcopy(existing or {})
+            record.update(deepcopy(decision))
             record.setdefault("data_domain", "world_simulation")
             record.setdefault("created_at", _now())
             record.setdefault("updated_at", record["created_at"])
@@ -115,13 +116,22 @@ class PostgresDecisionStore:
         if existing and existing.get("status") in {"approved", "rejected"}:
             return existing
 
-        record = deepcopy(decision)
+        record = deepcopy(existing or {})
+        record.update(deepcopy(decision))
         record.setdefault("data_domain", "world_simulation")
         tenant_id = _tenant_id(record)
         record.setdefault("created_at", _now())
         record.setdefault("updated_at", record["created_at"])
         record.setdefault("review", None)
-        with self._connect() as conn:
+        # Bind the RLS session to the record's own tenant, not whatever tenant (if any)
+        # happens to be ambient on the calling context. The async worker already binds
+        # per-event before calling upsert(), but the synchronous cascade fallback (used
+        # whenever WORKER_ENABLED is off) has no such binding, so an unbound or
+        # differently-scoped caller would otherwise have this write rejected outright by
+        # the tenant_id RLS policy (found 2026-07-15 by running the real store against a
+        # real least-privilege Postgres role instead of the always-permissive in-memory
+        # fake).
+        with self._connect(tenant_id) as conn:
             conn.execute(
                 """
                 insert into shelfwise_decisions
@@ -201,7 +211,28 @@ class PostgresDecisionStore:
             "status": status,
             "reviewed_at": updated["updated_at"],
         }
-        return self._save_payload(decision_id, updated)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                update shelfwise_decisions
+                set status = %s,
+                    payload = %s,
+                    updated_at = %s
+                where id = %s and status = 'pending'
+                returning payload
+                """,
+                (
+                    status,
+                    jsonb(updated),
+                    updated["updated_at"],
+                    decision_id,
+                ),
+            ).fetchone()
+            conn.commit()
+        if row is not None:
+            payload = row["payload"]
+            return deepcopy(payload if isinstance(payload, dict) else updated)
+        return self.get(decision_id)
 
     def _save_payload(self, decision_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self._connect() as conn:
@@ -271,8 +302,8 @@ class PostgresDecisionStore:
             apply_tenant_rls(conn, ("shelfwise_decisions",))
             conn.commit()
 
-    def _connect(self) -> Any:
-        return connect(self._database_url)
+    def _connect(self, tenant_id: str | None = None) -> Any:
+        return connect(self._database_url, tenant_id=tenant_id)
 
 
 def create_decision_store() -> InMemoryDecisionStore | PostgresDecisionStore:

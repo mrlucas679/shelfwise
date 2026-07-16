@@ -1,0 +1,24 @@
+{
+  "breaking_point_users": null,
+  "generated_at": "2026-07-14T22:13:44.761805+00:00",
+  "schema_version": "phase-c-ramp/v1",
+  "steps": [
+    {
+      "duration_seconds": 61.61,
+      "max_ms": 11422.75,
+      "p50_ms": 943.42,
+      "p95_ms": 3747.11,
+      "p99_ms": 8805.01,
+      "requests": 5563,
+      "requests_per_second": 90.29,
+      "server_errors": 0,
+      "status_counts": {
+        "200": 590,
+        "429": 4973
+      },
+      "transport_errors": 0,
+      "users": 128
+    }
+  ],
+  "verdict": "NO_BREAK_UP_TO_MAX_STEP"
+}

@@ -47,6 +47,17 @@ class InMemoryEventStore:
         with self._lock:
             return (tenant_id, _domain(data_domain), event_id) in self._published
 
+    def get(
+        self,
+        event_id: str,
+        *,
+        tenant_id: str,
+        data_domain: DataDomain | str,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._events.get((tenant_id, _domain(data_domain), event_id))
+        return deepcopy(row) if row is not None else None
+
     def mark_published(
         self,
         event_id: str,
@@ -130,6 +141,22 @@ class PostgresEventStore:
                 (tenant_id, resolved_domain, event_id),
             ).fetchone()
         return bool(row and row["published"])
+
+    def get(
+        self,
+        event_id: str,
+        *,
+        tenant_id: str,
+        data_domain: DataDomain | str,
+    ) -> dict[str, Any] | None:
+        resolved_domain = _domain(data_domain)
+        with self._connect(tenant_id) as conn:
+            row = conn.execute(
+                """select payload from shelfwise_events
+                   where tenant_id = %s and data_domain = %s and id = %s""",
+                (tenant_id, resolved_domain, event_id),
+            ).fetchone()
+        return deepcopy(row["payload"]) if row else None
 
     def mark_published(
         self,

@@ -104,6 +104,17 @@ class InMemoryLearningStore:
             self._events_by_decision[event_key] = event
             return event.to_dict()
 
+    def record_rejected_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        """Record a terminal rejection without moving an approval-derived threshold."""
+        event = _build_rejection_event(decision)
+        with self._lock:
+            key = (event.tenant_id, event.data_domain, event.decision_id)
+            existing = self._events_by_decision.get(key)
+            if existing is not None:
+                return existing.to_dict()
+            self._events_by_decision[key] = event
+        return event.to_dict()
+
 
 class PostgresLearningStore:
     """Postgres-backed learning store for approved outcomes and threshold memory."""
@@ -221,16 +232,75 @@ class PostgresLearningStore:
                     event.created_at,
                 ),
             )
-            conn.execute(
+            # Two concurrent approvals of the same decision can both pass the
+            # existing-event check above (the decision-store transition lets the loser
+            # through with the already-approved record), so the insert must absorb the
+            # race at the database level instead of surfacing a unique-violation 500 to
+            # a client whose approval actually succeeded. Both racers compute an
+            # identical event from the same previous_threshold, so returning the
+            # winner's persisted row is exact, not approximate.
+            inserted = conn.execute(
                 """
                 insert into shelfwise_learning_events
                     (tenant_id, data_domain, decision_id, payload, created_at)
                 values (%s, %s, %s, %s, %s)
+                on conflict (tenant_id, data_domain, decision_id) do nothing
+                returning payload
                 """,
                 (tenant_id, data_domain, event.decision_id, jsonb(payload), event.created_at),
-            )
+            ).fetchone()
+            if inserted is None:
+                winner = conn.execute(
+                    """
+                    select payload
+                    from shelfwise_learning_events
+                    where tenant_id = %s and data_domain = %s and decision_id = %s
+                    """,
+                    (tenant_id, data_domain, event.decision_id),
+                ).fetchone()
+                conn.commit()
+                return deepcopy(winner["payload"]) if winner else payload
             conn.commit()
             return payload
+
+    def record_rejected_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        """Persist a terminal rejection outcome while leaving thresholds unchanged."""
+        event = _build_rejection_event(decision)
+        payload = event.to_dict()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """select payload from shelfwise_learning_events
+                   where tenant_id = %s and data_domain = %s and decision_id = %s""",
+                (event.tenant_id, event.data_domain, event.decision_id),
+            ).fetchone()
+            if existing is not None:
+                return deepcopy(existing["payload"])
+            # Same double-submit race as record_approved_decision: absorb the conflict
+            # in the database rather than 500ing the losing (but equally valid) caller.
+            inserted = conn.execute(
+                """insert into shelfwise_learning_events
+                   (tenant_id, data_domain, decision_id, payload, created_at)
+                   values (%s, %s, %s, %s, %s)
+                   on conflict (tenant_id, data_domain, decision_id) do nothing
+                   returning payload""",
+                (
+                    event.tenant_id,
+                    event.data_domain,
+                    event.decision_id,
+                    jsonb(payload),
+                    event.created_at,
+                ),
+            ).fetchone()
+            if inserted is None:
+                winner = conn.execute(
+                    """select payload from shelfwise_learning_events
+                       where tenant_id = %s and data_domain = %s and decision_id = %s""",
+                    (event.tenant_id, event.data_domain, event.decision_id),
+                ).fetchone()
+                conn.commit()
+                return deepcopy(winner["payload"]) if winner else payload
+            conn.commit()
+        return payload
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -353,6 +423,9 @@ def _routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
     if action_type == "review_expiry_markdown":
         sku = str(params.get("sku") or "unknown")
         return f"{sku}:expiry_review_days_to_expiry", sku
+    if action_type == "reorder":
+        sku = str(params.get("sku") or "unknown")
+        return f"{sku}:reorder_stockout_exposure_minor_units", sku
     sku = str(params.get("sku") or "unknown")
     return f"{sku}:markdown_sell_through_target_units", sku
 
@@ -476,7 +549,54 @@ def _build_learning_event(
             metric=metric,
             subject=subject,
         )
+    if action_type == "reorder":
+        # Procurement decisions had no learning-metric route at all (not degraded, entirely
+        # absent) in both the deterministic and agentic cascades - approving a reorder never
+        # built organizational memory, so the app could never legitimately claim continuous
+        # learning for procurement, one of the store positions the product is required to
+        # cover for real, not as a demo slice. `stockout_exposure_minor_units` is the
+        # deterministic cascade's existing real field (money at risk of stockout, avoided by
+        # reordering) - reused here rather than inventing a new one, so both paths agree.
+        return _exposure_event(
+            decision,
+            previous_threshold=previous_threshold,
+            metric=metric,
+            subject=subject,
+            exposure_keys=(
+                "stockout_exposure_minor_units",
+                "incremental_profit_minor_units",
+            ),
+            label="Reorder stockout exposure avoided",
+        )
     return _markdown_learning_event(decision, previous_threshold=previous_threshold)
+
+
+def _build_rejection_event(decision: dict[str, Any]) -> LearningEvent:
+    if decision.get("status") != "rejected":
+        raise ValueError("rejection learning requires a rejected decision")
+    decision_id = str(decision.get("id") or "")
+    if not decision_id:
+        raise ValueError("decision must include id")
+    action = decision.get("action") if isinstance(decision.get("action"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    subject = str(params.get("sku") or params.get("site_id") or "unknown")
+    return LearningEvent(
+        id=f"learn_{decision_id.removeprefix('dec_')}",
+        decision_id=decision_id,
+        sku=subject,
+        metric=f"{subject}:rejection_outcome",
+        previous_threshold=0,
+        updated_threshold=0,
+        delta_units=0,
+        outcome={
+            "decision_status": "rejected",
+            "action_prevented": str(action.get("type") or "unknown"),
+        },
+        message=f"Rejected {action.get('type') or 'unknown'} for {subject}; no write-back created.",
+        created_at=datetime.now(UTC).isoformat(),
+        tenant_id=_tenant_id(decision),
+        data_domain=_data_domain(decision),
+    )
 
 
 def _markdown_learning_event(

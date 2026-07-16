@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from shelfwise_action.store import PostgresDecisionStore
+from shelfwise_backend.candidate_history import PostgresCandidateHistoryStore
 from shelfwise_backend.candidate_store import PostgresCandidateStore
 from shelfwise_backend.chat_store import PostgresChatConversationStore
 from shelfwise_backend.event_store import PostgresEventStore
 from shelfwise_backend.open_orders import PostgresOpenOrderStore
 from shelfwise_backend.worker.journal import PostgresJournal
 from shelfwise_catalog.store import PostgresProductCatalogStore
+from shelfwise_connectors import PostgresCursorStore, SourceSystem
 from shelfwise_connectors.inbound_store import PostgresInboundRecordStore
 from shelfwise_connectors.writeback import PostgresTaskWriteBackSink
 from shelfwise_inventory.store import PostgresInventoryPositionStore
@@ -52,6 +55,17 @@ def test_central_schema_supports_every_postgres_store(
     try:
         assert PostgresDecisionStore(_DATABASE_URL).list() == []
         assert PostgresCandidateStore(_DATABASE_URL).list(_TENANT_ID) == []
+        assert (
+            PostgresCandidateHistoryStore(_DATABASE_URL).list(_TENANT_ID, "schema-candidate")
+            == []
+        )
+        cursor_store = PostgresCursorStore(_DATABASE_URL)
+        assert (
+            asyncio.run(
+                cursor_store.get(tenant_id=_TENANT_ID, system=SourceSystem.SAP)
+            )
+            is None
+        )
         assert PostgresChatConversationStore(_DATABASE_URL).list(
             tenant_id=_TENANT_ID,
             user_id="schema-user",
@@ -74,6 +88,7 @@ def test_central_schema_supports_every_postgres_store(
         assert PostgresInboundRecordStore(_DATABASE_URL).list(
             tenant_id=_TENANT_ID
         ) == []
+        _assert_inbound_record_write_path_matches_schema()
         assert PostgresTaskWriteBackSink(_DATABASE_URL).list(
             tenant_id=_TENANT_ID,
             data_domain="operational_twin",
@@ -118,6 +133,51 @@ def test_central_schema_supports_every_postgres_store(
         assert PostgresOnboardingManifestRegistry(_DATABASE_URL).get(
             _TENANT_ID, "schema-store"
         ) is None
+    finally:
+        reset_tenant_context(token)
+
+
+def _assert_inbound_record_write_path_matches_schema() -> None:
+    """Exercise the INSERT ... ON CONFLICT path, not just list().
+
+    The 2026-07-14 Phase C break campaign found this exact write 500ing in production
+    (`InvalidColumnReference`: the ON CONFLICT column list had no matching unique
+    constraint) while every read-path check stayed green. A per-run tenant keeps reruns
+    from tripping this file's empty-list assertions for the fixed contract tenant.
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from shelfwise_connectors import SourceSystem as _SourceSystem
+    from shelfwise_connectors.provenance import InboundRecord
+
+    store = PostgresInboundRecordStore(_DATABASE_URL)
+    tenant_id = f"schema_contract_write_{uuid4().hex[:10]}"
+    token = bind_tenant_context(tenant_id)
+    try:
+        shared_payload = {"order_id": "ord_schema", "lines": [{"sku": "4011"}, {"sku": "4012"}]}
+
+        def _line(source_object_id: str) -> InboundRecord:
+            return InboundRecord(
+                tenant_id=tenant_id,
+                source_system=_SourceSystem.SHOPIFY,
+                source_object_type="sale",
+                source_object_id=source_object_id,
+                event_time=datetime(2026, 7, 14, 10, 0, tzinfo=UTC),
+                raw_payload=shared_payload,
+                canonical_type="sale",
+                correlation_id="cor_schema_contract",
+            )
+
+        first_is_new, _ = store.record(_line("ord_schema:line_1"))
+        second_is_new, _ = store.record(_line("ord_schema:line_2"))
+        replay_is_new, _ = store.record(_line("ord_schema:line_1"))
+        assert first_is_new is True
+        assert second_is_new is True, (
+            "a second line from the same raw payload must persist - if this fails the "
+            "dedupe key collapsed back to (tenant_id, source_system, raw_payload_hash)"
+        )
+        assert replay_is_new is False, "an exact resend must dedupe, not double-store"
     finally:
         reset_tenant_context(token)
 
@@ -186,3 +246,49 @@ def test_postgres_chat_lock_preserves_concurrent_messages_and_user_scope(
         user_id=user_id,
         conversation_id=conversation_id,
     ) is None
+
+
+def test_concurrent_double_approve_learning_never_500s_and_records_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Race two learning recordings for one approved decision against real Postgres.
+
+    The decision-store transition lets the loser of a double-approve through with the
+    already-approved record, so both callers reach record_approved_decision inside the
+    same race window. Before 2026-07-15 the loser's plain INSERT hit the
+    (tenant_id, data_domain, decision_id) primary key and surfaced a unique-violation
+    500 for an approval that had genuinely succeeded; the insert now absorbs the
+    conflict and returns the winner's row. Both calls must succeed and exactly one
+    learning event may exist.
+    """
+    from uuid import uuid4
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"postgres_learning_race_{uuid4().hex[:10]}"
+    decision = {
+        "id": f"dec_race_{uuid4().hex[:10]}",
+        "tenant_id": tenant_id,
+        "data_domain": "world_simulation",
+        "status": "approved",
+        "action": {"type": "apply_markdown", "params": {"sku": "SKU-RACE", "units": 8}},
+        "expected_outcome": {"incremental_profit_minor_units": 12_345},
+    }
+    store = PostgresLearningStore(_DATABASE_URL)
+
+    def record() -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.record_approved_decision(decision)
+        finally:
+            reset_tenant_context(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: record(), range(2)))
+
+    assert all(result["decision_id"] == decision["id"] for result in results)
+    token = bind_tenant_context(tenant_id)
+    try:
+        events = store.list_events(tenant_id=tenant_id, data_domain="world_simulation")
+    finally:
+        reset_tenant_context(token)
+    assert len([e for e in events if e["decision_id"] == decision["id"]]) == 1

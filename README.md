@@ -73,7 +73,7 @@ happens.
 
 ## Built on AMD (compute-usage proof)
 
-- All agent reasoning — the four agentic cascades (`POST /demo/{golden,procurement,sales,cold-chain}/agentic`)
+- All agent reasoning — the four agentic cascades (`POST /scenarios/{golden,procurement,sales,cold-chain}/agentic`)
   and the agentic `/chat` — executes on an **AMD Instinct MI300X** droplet (AMD Developer
   Cloud) running **vLLM 0.23 on ROCm** with native Gemma tool calling
   (`--enable-auto-tool-choice --tool-call-parser gemma4`). Role routing uses E4B routine on
@@ -253,7 +253,7 @@ Ask the chat anything about the store — it picks its own tools per question:
 Fire a full agentic cascade directly (`live_required` — 503s rather than faking success):
 
 ```bash
-curl -X POST http://localhost:8000/demo/procurement/agentic
+curl -X POST http://localhost:8000/scenarios/procurement/agentic
 ```
 
 Verify any chat answer is genuinely live from the response headers:
@@ -310,11 +310,11 @@ A few endpoints worth knowing by name (used throughout this README):
 | Endpoint | Purpose |
 |---|---|
 | `POST /chat` | Agentic chat — picks its own tools per question |
-| `POST /demo/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
+| `POST /scenarios/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
 | `GET /inference/smoke` | Confirms whether a call is offline, Fireworks, or AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
-| `GET /demo/worldgen-runs` | Digital-twin world simulation runs |
+| `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
 | `GET /twin/stores/{store_id}` · `GET /twin/entities/{twin_id}` | Exact-store topology, current state, and provenance |
 | `GET /twin/observations` · `GET /twin/fidelity` · `POST /twin/observations` | Derived observations, fidelity guards, and tenant-bound intake |
 | `POST /twin/onboarding` · `POST /twin/stores/{store_id}/bootstrap` · `GET /twin/stores/{store_id}/snapshot` | Explicit shop binding, event replay, and deterministic snapshot identity |
@@ -530,9 +530,130 @@ flowchart TB
     HITL --> UI
 ```
 
+**No-footage data path (privacy boundary for the edge camera design above):**
+
+```mermaid
+flowchart LR
+    CAM["Existing camera stream"] --> RAM["Volatile edge ring buffer"]
+    RAM --> PRE["Crop privacy zones, sample, preprocess"]
+    PRE --> AMD["AMD Kria or Versal inference"]
+    AMD --> FUSE["Fuse with planogram, load cell, RFID, POS"]
+    FUSE --> POLICY{"Confidence and policy pass?"}
+    POLICY -->|yes| EVENT["Derived observation event"]
+    POLICY -->|no| UNKNOWN["Unknown / verify task"]
+    EVENT --> SIGN["Sign, sequence, and queue locally"]
+    UNKNOWN --> SIGN
+    SIGN --> TWIN["ShelfWise observation intake"]
+    RAM --> ERASE["Overwrite immediately"]
+    TWIN --> STATE["Store derived facts, provenance, model and device version"]
+```
+
+Raw video/audio never leaves the edge device and is never persisted: only derived,
+policy-checked observations (a shelf-slot facing-count band, a confidence score, a device/model
+version) cross the trust boundary into the twin. See the plan doc's Section 26/27 for the full
+no-footage privacy contract.
+
 Camera/sensor edge hardware (AMD Kria/Versal), the 2D Store Twin UI, and multi-week fidelity
 re-validation are explicitly **not implemented** — see the plan doc's phased roadmap (Phases 0-G)
 for the intended build order before any of it is claimed as working.
+
+### Conversational assistant architecture (design-stage, not yet implemented)
+
+The chat surface today is a 12-message sliding window with no skill registry or progressive tool
+discovery (see `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md` Sections 35-43 for the full gap
+analysis). The target design keeps the existing 11 agents and Critic/Executive/HITL chain as the
+sole owners of any recommendation — the assistant is a conversational surface over them, never a
+replacement decision-maker:
+
+**Preservation strategy — the assistant sits above the existing agents, never replaces them:**
+
+```mermaid
+flowchart TB
+    USER["Manager or associate conversation"] --> ASSIST["Shop Assistant surface"]
+    ASSIST --> DISCOVER["Skill and tool discovery"]
+    ASSIST --> MEMORY["Bounded conversation memory"]
+    ASSIST --> TWIN["Live exact-store twin"]
+
+    DISCOVER --> INV["Inventory"]
+    DISCOVER --> DEM["Demand"]
+    DISCOVER --> EXP["Expiry"]
+    DISCOVER --> OPP["Opportunity"]
+    DISCOVER --> SIM["Simulation"]
+    DISCOVER --> PROC["Procurement"]
+    DISCOVER --> SALES["Sales"]
+    DISCOVER --> COLD["Cold Chain"]
+
+    INV --> CRITIC["Critic"]
+    DEM --> CRITIC
+    EXP --> CRITIC
+    OPP --> CRITIC
+    SIM --> CRITIC
+    PROC --> CRITIC
+    SALES --> CRITIC
+    COLD --> CRITIC
+    CRITIC --> EXEC["Executive"] --> HITL["Human approval"]
+    ORCH["Orchestrator"] --> DISCOVER
+    TWIN --> INV
+    TWIN --> DEM
+    TWIN --> EXP
+    TWIN --> OPP
+    TWIN --> SIM
+    TWIN --> PROC
+    TWIN --> SALES
+    TWIN --> COLD
+```
+
+**Target conversational architecture — dual-model routing, memory, and skill selection:**
+
+```mermaid
+flowchart TB
+    USER["Manager / associate"] --> API["Conversation API and identity"]
+    API --> INTENT["Deterministic intent, entity, time and risk extraction"]
+    INTENT --> ROUTER["Dual-model route policy"]
+    INTENT --> SKILLS["Skill catalogue: search -> inspect -> execute"]
+    INTENT --> MEM["Conversation memory retrieval"]
+    INTENT --> LIVE["Fresh twin/tool retrieval"]
+
+    subgraph Memory["Tenant/user-isolated memory"]
+        RECENT["Recent turns"]
+        PINNED["Pinned objectives and corrections"]
+        EPISODES["Versioned sourced episodes"]
+        TRANSCRIPT["Append-only messages"]
+    end
+
+    MEM --> RECENT
+    MEM --> PINNED
+    MEM --> EPISODES
+    MEM --> TRANSCRIPT
+
+    SKILLS --> TOOLS["Selected read-only tools"]
+    TOOLS --> AGENTS["Existing 11 agents and workflows"]
+    LIVE --> TOOLS
+    LIVE --> AGENTS
+
+    ROUTER --> E4B["E4B routine: simple chat, retrieval, compaction"]
+    ROUTER --> M31["31B strong: conflicts, root cause, scenarios, high risk"]
+    E4B -->|"validated evidence capsule / escalation"| M31
+
+    RECENT --> BUDGET["Token-aware context allocator"]
+    PINNED --> BUDGET
+    EPISODES --> BUDGET
+    TOOLS --> BUDGET
+    BUDGET --> E4B
+    BUDGET --> M31
+
+    E4B --> GROUND["Grounding, coverage and policy validator"]
+    M31 --> GROUND
+    AGENTS --> CRITIC["Existing Critic"] --> EXEC["Existing Executive"] --> HITL["Existing HITL"]
+    GROUND --> ANSWER["Answer with evidence, freshness and uncertainty"]
+    GROUND --> CRITIC
+    ANSWER --> WRITE["Append message, memory candidates and route receipt"]
+    HITL --> WRITE
+```
+
+Neither diagram above is implemented yet — today's chat is a single dual-model role router with a
+12-message window and no skill catalogue or hierarchical memory. See the plan doc's Sections 41-43
+for the implementation-ready code blueprint and phased rollout before either is claimed as built.
 
 ## Inference Strategy
 

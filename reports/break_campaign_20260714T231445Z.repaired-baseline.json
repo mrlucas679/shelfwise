@@ -1,0 +1,389 @@
+{
+  "auth": {
+    "api_key_configured": false,
+    "cookie_name": "shelfwise_session",
+    "cookie_received": true,
+    "mode": "jwt",
+    "session_route_ok": true,
+    "tenant_id": "sa_retail_demo"
+  },
+  "base_url_host": "localhost",
+  "chat": {
+    "calls": 0,
+    "fail_closed_answers": 3,
+    "fallback_answers": 0,
+    "headers": [],
+    "model_answers": 0,
+    "replay_checks": 0,
+    "replay_matches": 0
+  },
+  "cycles_completed": 3,
+  "cycles_requested": 3,
+  "duration_seconds": 24.254,
+  "failures": [
+    "learning_noop:dec_sa_retail_demo_world_simulation_evt_demo_scan_81ae43c69088",
+    "learning_noop:dec_sa_retail_demo_world_simulation_evt_demo_scan_8c18200a2cad"
+  ],
+  "frontend": {
+    "content_type": "text/html",
+    "ok": true,
+    "status_code": 200
+  },
+  "generated_at": "2026-07-14T21:15:10.775034+00:00",
+  "hitl": {
+    "approvals": 2,
+    "observed_decision_ids": [
+      "dec_sa_retail_demo_world_simulation_evt_demo_scan_8c18200a2cad",
+      "dec_sa_retail_demo_world_simulation_evt_demo_scan_09d6907bbfb1",
+      "dec_sa_retail_demo_world_simulation_evt_demo_scan_81ae43c69088"
+    ],
+    "rejections": 1,
+    "tenant_mismatches": 0,
+    "transition_mismatches": [],
+    "unique_decision_ids": true
+  },
+  "learning": {
+    "event_count": 6,
+    "movements": 0,
+    "movements_expected": 0,
+    "route_ok": true
+  },
+  "mode": "short",
+  "probes": [
+    {
+      "elapsed_ms": 27.66,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/health",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2.48,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 5.01,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/auth/session",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 408.61,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/readiness",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2251.8,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2008.99,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_8c18200a2cad/approve",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2238.65,
+      "failure_code": null,
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "elapsed_ms": 2762.03,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 1185.59,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_09d6907bbfb1/reject",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2089.74,
+      "failure_code": null,
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "elapsed_ms": 3030.83,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 1889.77,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_81ae43c69088/approve",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2869.21,
+      "failure_code": null,
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "elapsed_ms": 202.99,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/decisions",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 411.66,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/learning",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 196.03,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/writeback/tasks",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 2451.06,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/mlops/observability",
+      "status_code": 200
+    }
+  ],
+  "readiness": {
+    "amd_demo_ready": true,
+    "auth_mode": "jwt",
+    "event_bus": "RedisStreamsEventBus",
+    "inference_provider": null,
+    "ready": true,
+    "route_ok": true,
+    "storage_backends": [
+      "PostgresDecisionStore",
+      "PostgresLearningStore",
+      "PostgresEventStore",
+      "PostgresJournal",
+      "PostgresTaskWriteBackSink"
+    ]
+  },
+  "routes": [
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/health",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/auth/session",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/readiness",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_8c18200a2cad/approve",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": "route_failure:POST /chat:status=503",
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_09d6907bbfb1/reject",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": "route_failure:POST /chat:status=503",
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/demo/golden",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/decisions/dec_sa_retail_demo_world_simulation_evt_demo_scan_81ae43c69088/approve",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": "route_failure:POST /chat:status=503",
+      "method": "POST",
+      "ok": false,
+      "path": "/chat",
+      "status_code": 503
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/decisions",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/learning",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/writeback/tasks",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/mlops/observability",
+      "status_code": 200
+    }
+  ],
+  "schema_version": "deployment-shakedown/v1",
+  "startup": {
+    "elapsed_seconds": 0.028,
+    "health": true
+  },
+  "verdict": "FAIL",
+  "writeback": {
+    "approved_decisions": 2,
+    "pending_external_writes": 4,
+    "route_ok": true,
+    "task_count": 4
+  }
+}

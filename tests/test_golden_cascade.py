@@ -100,6 +100,25 @@ def test_procurement_cascade_uses_reorder_policy_and_supplier_ranking() -> None:
     assert any(fact["fact"] == "supplier_coverage" for fact in support)
 
 
+def test_demo_procurement_decision_carries_governance_and_economics() -> None:
+    """Procurement had NO learning-metric route at all (not degraded, entirely absent) -
+    approving a reorder always showed "R0.00 recovered" on the `/mlops` economics dashboard,
+    because `expected_outcome` never carried the key `_attach_decision_governance` reads
+    (found 2026-07-15 by distrusting a run that reported 0 failures).
+    """
+    client = TestClient(app)
+    response = client.post("/scenarios/procurement")
+
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    economics = decision["economics"]
+
+    assert economics["recovered"]["minor_units"] > 0
+    assert economics["recovered"]["minor_units"] == decision["expected_outcome"][
+        "incremental_profit_minor_units"
+    ]
+
+
 def test_sales_cascade_records_clean_pos_sale() -> None:
     result = run_sales_cascade()
     support = [
@@ -180,7 +199,7 @@ def test_inference_routing_keeps_strong_model_for_critic_and_executive() -> None
 
 def test_hitl_approve_flow() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     assert run_response.status_code == 200
 
     decision = run_response.json()["decision"]
@@ -216,7 +235,7 @@ def test_hitl_approve_flow() -> None:
 def test_hitl_reject_flow() -> None:
     """The manual reject path had zero test coverage - only critic auto-rejection did."""
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision_id = run_response.json()["decision"]["id"]
 
     reject_response = client.post(f"/decisions/{decision_id}/reject")
@@ -225,7 +244,10 @@ def test_hitl_reject_flow() -> None:
     rejected = reject_response.json()["decision"]
     assert rejected["status"] == "rejected"
     assert rejected["review"]["status"] == "rejected"
-    assert reject_response.json()["learning_event"] is None
+    learning_event = reject_response.json()["learning_event"]
+    assert learning_event["outcome"]["decision_status"] == "rejected"
+    assert learning_event["delta_units"] == 0
+    assert client.get("/writeback/tasks").json()["tasks"] == []
 
     # Terminal-state guard: re-rejecting an already-rejected decision is idempotent, not an error.
     second = client.post(f"/decisions/{decision_id}/reject")
@@ -238,7 +260,7 @@ def test_hitl_reject_flow() -> None:
 
 def test_demo_decision_carries_governance_and_economics() -> None:
     client = TestClient(app)
-    response = client.post("/demo/golden")
+    response = client.post("/scenarios/golden")
 
     assert response.status_code == 200
     decision = response.json()["decision"]
@@ -256,15 +278,15 @@ def test_demo_decision_carries_governance_and_economics() -> None:
 
 def test_demo_golden_read_does_not_reset_resolved_decision() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     assert approve_response.status_code == 200
     assert approve_response.json()["decision"]["status"] == "approved"
 
-    preview_response = client.get("/demo/golden")
+    preview_response = client.get("/scenarios/golden")
     stored_response = client.get(f"/decisions/{decision['id']}")
-    repeated_response = client.post("/demo/golden")
+    repeated_response = client.post("/scenarios/golden")
 
     assert preview_response.status_code == 200
     assert preview_response.json()["decision"]["status"] == "pending"
@@ -280,9 +302,9 @@ def test_demo_golden_read_does_not_reset_resolved_decision() -> None:
 def test_demo_golden_get_is_preview_and_post_records_trace() -> None:
     client = TestClient(app)
 
-    preview = client.get("/demo/golden")
+    preview = client.get("/scenarios/golden")
     preview_trace = client.get(f"/trace/{preview.json()['correlation_id']}")
-    recorded = client.post("/demo/golden")
+    recorded = client.post("/scenarios/golden")
     recorded_trace = client.get(f"/trace/{recorded.json()['correlation_id']}")
 
     assert preview.status_code == 200
@@ -294,7 +316,7 @@ def test_demo_golden_get_is_preview_and_post_records_trace() -> None:
 
 def test_demo_golden_exposes_store_intelligence_numbers() -> None:
     client = TestClient(app)
-    response = client.post("/demo/golden")
+    response = client.post("/scenarios/golden")
 
     assert response.status_code == 200
     intelligence = response.json()["store_intelligence"]
@@ -307,7 +329,7 @@ def test_demo_golden_exposes_store_intelligence_numbers() -> None:
 
 def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> None:
     client = TestClient(app)
-    response = client.post("/demo/critic-rejection")
+    response = client.post("/scenarios/critic-rejection")
 
     assert response.status_code == 200
     decision = response.json()["decision"]
@@ -324,7 +346,7 @@ def test_demo_critic_rejection_endpoint_is_final_without_learning_event() -> Non
 
 def test_demo_procurement_endpoint_persists_pending_reorder() -> None:
     client = TestClient(app)
-    response = client.post("/demo/procurement")
+    response = client.post("/scenarios/procurement")
 
     assert response.status_code == 200
     body = response.json()
@@ -340,7 +362,7 @@ def test_demo_procurement_endpoint_persists_pending_reorder() -> None:
 
 def test_demo_sales_endpoint_persists_recorded_sale() -> None:
     client = TestClient(app)
-    response = client.get("/demo/sales")
+    response = client.get("/scenarios/sales")
 
     assert response.status_code == 200
     decision = response.json()["decision"]
@@ -351,7 +373,7 @@ def test_demo_sales_endpoint_persists_recorded_sale() -> None:
 
 def test_demo_cold_chain_endpoint_persists_facilities_decision() -> None:
     client = TestClient(app)
-    response = client.get("/demo/cold-chain")
+    response = client.get("/scenarios/cold-chain")
 
     assert response.status_code == 200
     decision = response.json()["decision"]
@@ -363,7 +385,7 @@ def test_demo_cold_chain_endpoint_persists_facilities_decision() -> None:
 
 def test_decisions_endpoint_lists_demo_decisions() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     assert run_response.status_code == 200
     decision = run_response.json()["decision"]
 
@@ -394,7 +416,7 @@ def test_readiness_endpoint_reports_backend_ready() -> None:
 
 def test_learning_endpoint_reports_threshold_events() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     assert approve_response.status_code == 200
@@ -471,7 +493,7 @@ def test_inference_smoke_records_model_run() -> None:
 
 def test_accountability_endpoint_joins_decisions_and_model_runs() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     assert approve_response.status_code == 200

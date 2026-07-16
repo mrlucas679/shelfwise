@@ -54,7 +54,7 @@ class FakeDeployment:
                     "inference": {"provider": "offline"},
                 },
             )
-        if path == "/demo/golden":
+        if path == "/scenarios/golden":
             self.counter += 1
             decision_id = f"decision-{self.counter}"
             decision = {
@@ -81,6 +81,8 @@ class FakeDeployment:
                     "previous_threshold": 10,
                     "updated_threshold": 11,
                     "delta_units": 1,
+                    "decision_id": decision_id,
+                    "outcome": {"units_cleared": 1},
                 }
                 self.learning_events.append(event)
                 payload["learning_event"] = event
@@ -147,7 +149,10 @@ def _run(monkeypatch, fake: FakeDeployment, **kwargs: Any) -> shakedown.Deployme
         ({"base_url": "fake.example"}, "absolute http or https"),
         ({"base_url": "https://user:password@example.test"}, "credentials"),
         ({"cycles": 0}, "cycles"),
-        ({"request_timeout": 30}, "request_timeout"),
+        # 30s used to be the (retired) submission-gate ceiling; only genuinely unbounded
+        # waits are rejected now (the operational bound is 900s).
+        ({"request_timeout": 901}, "request_timeout"),
+        ({"request_timeout": 0}, "request_timeout"),
         ({"duration_seconds": 901}, "duration_seconds"),
     ],
 )
@@ -175,9 +180,63 @@ def test_deployment_shakedown_passes_short_mode_and_records_fallback(monkeypatch
     assert receipt.hitl.approvals == 2
     assert receipt.hitl.rejections == 1
     assert receipt.chat.fallback_answers == 3
+    assert receipt.chat.fail_closed_answers == 0
     assert receipt.chat.replay_checks == receipt.chat.replay_matches == 3
     assert receipt.learning.movements == receipt.learning.movements_expected == 2
     assert receipt.writeback.pending_external_writes == 2
+
+
+def test_http_harness_bridges_its_own_secure_session_without_serializing_it(monkeypatch) -> None:
+    class SecureCookieServer(FakeDeployment):
+        def handle(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/auth/session":
+                return httpx.Response(
+                    200,
+                    request=request,
+                    headers={"set-cookie": "shelfwise_session=opaque-cookie; Secure; Path=/"},
+                    json={"mode": "jwt", "session": {"tenant_id": "tenant_a"}},
+                )
+            if request.url.path == "/readiness" and request.headers.get("authorization"):
+                return super().handle(request)
+            if request.url.path == "/readiness":
+                return httpx.Response(401, request=request, json={"detail": "auth required"})
+            return super().handle(request)
+
+    receipt = _run(monkeypatch, SecureCookieServer())
+
+    assert receipt.verdict == "PASS", receipt.failures
+    assert "opaque-cookie" not in json.dumps(receipt.to_dict())
+
+
+def test_non_live_chat_503_is_recorded_as_fail_closed(monkeypatch) -> None:
+    class FailClosedChat(FakeDeployment):
+        def handle(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/chat":
+                return httpx.Response(503, request=request, json={"detail": "model unavailable"})
+            return super().handle(request)
+
+    receipt = _run(monkeypatch, FailClosedChat())
+
+    assert receipt.verdict == "PASS", receipt.failures
+    assert receipt.chat.fail_closed_answers == 3
+
+
+def test_accepted_idempotent_learning_receipt_is_not_a_missing_write(monkeypatch) -> None:
+    class NoMovementLearning(FakeDeployment):
+        def handle(self, request: httpx.Request) -> httpx.Response:
+            response = super().handle(request)
+            if request.url.path.endswith("/approve") and response.status_code == 200:
+                payload = response.json()
+                payload["learning_event"]["delta_units"] = 0
+                payload["learning_event"]["updated_threshold"] = 10
+                return httpx.Response(200, request=request, json=payload)
+            return response
+
+    receipt = _run(monkeypatch, NoMovementLearning())
+
+    assert receipt.verdict == "PASS", receipt.failures
+    assert receipt.learning.movements == 0
+    assert receipt.learning.movements_expected == 2
 
 
 def test_deployment_shakedown_reports_timeout_without_raising(monkeypatch) -> None:

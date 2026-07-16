@@ -31,6 +31,13 @@ def run_fleet_scale_shakedown(
     )
     elapsed_ms = int((time.perf_counter() - started) * 1_000)
     result = summary.to_dict()
+    # `iter_fleet_batch_states` yields exactly one row per SKU in the "fleet" scale catalog,
+    # which is capped at FLEET_SKU_TARGET (currently 500,000) - `islice(..., rows)` silently
+    # stops early when `rows` exceeds that catalog size, with no error and no indication in
+    # the CLI's own summary line that the requested scale was never reached. Surface the
+    # shortfall as an explicit field so a caller can never mistake "requested 2,000,000" for
+    # "achieved 2,000,000" just because the run finished without raising.
+    fully_processed = summary.rows_processed >= rows
     return {
         "schema_version": "fleet-scale-v1",
         "started_at": datetime.now(UTC).isoformat(),
@@ -45,6 +52,8 @@ def run_fleet_scale_shakedown(
         "queue_reduction_ratio": round(
             len(summary.top_candidates) / max(summary.rows_processed, 1), 6
         ),
+        "requested_rows_fully_processed": fully_processed,
+        "rows_shortfall": max(0, rows - summary.rows_processed),
         "score": result,
     }
 

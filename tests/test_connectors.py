@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -135,6 +136,30 @@ def test_task_writeback_sink_is_idempotent() -> None:
     assert sink.list(tenant_id="tenant_1") == []
 
 
+def test_task_writeback_sink_stays_idempotent_under_real_concurrent_approval_race() -> None:
+    """A duplicate approve request (double-click, retry-after-timeout, a browser re-send)
+    hitting the same decision concurrently must never create two write-back tasks. This
+    exercises real OS threads racing the exact same idempotency key, not a single-threaded
+    call sequence - the bug this guards against (found via this same style of test) was a
+    check-then-write race with no lock, invisible to sequential-call tests."""
+    sink = TaskWriteBackSink()
+
+    def approve(_: int) -> dict[str, object]:
+        return sink.create_task(
+            idempotency_key="writeback:dec_race",
+            tenant_id="race_tenant",
+            title="Approve markdown",
+            action={"type": "apply_markdown", "sku": "4011"},
+        )
+
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        results = list(pool.map(approve, range(200)))
+
+    unique_ids = {task["id"] for task in results}
+    assert len(unique_ids) == 1, f"expected exactly one task id, got {unique_ids}"
+    assert len(sink.list(tenant_id="race_tenant")) == 1
+
+
 def test_quarantine_rejects_disguised_binaries_and_accepts_clean_csv() -> None:
     exe = quarantine_intake(b"MZ\x90\x00pretend.csv", claimed_mime="text/csv")
     xlsx = quarantine_intake(b"PK\x03\x04fake_sheet", claimed_mime="text/csv")
@@ -208,3 +233,40 @@ def test_inbound_records_from_one_payload_get_distinct_stored_ids() -> None:
     _, stored_second = store.record(second)
 
     assert stored_first["id"] != stored_second["id"]
+
+
+def test_schema_sql_dedup_key_matches_the_postgres_store_on_conflict_columns() -> None:
+    """The 2026-07-14 Phase C break campaign found every /connectors/*/intake call 500ing
+    on the deployed Postgres stack: PostgresInboundRecordStore's ON CONFLICT names four
+    columns, but schema.sql (the production migrate path, used when SHELFWISE_AUTO_SCHEMA
+    is off) still declared the pre-widening three-column unique key - the auto-schema path
+    got the migration, the production path didn't. Memory-backend tests structurally cannot
+    catch that drift, so pin the two files to each other statically.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    store_source = (root / "src" / "shelfwise_connectors" / "inbound_store.py").read_text(
+        encoding="utf-8"
+    )
+    schema_source = (root / "src" / "shelfwise_storage" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
+
+    conflict = re.search(r"on conflict\s*\(([^)]+)\)", store_source)
+    assert conflict is not None, "PostgresInboundRecordStore lost its ON CONFLICT clause"
+    conflict_columns = [column.strip() for column in conflict.group(1).split(",")]
+
+    constraint = re.search(
+        r"add constraint shelfwise_inbound_records_dedup_key\s+unique \(([^)]+)\)",
+        schema_source,
+    )
+    assert constraint is not None, (
+        "schema.sql no longer declares shelfwise_inbound_records_dedup_key - the "
+        "production migrate path must carry the same dedupe key the store's ON CONFLICT "
+        "requires (SHELFWISE_AUTO_SCHEMA=false deployments never run _ensure_schema)"
+    )
+    schema_columns = [column.strip() for column in constraint.group(1).split(",")]
+
+    assert conflict_columns == schema_columns

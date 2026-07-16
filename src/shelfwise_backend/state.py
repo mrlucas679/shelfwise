@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from shelfwise_action import create_decision_store
 from shelfwise_catalog import create_product_catalog_store
-from shelfwise_connectors import create_inbound_record_store, create_writeback_sink
+from shelfwise_connectors import (
+    create_cursor_store,
+    create_inbound_record_store,
+    create_writeback_sink,
+)
 from shelfwise_inventory import create_inventory_position_store
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
@@ -31,7 +35,7 @@ from shelfwise_worldgen import create_world_snapshot_store, create_worldgen_run_
 from .candidate_store import create_candidate_store
 from .cascade_dispatcher import CascadeDispatcher
 from .chat_store import create_chat_store
-from .cold_chain_demo import ColdChainDemoService
+from .cold_chain_feed import ColdChainFeedService
 from .event_bus import create_event_bus
 from .event_store import create_event_store
 from .open_orders import create_open_order_store
@@ -55,6 +59,7 @@ tenant_fact_store = create_tenant_fact_store()
 tenant_profile_store = create_tenant_profile_store()
 writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
+connector_cursor_store = create_cursor_store()
 product_catalog_store = create_product_catalog_store()
 candidate_store = create_candidate_store()
 open_order_store = create_open_order_store()
@@ -78,7 +83,7 @@ cascade_worker = CascadeWorker(
     handler=cascade_dispatcher.run_worker,
 )
 worker_service = WorkerLoopService(cascade_worker)
-cold_chain_demo = ColdChainDemoService()
+cold_chain_feed = ColdChainFeedService()
 
 
 def operational_facts_for_query(

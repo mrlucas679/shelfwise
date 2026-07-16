@@ -25,9 +25,10 @@ from shelfwise_runtime import DataDomain, normalize_domain
 from shelfwise_twin import TwinService
 
 from ..product_catalog import get_delivery_exception
-from ..world_facts import WorldFactsProvider
+from ..world_facts import UnknownSkuError, WorldFactsProvider
 
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
+_CHAT_TOOL_ROW_LIMIT = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +119,15 @@ def build_platform_tools(
 
     async def get_stock(sku: str | None = None) -> dict[str, Any]:
         record_tool("get_stock", {"sku": sku})
-        scenario = facts.get_scenario_facts(tenant_id, sku)
+        try:
+            scenario = facts.get_scenario_facts(tenant_id, sku)
+        except UnknownSkuError:
+            return {
+                "data_domain": data_domain,
+                "requested_sku": sku,
+                "available": False,
+                "message": "No stock record exists for the requested SKU.",
+            }
         return {
             "data_domain": data_domain,
             "sku": scenario.sku,
@@ -132,12 +141,14 @@ def build_platform_tools(
 
     async def get_thresholds() -> dict[str, Any]:
         record_tool("get_thresholds", {})
+        thresholds = memory.thresholds(
+            tenant_id=tenant_id,
+            data_domain=data_domain,
+        )
         return {
             "data_domain": data_domain,
-            "thresholds": memory.thresholds(
-                tenant_id=tenant_id,
-                data_domain=data_domain,
-            )
+            "total_thresholds": len(thresholds),
+            "thresholds": dict(list(thresholds.items())[-_CHAT_TOOL_ROW_LIMIT:]),
         }
 
     async def list_open_decisions() -> dict[str, Any]:
@@ -150,7 +161,11 @@ def build_platform_tools(
             and str(item.get("data_domain") or DataDomain.WORLD_SIMULATION.value)
             == data_domain
         ]
-        return {"data_domain": data_domain, "decisions": rows}
+        return {
+            "data_domain": data_domain,
+            "total_open": len(rows),
+            "decisions": [_compact_open_decision(item) for item in rows[:_CHAT_TOOL_ROW_LIMIT]],
+        }
 
     async def explain_decision(
         decision_id: str,
@@ -170,7 +185,7 @@ def build_platform_tools(
             }
         return {
             "data_domain": data_domain,
-            "decision": decision,
+            "decision": _compact_explained_decision(decision),
             "summary": decision.get("summary", ""),
             "critic_verdict": decision.get("critic_verdict"),
         }
@@ -305,6 +320,7 @@ def build_platform_tools(
             "reorder_point_units": str(policy.reorder_point_units),
             "suggested_order_units": str(policy.suggested_order_units),
             "stockout_risk": str(policy.stockout_risk),
+            "stockout_exposure_minor_units": policy.zar_exposure.minor_units,
             "method": policy.method,
         }
 
@@ -481,6 +497,39 @@ def build_platform_tools(
     ]
 
 
+def _compact_open_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    """Keep decision-ranking evidence while excluding unbounded traces and payloads."""
+    compact = {
+        key: decision[key]
+        for key in ("id", "status", "summary", "role", "critic_verdict", "created_at")
+        if key in decision
+    }
+    action = decision.get("action") if isinstance(decision.get("action"), dict) else {}
+    compact["action"] = {
+        key: action[key]
+        for key in ("type", "risk_tier")
+        if key in action
+    }
+    expected = (
+        decision.get("expected_outcome")
+        if isinstance(decision.get("expected_outcome"), dict)
+        else {}
+    )
+    compact["expected_outcome"] = expected
+    return compact
+
+
+def _compact_explained_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    """Return the selected decision's evidence without unrelated execution traces."""
+    compact = _compact_open_decision(decision)
+    evidence = decision.get("evidence")
+    if isinstance(evidence, list):
+        compact["evidence"] = evidence[:_CHAT_TOOL_ROW_LIMIT]
+    elif isinstance(evidence, dict):
+        compact["evidence"] = evidence
+    return compact
+
+
 def build_live_twin_tools(
     *,
     decisions: Any,
@@ -531,14 +580,16 @@ def build_live_twin_tools(
 
     async def list_open_decisions() -> dict[str, Any]:
         audit_log.record(tool="live_list_open_decisions", tenant_id=tenant_id, args={})
+        rows = [
+            item for item in decisions.list()
+            if item.get("status") == "pending"
+            and str(item.get("tenant_id") or "default") == tenant_id
+            and item.get("data_domain") == "operational_twin"
+        ]
         return {
             "data_domain": "operational_twin",
-            "decisions": [
-                item for item in decisions.list()
-                if item.get("status") == "pending"
-                and str(item.get("tenant_id") or "default") == tenant_id
-                and item.get("data_domain") == "operational_twin"
-            ],
+            "total_open": len(rows),
+            "decisions": [_compact_open_decision(item) for item in rows[:_CHAT_TOOL_ROW_LIMIT]],
         }
 
     async def explain_decision(decision_id: str) -> dict[str, Any]:
@@ -552,16 +603,21 @@ def build_live_twin_tools(
             or decision.get("data_domain") != "operational_twin"
         ):
             return {"data_domain": "operational_twin", "decision": None}
-        return {"data_domain": "operational_twin", "decision": decision}
+        return {
+            "data_domain": "operational_twin",
+            "decision": _compact_explained_decision(decision),
+        }
 
     async def get_thresholds() -> dict[str, Any]:
         audit_log.record(tool="live_get_thresholds", tenant_id=tenant_id, args={})
+        thresholds = memory.thresholds(
+            tenant_id=tenant_id,
+            data_domain="operational_twin",
+        )
         return {
             "data_domain": "operational_twin",
-            "thresholds": memory.thresholds(
-                tenant_id=tenant_id,
-                data_domain="operational_twin",
-            ),
+            "total_thresholds": len(thresholds),
+            "thresholds": dict(list(thresholds.items())[-_CHAT_TOOL_ROW_LIMIT:]),
         }
 
     return [

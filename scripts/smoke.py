@@ -18,7 +18,7 @@ def main() -> None:
     health = client.get("/health")
     assert health.status_code == 200, health.text
 
-    run = client.post("/demo/golden")
+    run = client.post("/scenarios/golden")
     assert run.status_code == 200, run.text
     body = run.json()
     assert body["decision"]["status"] == "pending"
@@ -32,7 +32,7 @@ def main() -> None:
     assert approve.status_code == 200, approve.text
     assert approve.json()["decision"]["status"] == "approved"
 
-    rejection = client.get("/demo/critic-rejection")
+    rejection = client.get("/scenarios/critic-rejection")
     assert rejection.status_code == 200, rejection.text
     rejected = rejection.json()["decision"]
     assert rejected["status"] == "rejected"

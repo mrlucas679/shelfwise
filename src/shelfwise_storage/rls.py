@@ -24,6 +24,8 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_inventory_positions": "tenant_id",
     "shelfwise_world_snapshot": "tenant_id",
     "shelfwise_candidates": "tenant_id",
+    "shelfwise_candidate_history": "tenant_id",
+    "shelfwise_connector_cursors": "tenant_id",
     "shelfwise_open_orders": "tenant_id",
     "shelfwise_twin_entities": "tenant_id",
     "shelfwise_twin_relationships": "tenant_id",

@@ -94,6 +94,7 @@ def test_agentic_chat_reports_the_model_that_actually_answered_not_a_hardcoded_g
     routine_meta = _run_chat_with_model("gemma-routine-tier")
     assert routine_meta["model"] == "gemma-routine-tier"
     assert routine_meta["answer_source"] == "model"
+    assert routine_meta["tool_calls"] == []
 
     strong_meta = _run_chat_with_model("gemma-strong-tier")
     assert strong_meta["model"] == "gemma-strong-tier"

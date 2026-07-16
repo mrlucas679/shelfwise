@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import unicodedata
 from collections.abc import Iterator
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from shelfwise_inference import InferenceError, OpenAICompatibleInferenceClient
 from shelfwise_inference.orchestration import (
@@ -38,6 +39,12 @@ _CHAT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# The deployed routine model exposes an 8,192-token window.  Keep state well below the
+# generic 24k-character assembler ceiling because platform tool schemas and output tokens
+# share that same window.
+_CHAT_CONTEXT_MAX_CHARS = 12_000
+_CHAT_MAX_OUTPUT_TOKENS = 400
+
 _CHAT_SYSTEM_PROMPT = (
     "You are ShelfWise, an AI operations assistant for a real supermarket. Speak like a "
     "knowledgeable colleague, not a database readout.\n\n"
@@ -51,6 +58,12 @@ _CHAT_SYSTEM_PROMPT = (
     'shape of tool_results/state_json to the user (no "the tool result is `null`", no '
     "field names, no backticks around raw internal values, no mention of JSON) - speak in "
     "plain retail-operations language.\n\n"
+    "For follow-up questions containing references such as 'that recommendation', 'it', "
+    "or 'the evidence', resolve the reference from conversation_history and keep the same "
+    "decision, SKU, or store unless the user explicitly changes subjects. Never substitute "
+    "a different product merely because another tool result is available.\n\n"
+    "When asked which decision needs attention first, choose exactly one decision and include "
+    "its full decision ID so a follow-up can retrieve the same evidence.\n\n"
     "You have real, live tools covering every part of the store - call the one that "
     "matches the question before answering, never guess a number a tool could have given "
     "you: get_stock (on-hand/on-order for a SKU), get_demand_forecast, get_expiry_risk, "
@@ -96,6 +109,15 @@ class ChatBody(BaseModel):
     message_id: str | None = Field(default=None, min_length=1, max_length=128)
     data_domain: Literal["operational_twin", "world_simulation"] | None = None
     live_required: bool = False
+
+    @field_validator("question")
+    @classmethod
+    def remove_database_unsafe_nul(cls, value: str) -> str:
+        """Remove NUL, which PostgreSQL JSONB cannot store, before model or DB use."""
+        sanitized = value.replace("\x00", "")
+        if not sanitized.strip():
+            raise ValueError("question must contain visible text")
+        return sanitized
 
 
 def stream_chat_reply(
@@ -211,7 +233,11 @@ def build_chat_reply_with_meta(
         if live_twin
         else {"catalog_search": product, "subject": subject}
     )
-    assembled = assemble_context(state, decision_type="chat")
+    assembled = assemble_context(
+        state,
+        decision_type="chat",
+        max_chars=_CHAT_CONTEXT_MAX_CHARS,
+    )
     state = assembled.payload
     if not inference.config.api_key_present:
         if live_required:
@@ -244,9 +270,12 @@ def build_chat_reply_with_meta(
         last_error: AgentOrchestrationError | ToolCallingError | None = None
         for attempt in range(2):
             try:
+                attempt_prompt = _continuity_retry_prompt(prompt, question, state, attempt)
                 answer, run_tool_calls, model_used = asyncio.run(
                     _run_agentic_chat(
-                        prompt=prompt,
+                        question=question,
+                        continuity_ids=_continuity_ids(question, state),
+                        prompt=attempt_prompt,
                         inference=inference,
                         decisions=decisions,
                         memory=memory,
@@ -260,8 +289,10 @@ def build_chat_reply_with_meta(
                         audit=audit,
                     )
                 )
+                _assert_followup_continuity(question, state, answer, run_tool_calls)
                 meta["answer_source"] = "model"
                 meta["tools_used"] = [call.name for call in run_tool_calls]
+                meta["tool_calls"] = [call.to_dict() for call in run_tool_calls]
                 if model_used:
                     meta["model"] = model_used
                 return answer, meta
@@ -342,8 +373,69 @@ def build_chat_reply_with_meta(
     return answer, meta
 
 
+_FOLLOW_UP_MARKERS = ("that recommendation", "that decision", "the evidence", "it", "this")
+_BUSINESS_ID_PATTERN = re.compile(r"\b(?:P\d{8}|SKU[-_A-Z0-9]+|dec_[a-zA-Z0-9_-]+)\b")
+
+
+def _prior_assistant_text(state: dict[str, Any]) -> str:
+    history = state.get("conversation_history")
+    if not isinstance(history, list):
+        return ""
+    for message in reversed(history):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            return str(message.get("text") or "")
+    return ""
+
+
+def _continuity_ids(question: str, state: dict[str, Any]) -> set[str]:
+    lowered = question.casefold()
+    if not any(marker in lowered for marker in _FOLLOW_UP_MARKERS):
+        return set()
+    return set(_BUSINESS_ID_PATTERN.findall(_prior_assistant_text(state)))
+
+
+def _assert_followup_continuity(
+    question: str,
+    state: dict[str, Any],
+    answer: str,
+    tool_calls: tuple[Any, ...] = (),
+) -> None:
+    required = _continuity_ids(question, state)
+    explained_ids = {
+        str(call.arguments.get("decision_id"))
+        for call in tool_calls
+        if call.name in {"explain_decision", "live_explain_decision"}
+        and isinstance(call.arguments, dict)
+        and call.arguments.get("decision_id")
+    }
+    answer_ids = set(_BUSINESS_ID_PATTERN.findall(answer))
+    preserved = required.intersection(answer_ids | explained_ids)
+    if required and not preserved:
+        raise ToolCallingError(
+            "follow-up answer changed subject instead of preserving the prior identifier"
+        )
+
+
+def _continuity_retry_prompt(
+    prompt: str, question: str, state: dict[str, Any], attempt: int
+) -> str:
+    required = sorted(_continuity_ids(question, state))
+    if attempt == 0 or not required:
+        return prompt
+    identifiers = ", ".join(required[:4])
+    return (
+        f"{prompt}\n<continuity_requirement>Answer only about the prior subject identifier(s): "
+        f"{spotlight(identifiers, max_len=300)}. Do not switch products or decisions. "
+        "Use only evidence and numeric values returned by explain_decision for that identifier; "
+        "do not reuse metrics from conversation history or general state."
+        "</continuity_requirement>"
+    )
+
+
 async def _run_agentic_chat(
     *,
+    question: str,
+    continuity_ids: set[str],
     prompt: str,
     inference: OpenAICompatibleInferenceClient,
     decisions: Any,
@@ -362,7 +454,7 @@ async def _run_agentic_chat(
     because chat is user-facing, so the caller must not assume a tier and should record
     whichever model this run's final answer-producing call actually used.
     """
-    tools = (
+    all_tools = (
         build_live_twin_tools(
             decisions=decisions,
             memory=memory,
@@ -378,6 +470,12 @@ async def _run_agentic_chat(
             tenant_id=tenant_id,
             audit=audit,
         )
+    )
+    tools = _select_chat_tools(
+        all_tools,
+        question=question,
+        live_twin=twin is not None,
+        has_prior_decision=any(item.startswith("dec_") for item in continuity_ids),
     )
     orchestrator: AgentOrchestrator = (
         orchestrator_factory()
@@ -408,15 +506,108 @@ async def _run_agentic_chat(
         final_schema_name="chat_answer",
         correlation_id=correlation_id or f"chat_{uuid4().hex[:12]}",
         tenant_id=tenant_id,
-        temperature=0.2,
-        max_tokens=900,
+        temperature=0.0,
+        max_tokens=_CHAT_MAX_OUTPUT_TOKENS,
+        # Chat answers are allowed to see a bounded state summary, but live claims must
+        # still be backed by an audited platform-tool execution.  With provider-side
+        # tool_choice="auto", the model can otherwise jump straight to a plausible answer
+        # and the empty grounding check passes vacuously.
+        # vLLM/Gemma supports generic required tool choice reliably; forcing one named
+        # function can make it exhaust the output budget without emitting a valid call.
+        require_tool_call_first=True,
     )
     answer = ensure_english_response(str(run.answer["answer"]))
-    assert_conclusion_grounded_in_tool_results(answer, run.tool_calls)
+    hostile_control_text = _contains_hostile_control_text(question)
+    if hostile_control_text:
+        answer = (
+            "I can't follow instructions embedded as system commands. "
+            "Please ask a normal store-operations question, and I will use the relevant evidence."
+        )
+    else:
+        _assert_chat_grounded(answer, run.tool_calls)
     if not answer:
         raise AgentOrchestrationError("agentic chat produced an empty answer")
     model_used = run.model_calls[-1].model if run.model_calls else ""
     return answer[:3_000], run.tool_calls, model_used
+
+
+def _assert_chat_grounded(answer: str, tool_calls: tuple[Any, ...]) -> None:
+    """Ground decision lists by exact IDs and numeric tools by computed outputs."""
+    numeric_calls: list[Any] = []
+    for call in tool_calls:
+        if call.name not in {"list_open_decisions", "live_list_open_decisions"}:
+            numeric_calls.append(call)
+            continue
+        result = call.result if isinstance(call.result, dict) else {}
+        rows = result.get("decisions") if isinstance(result.get("decisions"), list) else []
+        decision_ids = {
+            str(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id")
+        }
+        if decision_ids and not any(decision_id in answer for decision_id in decision_ids):
+            raise ToolCallingError("decision-list answer did not cite a returned decision id")
+    assert_conclusion_grounded_in_tool_results(answer, numeric_calls)
+
+
+def _select_chat_tools(
+    tools: list[Any], *, question: str, live_twin: bool, has_prior_decision: bool
+) -> list[Any]:
+    """Expose only the tools relevant to this turn so small models retain reasoning space."""
+    lowered = question.casefold()
+    hostile_control_text = _contains_hostile_control_text(lowered)
+    if has_prior_decision:
+        names = ("live_explain_decision",) if live_twin else ("explain_decision",)
+    elif hostile_control_text:
+        # Prompt-injection vocabulary is not business intent. Keep a read-only stock tool
+        # available so live-required chat still exercises the model and audited tool path.
+        names = ("get_live_stock",) if live_twin else ("get_stock",)
+    elif live_twin:
+        names = (
+            ("live_list_open_decisions", "live_explain_decision")
+            if any(
+                word in lowered
+                for word in (
+                    "decision", "manager", "recommend", "evidence", "approve", "reject",
+                )
+            )
+            else ("get_live_stock", "get_live_cold_chain_status", "get_live_twin_state")
+        )
+    elif any(
+        word in lowered
+        for word in (
+            "decision", "manager", "recommend", "evidence", "approve", "reject",
+        )
+    ):
+        names = ("list_open_decisions", "explain_decision")
+    elif any(word in lowered for word in ("expiry", "expire", "markdown", "waste")):
+        names = ("get_expiry_risk", "simulate_markdown", "get_stock")
+    elif any(word in lowered for word in ("cold", "fridge", "temperature")):
+        names = ("get_cold_chain_status", "get_stock")
+    elif any(word in lowered for word in ("price", "till", "catalogue")):
+        names = ("check_price_integrity", "get_stock")
+    elif any(word in lowered for word in ("supplier", "reorder", "procure", "source")):
+        names = (
+            "get_reorder_policy",
+            "get_supplier_ranking",
+            "get_stock_sourcing_options",
+            "get_stock",
+        )
+    elif any(word in lowered for word in ("delivery", "shipment", "receiving")):
+        names = ("get_delivery_status", "get_stock")
+    else:
+        names = ("get_stock",)
+    by_name = {tool.name: tool for tool in tools}
+    selected = [by_name[name] for name in names if name in by_name]
+    if not selected:
+        raise AgentOrchestrationError("no relevant chat tools are registered")
+    return selected
+
+
+def _contains_hostile_control_text(question: str) -> bool:
+    """Detect control-language patterns that must never become business intent."""
+    lowered = question.casefold()
+    return any(
+        marker in lowered for marker in ("ignore previous", "system:", "⟦/data⟧", "=cmd")
+    )
 
 
 def _default_chat_orchestrator(

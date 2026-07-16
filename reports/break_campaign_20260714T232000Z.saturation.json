@@ -1,0 +1,11 @@
+{
+  "duration_seconds": 300.34,
+  "max_ms": 1385.18,
+  "p50_ms": 428.58,
+  "p95_ms": 634.34,
+  "requests": 667,
+  "schema_version": "phase-c-saturation/v1",
+  "status_counts": {
+    "200": 667
+  }
+}

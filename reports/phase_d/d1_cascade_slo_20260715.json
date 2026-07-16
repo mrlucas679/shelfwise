@@ -1,0 +1,87 @@
+{
+  "cascades": [
+    {
+      "cascade": "golden",
+      "elapsed_s": 18.7,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 242,
+        "prompt_tokens": 3338
+      }
+    },
+    {
+      "cascade": "procurement",
+      "elapsed_s": 15.4,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 305,
+        "prompt_tokens": 3361
+      }
+    },
+    {
+      "cascade": "sales",
+      "elapsed_s": 13.4,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 236,
+        "prompt_tokens": 3256
+      }
+    },
+    {
+      "cascade": "catalog_price",
+      "elapsed_s": 14.9,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 270,
+        "prompt_tokens": 3330
+      }
+    },
+    {
+      "cascade": "expiry_risk",
+      "elapsed_s": 16.8,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 303,
+        "prompt_tokens": 3344
+      }
+    },
+    {
+      "cascade": "cold_chain",
+      "elapsed_s": 26.6,
+      "live": true,
+      "model_calls": 3,
+      "passed": true,
+      "status": 200,
+      "token_budget": {
+        "calls": 3,
+        "completion_tokens": 618,
+        "prompt_tokens": 3208
+      }
+    }
+  ],
+  "droplet": "134.199.193.111 (MI300X, bootstrap commit 4a28407)",
+  "generated_at": "2026-07-14T22:54:59.350266+00:00",
+  "schema_version": "phase-d1/v1",
+  "topology": "nginx -> uvicorn -> postgres/redis (production compose), live vLLM dual-tier",
+  "verdict": "PASS"
+}

@@ -14,6 +14,9 @@ VALID_CASE_TYPES = {
     "stock_discrepancy",
     "delivery_dispute",
     "compliance_evidence",
+    "expiry_markdown",
+    "cold_chain_risk",
+    "price_integrity",
     "general",
 }
 VALID_EVIDENCE_TYPES = {

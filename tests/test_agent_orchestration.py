@@ -7,11 +7,13 @@ from typing import Any
 
 import pytest
 
+from shelfwise_inference import orchestration
 from shelfwise_inference.orchestration import (
     AgentArchitecture,
     AgentOrchestrationError,
     AgentOrchestrator,
     ArchitectureMode,
+    CascadeDeadlineExceeded,
     ExecutionMode,
     LiveInferenceRequiredError,
     ModelCall,
@@ -317,6 +319,191 @@ def test_require_tool_call_first_forces_tool_choice_required_on_opening_call() -
     assert runtime.requests[1]["tool_choice"] == "auto"
 
 
+def test_require_tool_call_first_rejects_provider_that_ignores_requirement() -> None:
+    """A model that ignores the forced opening tool call gets a bounded number of retries
+    (Gemma occasionally does this nondeterministically), but still hard-fails - never falls
+    back to the ungrounded direct answer - once the retries are exhausted.
+    """
+    ignored = {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'}
+    runtime = _FakeRuntime([ignored, ignored, ignored])
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    with pytest.raises(AgentOrchestrationError, match="ignored the required opening tool"):
+        asyncio.run(
+            orchestrator.run(
+                role="critic",
+                system="Assess stock risk.",
+                user="Check SKU 4011.",
+                final_schema=_schema(),
+                correlation_id="corr-required-ignored",
+                require_tool_call_first=True,
+            )
+        )
+    assert len(runtime.requests) == 3, "expected the opening call plus two forced retries"
+    assert all(request["tool_choice"] == "required" for request in runtime.requests), (
+        "every retry must re-force the opening tool call, not fall back to auto"
+    )
+
+
+def test_require_tool_call_first_recovers_when_model_complies_on_retry() -> None:
+    """If the model ignores the forced opening call once but complies on the retry, the
+    cascade proceeds normally - the non-compliance is recovered, not fatal.
+    """
+    runtime = _FakeRuntime(
+        [
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ]
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="critic",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-required-recovered",
+            require_tool_call_first=True,
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    assert len(result.tool_calls) == 1
+    assert runtime.requests[0]["tool_choice"] == "required"
+    assert runtime.requests[1]["tool_choice"] == "required"
+
+
+def test_strong_tier_forced_tool_call_never_competes_with_guided_json() -> None:
+    """Root-caused live on the 2026-07-15 hot soak: the 31B strong tier's native
+    `json_schema` guided decoding, combined with `tool_choice="required"` on the same
+    turn, made the model emit schema-shaped junk (max_tokens of empty content) instead of
+    the forced tool call - a 100% reproducible failure for the expiry-risk and cold-chain
+    critics, not a flaky one. The forced-tool-call turn must always request plain text so
+    the tool call can win cleanly; only the final-answer turn may request the strict
+    json_schema format.
+    """
+    runtime = _FakeRuntime(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ]
+    )
+    runtime.architecture = AgentArchitecture(
+        mode=ArchitectureMode.SHARED,
+        default_target=RoleModelTarget("fake://strong", "google/gemma-4-31B-it"),
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="critic",
+            system="Assess expiry risk.",
+            user="Assess batch B1 for SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-strong-forced-tool",
+            require_tool_call_first=True,
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    opening_call, answer_call = runtime.requests
+    assert opening_call["tool_choice"] == "required"
+    assert opening_call["response_format"] == {"type": "text"}, (
+        "forcing a tool call must never also request guided-JSON decoding on that turn"
+    )
+    assert answer_call["response_format"]["type"] == "json_schema", (
+        "the final-answer turn on the strong tier must still get native schema constraints"
+    )
+
+
+def test_required_named_tool_retries_malformed_opening_arguments() -> None:
+    runtime = _FakeRuntime(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_broken",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":'},
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ]
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="critic",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+            correlation_id="corr-malformed-retry",
+            require_tool_call_first=True,
+            required_tool_names=("get_stock",),
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    assert len(result.tool_calls) == 1
+    assert all(
+        request["tool_choice"]
+        == {"type": "function", "function": {"name": "get_stock"}}
+        for request in runtime.requests[:2]
+    )
+    correction = runtime.requests[1]["messages"][-1]
+    assert correction["role"] == "system"
+    assert "invalid JSON arguments" in correction["content"]
+
+
 def test_tool_choice_defaults_to_auto_without_require_tool_call_first() -> None:
     runtime = _FakeRuntime([{"role": "assistant", "content": '{"risk":"low","action":"noop"}'}])
     orchestrator = AgentOrchestrator(
@@ -335,6 +522,139 @@ def test_tool_choice_defaults_to_auto_without_require_tool_call_first() -> None:
     )
 
     assert runtime.requests[0]["tool_choice"] == "auto"
+
+
+class _ClockAdvancingRuntime:
+    """A fake runtime whose every call consumes a fixed amount of simulated wall-clock time.
+
+    Used to prove `deadline` stops the loop before it starts a model call it cannot finish,
+    without an actual sleep - `orchestration.monotonic` is monkeypatched to read `clock["t"]`,
+    and each `complete()` call advances it by `seconds_per_call`.
+    """
+
+    def __init__(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        clock: dict[str, float],
+        seconds_per_call: float,
+    ) -> None:
+        self.architecture = AgentArchitecture(
+            mode=ArchitectureMode.SHARED,
+            default_target=RoleModelTarget("fake://runtime", "gemma-fake"),
+        )
+        self.execution_mode = ExecutionMode.OFFLINE_TEST
+        self._messages = messages
+        self._clock = clock
+        self._seconds_per_call = seconds_per_call
+        self.requests: list[dict[str, Any]] = []
+
+    def complete(self, **kwargs: Any) -> ModelCall:
+        self.requests.append(deepcopy(kwargs))
+        index = len(self.requests) - 1
+        self._clock["t"] += self._seconds_per_call
+        return ModelCall(
+            call_id=f"model_{index + 1}",
+            role=kwargs["role"],
+            message=self._messages[index],
+            provider="deterministic_fake",
+            model="gemma-fake",
+            endpoint="fake://runtime",
+            used_network=False,
+            input_tokens=10,
+            output_tokens=3,
+            latency_ms=2,
+            correlation_id=kwargs["correlation_id"],
+            finish_reason="tool_calls" if index == 0 else "stop",
+        )
+
+
+def test_deadline_stops_the_loop_before_a_call_it_cannot_finish(monkeypatch) -> None:
+    """Each simulated call costs 10s. Starting from clock=1000 with a deadline 12s out, the
+    loop may safely start call 1 (0s elapsed, 12s left), but must refuse call 2 (10s elapsed,
+    only 2s left - below `_MIN_CALL_BUDGET_S`), raising CascadeDeadlineExceeded after exactly
+    one completed model call instead of burning GPU time on a request nobody awaits anymore.
+    """
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(orchestration, "monotonic", lambda: clock["t"])
+    runtime = _ClockAdvancingRuntime(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ],
+        clock=clock,
+        seconds_per_call=10.0,
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    with pytest.raises(CascadeDeadlineExceeded) as excinfo:
+        asyncio.run(
+            orchestrator.run(
+                role="critic",
+                system="Assess stock risk.",
+                user="Check SKU 4011.",
+                final_schema=_schema(),
+                deadline=clock["t"] + 12.0,
+            )
+        )
+
+    assert excinfo.value.completed_model_calls == 1
+    assert len(runtime.requests) == 1
+
+
+def test_no_deadline_leaves_multi_call_behavior_unchanged(monkeypatch) -> None:
+    """Omitting `deadline` (the default) must not change existing cascade behavior - the
+    loop runs to completion across as many calls as it needs regardless of elapsed time.
+    """
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(orchestration, "monotonic", lambda: clock["t"])
+    runtime = _ClockAdvancingRuntime(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_stock",
+                        "type": "function",
+                        "function": {"name": "get_stock", "arguments": '{"sku":"4011"}'},
+                    }
+                ],
+            },
+            {"role": "assistant", "content": '{"risk":"high","action":"monitor"}'},
+        ],
+        clock=clock,
+        seconds_per_call=10.0,
+    )
+    orchestrator = AgentOrchestrator(
+        tools=[_Tool("get_stock", "Read stock.", True, _get_stock)],
+        model_runtime=runtime,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            role="critic",
+            system="Assess stock risk.",
+            user="Check SKU 4011.",
+            final_schema=_schema(),
+        )
+    )
+
+    assert result.answer == {"risk": "high", "action": "monitor"}
+    assert len(runtime.requests) == 2
 
 
 def test_tool_choice_is_none_when_no_tools_registered() -> None:

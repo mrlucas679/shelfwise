@@ -132,8 +132,8 @@ def test_demo_endpoints_are_gated_by_the_write_path_api_key_when_configured(monk
     client = TestClient(app)
     monkeypatch.setenv("API_KEY", "secret")
 
-    blocked = client.get("/demo/golden")
-    allowed = client.get("/demo/golden", headers={"x-api-key": "secret"})
+    blocked = client.get("/scenarios/golden")
+    allowed = client.get("/scenarios/golden", headers={"x-api-key": "secret"})
 
     assert blocked.status_code == 401
     assert allowed.status_code == 200

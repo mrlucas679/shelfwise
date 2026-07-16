@@ -195,7 +195,7 @@ type ProductSearchPayload = {
   products?: ProductCatalogItem[]
   source_counts?: JsonObject
 }
-type GoldenDemo = {
+type GoldenScenario = {
   correlation_id?: string
   scenario?: string
   evidence?: EvidenceObject[]
@@ -324,7 +324,7 @@ declare global {
 // API
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
-const DEMO_PATH = '/demo/golden'
+const SCENARIO_PATH = '/scenarios/golden'
 
 // Runtime config (public/shelfwise-config.js) lets a deployed bundle point at any backend
 // without a rebuild; build-time VITE_* vars stay as the fallback.
@@ -382,7 +382,7 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
 async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
   await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
 }
-const fetchDemo = (path: string, signal: AbortSignal) => fetchJson<GoldenDemo>(path, { method: 'POST' }, signal)
+const fetchScenario = (path: string, signal: AbortSignal) => fetchJson<GoldenScenario>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
   try {
     return await fetchBackendJson<T>(path, { method: 'GET' }, signal)
@@ -1194,8 +1194,8 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Platform tools', method: 'GET', path: '/tools/platform', detail: 'Read-only tool catalogue exposed to agents.' },
   { label: 'Platform audit', method: 'GET', path: '/tools/platform/audit', detail: 'Tool-call audit events.' },
   { label: 'Cold-chain feed', method: 'GET', path: '/cold-chain/feed', detail: 'Cold-chain status and buffered feed events.' },
-  { label: 'Worldgen runs', method: 'GET', path: '/demo/worldgen-runs', detail: 'Synthetic drill run history.' },
-  { label: 'Worldgen run detail', method: 'GET', path: '/demo/worldgen-runs/{run_id}', detail: 'Parameterized synthetic drill run detail.' },
+  { label: 'Worldgen runs', method: 'GET', path: '/scenarios/worldgen-runs', detail: 'Synthetic drill run history.' },
+  { label: 'Worldgen run detail', method: 'GET', path: '/scenarios/worldgen-runs/{run_id}', detail: 'Parameterized synthetic drill run detail.' },
   { label: 'Tenant profile', method: 'GET', path: '/tenants/me', detail: 'Current tenant/store profile and connector policy.' },
   { label: 'Inventory positions', method: 'GET', path: '/inventory/positions', detail: 'Tenant shelf, backroom, bin, quarantine, and returns ledger.' },
   { label: 'Connector catalogue', method: 'GET', path: '/connectors/systems', detail: 'Supported source-system connector capabilities.' },
@@ -1208,6 +1208,7 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Tenant facts', method: 'GET', path: '/mlops/tenant-facts', detail: 'Governed learning facts.' },
   { label: 'Worker status', method: 'GET', path: '/worker/status', detail: 'Background worker runtime state.' },
   { label: 'Worker runs', method: 'GET', path: '/worker/runs', detail: 'Background cascade processing journal.' },
+  { label: 'Connector poll status', method: 'GET', path: '/connectors/poll/status', detail: 'ERP/WMS background poll loop: configured systems, runs, and last error.' },
   { label: 'Catalog products', method: 'GET', path: '/catalog/products', detail: 'Product-identity master list for the tenant.' },
   { label: 'Catalog product detail', method: 'GET', path: '/catalog/products/{product_id}', detail: 'Parameterized product-identity record.' },
   { label: 'Catalog variants', method: 'GET', path: '/catalog/products/{product_id}/variants', detail: 'Sellable variants (pack size, unit) for a product.' },
@@ -1219,6 +1220,7 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Twin fidelity', method: 'GET', path: '/twin/fidelity', detail: 'Dimensioned identity, freshness, provenance, projection, and guard score.' },
   { label: 'Twin devices', method: 'GET', path: '/twin/stores/{store_id}/devices', detail: 'Tenant-scoped edge device health without signing secrets.' },
   { label: 'Twin scenario compare', method: 'GET', path: '/twin/stores/{store_id}/scenarios/{branch_id}', detail: 'Observed-versus-predicted branch comparison.' },
+  { label: 'Candidate history', method: 'GET', path: '/candidates/{candidate_key}/history', detail: 'Immutable lifecycle transitions recorded for one fleet candidate.' },
 ]
 
 const GATED_ENDPOINTS = [
@@ -1254,21 +1256,21 @@ const GATED_ENDPOINTS = [
   { label: 'Chat conversation detail', method: 'GET', path: '/chat/conversations/{conversation_id}', group: 'operations', detail: 'Full transcript for one conversation.' },
   { label: 'Trace detail', method: 'GET', path: '/trace/{correlation_id}', group: 'operations', detail: 'Parameterized trace detail from the trace registry.' },
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
-  { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
-  { label: 'Recall quarantine drill', method: 'POST', path: '/demo/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
-  { label: 'Inventory exception drill', method: 'POST', path: '/demo/inventory-exception', group: 'operations', detail: 'Runs a seeded shrink count through event ingest, type-specific evidence, HITL, and write-back.' },
-  { label: 'Golden demo (agentic)', method: 'POST', path: '/demo/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Procurement demo', method: 'GET/POST', path: '/demo/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
-  { label: 'Procurement demo (agentic)', method: 'POST', path: '/demo/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Sales demo', method: 'GET/POST', path: '/demo/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
-  { label: 'Sales demo (agentic)', method: 'POST', path: '/demo/sales/agentic', group: 'operations', detail: 'Runs the POS price-integrity verdict through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Catalog price guardrail (agentic)', method: 'POST', path: '/demo/catalog-price/agentic', group: 'operations', detail: 'Runs the conditional POS catalog-price exception guardrail through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Expiry risk guardrail (agentic)', method: 'POST', path: '/demo/expiry-risk/agentic', group: 'operations', detail: 'Runs the conditional imminent-expiry guardrail through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Cold-chain demo', method: 'GET/POST', path: '/demo/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
-  { label: 'Cold-chain demo (agentic)', method: 'POST', path: '/demo/cold-chain/agentic', group: 'operations', detail: 'Runs the cold-chain facilities-escalation verdict through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Critic rejection demo', method: 'GET/POST', path: '/demo/critic-rejection', group: 'operations', detail: 'Scenario endpoint for the critic-rejection path.' },
-  { label: 'Worldgen run detail', method: 'GET', path: '/demo/worldgen-runs/{run_id}', group: 'operations', detail: 'Parameterized synthetic drill run detail.' },
-  { label: 'Worldgen drill', method: 'GET', path: '/demo/worldgen/{scenario_id}', group: 'operations', detail: 'Synthetic scenario execution; not auto-run from the sidebar.' },
+  { label: 'Golden scenario', method: 'GET/POST', path: '/scenarios/golden', group: 'operations', detail: 'Scenario cascade endpoint used by smoke and runbook flows.' },
+  { label: 'Recall quarantine drill', method: 'POST', path: '/scenarios/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
+  { label: 'Inventory exception drill', method: 'POST', path: '/scenarios/inventory-exception', group: 'operations', detail: 'Runs a seeded shrink count through event ingest, type-specific evidence, HITL, and write-back.' },
+  { label: 'Golden scenario (agentic)', method: 'POST', path: '/scenarios/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Procurement scenario', method: 'GET/POST', path: '/scenarios/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
+  { label: 'Procurement scenario (agentic)', method: 'POST', path: '/scenarios/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Sales scenario', method: 'GET/POST', path: '/scenarios/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
+  { label: 'Sales scenario (agentic)', method: 'POST', path: '/scenarios/sales/agentic', group: 'operations', detail: 'Runs the POS price-integrity verdict through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Catalog price guardrail (agentic)', method: 'POST', path: '/scenarios/catalog-price/agentic', group: 'operations', detail: 'Runs the conditional POS catalog-price exception guardrail through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Expiry risk guardrail (agentic)', method: 'POST', path: '/scenarios/expiry-risk/agentic', group: 'operations', detail: 'Runs the conditional imminent-expiry guardrail through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Cold-chain scenario', method: 'GET/POST', path: '/scenarios/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
+  { label: 'Cold-chain scenario (agentic)', method: 'POST', path: '/scenarios/cold-chain/agentic', group: 'operations', detail: 'Runs the cold-chain facilities-escalation verdict through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Critic rejection scenario', method: 'GET/POST', path: '/scenarios/critic-rejection', group: 'operations', detail: 'Scenario endpoint for the critic-rejection path.' },
+  { label: 'Worldgen run detail', method: 'GET', path: '/scenarios/worldgen-runs/{run_id}', group: 'operations', detail: 'Parameterized synthetic drill run detail.' },
+  { label: 'Worldgen drill', method: 'GET', path: '/scenarios/worldgen/{scenario_id}', group: 'operations', detail: 'Synthetic scenario execution; not auto-run from the sidebar.' },
   { label: 'Catalog product upsert', method: 'POST', path: '/catalog/products', group: 'intelligence', detail: 'Create or update a product-identity record.' },
   { label: 'Catalog variant upsert', method: 'POST', path: '/catalog/products/{product_id}/variants', group: 'intelligence', detail: 'Create or update a sellable variant of a product.' },
   { label: 'Catalog identifier upsert', method: 'POST', path: '/catalog/identifiers', group: 'intelligence', detail: 'Map a GTIN/barcode/SKU/PLU/source id to a variant; rejects conflicting remaps.' },
@@ -1375,7 +1377,7 @@ function InferencePill({ config, verified = false }: { config?: InferenceConfig 
       : `AMD vLLM endpoint configured but not yet verified by a successful call${host ? ` via ${host}` : ''}`
     : config?.provider === 'fireworks'
       ? 'Fireworks fallback configured'
-      : 'Deterministic offline mode; set LLM_BASE_URL before the MI300X demo'
+      : 'Deterministic offline mode; set LLM_BASE_URL before the MI300X run'
   return (
     <span className={`inference-pill tone-${tone}`} title={title}>
       <span className="inference-pill-label">{label}</span>
@@ -1408,7 +1410,7 @@ function Sidebar({
   activeWorkspace: WorkspaceSurface | null
   recents: Recent[]
   queue: Decision[]
-  data: GoldenDemo | null
+  data: GoldenScenario | null
   seed: SeedSummary | null
   ops: OperationalSnapshot
   recoveredToday: string | null
@@ -1990,7 +1992,7 @@ function WorkspaceScreen({
   initialQuery?: string
   dataDomain: DataDomain
   onBack: () => void
-  data: GoldenDemo | null
+  data: GoldenScenario | null
   seed: SeedSummary | null
   queue: Decision[]
   ops: OperationalSnapshot
@@ -2869,7 +2871,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => {
             const isAgentic = item.path.endsWith('/agentic')
-            const isRunnable = isAgentic || item.path === '/demo/recall' || item.path === '/demo/inventory-exception'
+            const isRunnable = isAgentic || item.path === '/scenarios/recall' || item.path === '/scenarios/inventory-exception'
             const run = agenticRuns[item.path]
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
@@ -3127,7 +3129,7 @@ function isOverlayViewport(): boolean {
 // ---------------------------------------------------------------------------
 function App() {
   const [dataDomain, setDataDomain] = useState<DataDomain>('operational_twin')
-  const [data, setData] = useState<GoldenDemo | null>(null)
+  const [data, setData] = useState<GoldenScenario | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [seed, setSeed] = useState<SeedSummary | null>(null)
   const [ops, setOps] = useState<OperationalSnapshot>(() => emptyOps('operational_twin'))
@@ -3193,8 +3195,8 @@ function App() {
     async function load() {
       await ensureBrowserSession(controller.signal)
       const payload = dataDomain === 'world_simulation'
-        ? await fetchDemo(DEMO_PATH, controller.signal)
-        : ({} as GoldenDemo)
+        ? await fetchScenario(SCENARIO_PATH, controller.signal)
+        : ({} as GoldenScenario)
       const openApi = await fetchOptional<{ paths?: JsonObject }>('/openapi.json', controller.signal)
       const apiPaths = Object.keys(asObject(openApi?.paths)).sort()
       const available = (path: string) => Boolean(asObject(openApi?.paths)[path])
@@ -3264,7 +3266,7 @@ function App() {
         fetchIfAvailable<{ snapshot?: JsonObject }>(withDataDomain('/mlops/observability?limit=200', dataDomain), '/mlops/observability'),
         fetchIfAvailable<{ worker?: JsonObject }>('/worker/status'),
         dataDomain === 'world_simulation'
-          ? fetchIfAvailable<{ runs?: JsonObject[] }>('/demo/worldgen-runs?limit=20', '/demo/worldgen-runs')
+          ? fetchIfAvailable<{ runs?: JsonObject[] }>('/scenarios/worldgen-runs?limit=20', '/scenarios/worldgen-runs')
           : Promise.resolve(null),
         fetchIfAvailable<{ sql?: string }>('/detective/root-cause-sql'),
       ])
@@ -3495,12 +3497,12 @@ function App() {
       })
   }
 
-  const runAgenticDemo = (path: string) => {
+  const runAgenticScenario = (path: string) => {
     if (agenticRuns[path]?.state === 'running') return
     if (dataDomain !== 'world_simulation') {
       setAgenticRuns((prev) => ({
         ...prev,
-        [path]: { state: 'error', detail: 'Switch to Simulation before running a demo scenario.' },
+        [path]: { state: 'error', detail: 'Switch to Simulation before running a scenario.' },
       }))
       return
     }
@@ -3688,7 +3690,7 @@ function App() {
               ops={ops}
               recoveredToday={recoveredToday}
               agenticRuns={agenticRuns}
-              onRunAgentic={runAgenticDemo}
+              onRunAgentic={runAgenticScenario}
             />
           ) : (
             <>

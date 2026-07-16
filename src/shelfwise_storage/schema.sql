@@ -51,6 +51,30 @@ drop index if exists idx_shelfwise_candidates_tenant_suppression;
 create index if not exists idx_shelfwise_candidates_tenant_suppression
 on shelfwise_candidates (tenant_id, data_domain, suppressed_until);
 
+create table if not exists shelfwise_candidate_history (
+    tenant_id text not null,
+    data_domain text not null default 'world_simulation',
+    candidate_key text not null,
+    sequence integer not null,
+    reason text not null,
+    status text not null,
+    score numeric not null,
+    urgency numeric not null,
+    exposure_units integer not null,
+    decision_id text,
+    recorded_at timestamptz not null,
+    primary key (tenant_id, candidate_key, sequence)
+);
+create index if not exists idx_shelfwise_candidate_history_tenant_key
+on shelfwise_candidate_history (tenant_id, candidate_key, sequence desc);
+
+create table if not exists shelfwise_connector_cursors (
+    tenant_id text not null,
+    system text not null,
+    cursor text not null,
+    primary key (tenant_id, system)
+);
+
 create table if not exists shelfwise_open_orders (
     tenant_id text not null,
     data_domain text not null default 'operational_twin',
@@ -123,9 +147,44 @@ create table if not exists shelfwise_inbound_records (
     event_id text,
     payload jsonb not null,
     ingested_at timestamptz not null,
-    event_time timestamptz not null,
-    unique (tenant_id, source_system, raw_payload_hash)
+    event_time timestamptz not null
 );
+
+-- Dedupe key must match PostgresInboundRecordStore's ON CONFLICT column list exactly.
+-- The pre-migration shape keyed only on (tenant_id, source_system, raw_payload_hash):
+-- every line/count derived from one raw webhook payload shares that hash, so it silently
+-- kept only the first. Widen it to include source_object_id so distinct lines/counts from
+-- a single payload can all persist, while a resent payload (same object ids) still dedups.
+-- Mirrors the identical migration in inbound_store._ensure_schema, which only runs when
+-- SHELFWISE_AUTO_SCHEMA is enabled - production deployments migrate through this file.
+do $$
+declare
+    old_constraint text;
+begin
+    select con.conname into old_constraint
+    from pg_constraint con
+    join pg_class rel on rel.oid = con.conrelid
+    where rel.relname = 'shelfwise_inbound_records'
+      and con.contype = 'u'
+      and pg_get_constraintdef(con.oid)
+          = 'UNIQUE (tenant_id, source_system, raw_payload_hash)';
+
+    if old_constraint is not null then
+        execute format(
+            'alter table shelfwise_inbound_records drop constraint %I',
+            old_constraint
+        );
+    end if;
+
+    if not exists (
+        select 1 from pg_constraint
+        where conname = 'shelfwise_inbound_records_dedup_key'
+    ) then
+        alter table shelfwise_inbound_records
+        add constraint shelfwise_inbound_records_dedup_key
+        unique (tenant_id, source_system, raw_payload_hash, source_object_id);
+    end if;
+end $$;
 
 create index if not exists idx_shelfwise_inbound_records_tenant_ingested
 on shelfwise_inbound_records (tenant_id, ingested_at desc);
@@ -523,6 +582,20 @@ alter table shelfwise_candidates enable row level security;
 alter table shelfwise_candidates force row level security;
 drop policy if exists shelfwise_candidates_tenant_isolation on shelfwise_candidates;
 create policy shelfwise_candidates_tenant_isolation on shelfwise_candidates
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_candidate_history enable row level security;
+alter table shelfwise_candidate_history force row level security;
+drop policy if exists shelfwise_candidate_history_tenant_isolation on shelfwise_candidate_history;
+create policy shelfwise_candidate_history_tenant_isolation on shelfwise_candidate_history
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_connector_cursors enable row level security;
+alter table shelfwise_connector_cursors force row level security;
+drop policy if exists shelfwise_connector_cursors_tenant_isolation on shelfwise_connector_cursors;
+create policy shelfwise_connector_cursors_tenant_isolation on shelfwise_connector_cursors
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 

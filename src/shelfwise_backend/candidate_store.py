@@ -13,6 +13,12 @@ from shelfwise_storage import validate_limit as _validate_limit
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .candidate_factory import FleetCandidate
+from .candidate_history import (
+    CandidateHistoryEntry,
+    CandidateHistoryStore,
+    InMemoryCandidateHistoryStore,
+    PostgresCandidateHistoryStore,
+)
 
 CANDIDATE_STATUSES = frozenset(
     {"new", "monitoring", "suppressed", "pending", "approved", "rejected", "resolved"}
@@ -23,9 +29,10 @@ TERMINAL_CANDIDATE_STATUSES = frozenset({"approved", "rejected", "resolved"})
 class InMemoryCandidateStore:
     """Process-local candidate store used by the default zero-config runtime."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, history: CandidateHistoryStore | None = None) -> None:
         self._lock = Lock()
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
+        self._history = history if history is not None else InMemoryCandidateHistoryStore()
 
     def upsert_many(
         self, candidates: list[FleetCandidate], *, now: datetime | None = None
@@ -40,10 +47,28 @@ class InMemoryCandidateStore:
         with self._lock:
             existing = self._records.get(key)
             record = _base_record(candidate, timestamp)
+            reason = "observed"
             if existing is not None:
                 record = _merge_observation(existing, record, timestamp)
+                reason = None if existing["status"] == record["status"] else "status_changed"
             self._records[key] = record
+            if reason is not None:
+                self._history.record(record, reason=reason)
             return deepcopy(record)
+
+    def history(
+        self,
+        tenant_id: str,
+        candidate_key: str,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+    ) -> list[CandidateHistoryEntry]:
+        """Return the immutable lifecycle transitions recorded for one candidate."""
+        return self._history.list(
+            tenant_id, candidate_key, since=since, until=until, limit=limit
+        )
 
     def get(self, tenant_id: str, candidate_key: str) -> dict[str, Any] | None:
         """Return one candidate only when it belongs to the requested tenant."""
@@ -78,6 +103,7 @@ class InMemoryCandidateStore:
                 }
             )
             self._records[(tenant_id, candidate_key)] = updated
+            self._history.record(updated, reason="suppressed")
             return deepcopy(updated)
 
     def link_decision(
@@ -101,6 +127,7 @@ class InMemoryCandidateStore:
             updated["status"] = "pending"
             updated["updated_at"] = _timestamp(None)
             self._records[(tenant_id, candidate_key)] = updated
+            self._history.record(updated, reason="linked_decision")
             return deepcopy(updated)
 
     def list(
@@ -127,15 +154,21 @@ class InMemoryCandidateStore:
         """Clear process-local records for tests and disposable runs."""
         with self._lock:
             self._records.clear()
+        self._history.clear()
 
 
 class PostgresCandidateStore:
     """Durable candidate store protected by the same tenant RLS contract as decisions."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(
+        self, database_url: str, *, history: CandidateHistoryStore | None = None
+    ) -> None:
         if not database_url:
             raise ValueError("DATABASE_URL is required for PostgresCandidateStore")
         self._database_url = database_url
+        self._history = (
+            history if history is not None else PostgresCandidateHistoryStore(database_url)
+        )
         if auto_schema_enabled():
             self._ensure_schema()
 
@@ -150,8 +183,10 @@ class PostgresCandidateStore:
         timestamp = _timestamp(now)
         existing = self.get(candidate.tenant_id, candidate.candidate_key)
         record = _base_record(candidate, timestamp)
+        reason = "observed"
         if existing is not None:
             record = _merge_observation(existing, record, timestamp)
+            reason = None if existing["status"] == record["status"] else "status_changed"
         with self._connect(candidate.tenant_id) as conn:
             conn.execute(
                 """
@@ -181,7 +216,23 @@ class PostgresCandidateStore:
                 _row_values(record),
             )
             conn.commit()
+        if reason is not None:
+            self._history.record(record, reason=reason)
         return record
+
+    def history(
+        self,
+        tenant_id: str,
+        candidate_key: str,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+    ) -> list[CandidateHistoryEntry]:
+        """Return the immutable lifecycle transitions recorded for one candidate."""
+        return self._history.list(
+            tenant_id, candidate_key, since=since, until=until, limit=limit
+        )
 
     def get(self, tenant_id: str, candidate_key: str) -> dict[str, Any] | None:
         """Read one candidate under the active tenant RLS context."""
@@ -218,7 +269,7 @@ class PostgresCandidateStore:
                 "updated_at": _timestamp(None),
             }
         )
-        return self._save(current)
+        return self._save(current, reason="suppressed")
 
     def link_decision(
         self, tenant_id: str, candidate_key: str, decision_id: str
@@ -236,7 +287,7 @@ class PostgresCandidateStore:
         current.update(
             {"decision_id": decision_id, "status": "pending", "updated_at": _timestamp(None)}
         )
-        return self._save(current)
+        return self._save(current, reason="linked_decision")
 
     def list(
         self,
@@ -272,8 +323,9 @@ class PostgresCandidateStore:
         with self._connect() as conn:
             conn.execute("delete from shelfwise_candidates")
             conn.commit()
+        self._history.clear()
 
-    def _save(self, record: dict[str, Any]) -> dict[str, Any]:
+    def _save(self, record: dict[str, Any], *, reason: str) -> dict[str, Any]:
         with self._connect(record["tenant_id"]) as conn:
             conn.execute(
                 """
@@ -294,6 +346,7 @@ class PostgresCandidateStore:
                 ),
             )
             conn.commit()
+        self._history.record(record, reason=reason)
         return record
 
     def _ensure_schema(self) -> None:

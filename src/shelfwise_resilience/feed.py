@@ -132,7 +132,7 @@ class ColdChainFeed:
             self._last_alert.pop(asset_id, None)
 
 
-async def run_demo_feed(
+async def run_cold_chain_feed(
     publish: Publish,
     *,
     interval_s: float = 2.0,

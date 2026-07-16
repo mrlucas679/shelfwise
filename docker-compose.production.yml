@@ -18,7 +18,10 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    # Debian-based, not Alpine: sidesteps CVE-2025-60876 (an unpatched apk heap overflow
+    # affecting every current Alpine image) by not shipping apk at all. Same official
+    # redis:7 build otherwise.
+    image: redis:7-bookworm
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -39,7 +42,16 @@ services:
     command:
       - sh
       - -ec
-      - psql -h postgres -U shelfwise -d shelfwise -v ON_ERROR_STOP=1 -f /schema.sql
+      - |
+        for attempt in $(seq 1 10); do
+          if psql -h postgres -U shelfwise -d shelfwise -v ON_ERROR_STOP=1 -f /schema.sql; then
+            exit 0
+          fi
+          if [ "$$attempt" -eq 10 ]; then
+            exit 1
+          fi
+          sleep 2
+        done
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,11 +76,16 @@ services:
       APP_ENV: production
       SHELFWISE_AUTH_MODE: jwt
       SHELFWISE_PUBLIC_DEMO_SESSION: "true"
+      SHELFWISE_CHAT_DATA_DOMAIN: ${SHELFWISE_CHAT_DATA_DOMAIN:-world_simulation}
       SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}
       SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: ${SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI:-false}
       TENANT_AUTH_SECRET: ${TENANT_AUTH_SECRET:?TENANT_AUTH_SECRET is required}
       SHELFWISE_STORE_BACKEND: postgres
       SHELFWISE_AUTO_SCHEMA: "false"
+      # Pooled Postgres access (psycopg_pool). Size the ceiling below Postgres
+      # max_connections (default 100) x replicas; each checkout re-binds the tenant for
+      # RLS, so pooling does not weaken tenant isolation.
+      SHELFWISE_DB_POOL_MAX: ${SHELFWISE_DB_POOL_MAX:-20}
       SHELFWISE_BUS_BACKEND: redis
       DATABASE_URL: postgresql://shelfwise_app:${POSTGRES_APP_PASSWORD}@postgres:5432/shelfwise
       REDIS_URL: redis://redis:6379/0

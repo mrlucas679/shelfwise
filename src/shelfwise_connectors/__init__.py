@@ -5,11 +5,14 @@ from .catalog import (
     list_connector_capabilities,
 )
 from .connectors import (
+    CursorStore,
     InMemoryCursorStore,
     InMemoryWebhookDedupStore,
     PollingConnector,
+    PostgresCursorStore,
     SourceConnector,
     WebhookReceiver,
+    create_cursor_store,
     verify_signature,
 )
 from .connectors.systems import (
@@ -49,6 +52,7 @@ from .writeback import PostgresTaskWriteBackSink, TaskWriteBackSink, create_writ
 __all__ = [
     "MAX_WEBHOOK_BYTES",
     "ConnectorCapability",
+    "CursorStore",
     "IdentityMap",
     "InMemoryCursorStore",
     "InMemoryInboundRecordStore",
@@ -58,6 +62,7 @@ __all__ = [
     "LightspeedSaleWebhookReceiver",
     "OdooProductConnector",
     "PollingConnector",
+    "PostgresCursorStore",
     "PostgresInboundRecordStore",
     "PostgresTaskWriteBackSink",
     "ProductMaster",
@@ -74,6 +79,7 @@ __all__ = [
     "ValidationResult",
     "WebhookReceiver",
     "connector_status_for_policy",
+    "create_cursor_store",
     "create_inbound_record_store",
     "create_writeback_sink",
     "inventory_to_event",

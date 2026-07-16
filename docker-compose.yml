@@ -23,7 +23,10 @@ services:
       timeout: 5s
       retries: 5
   redis:
-    image: redis:7-alpine
+    # Debian-based, not Alpine: sidesteps CVE-2025-60876 (an unpatched apk heap overflow
+    # affecting every current Alpine image) by not shipping apk at all. Same official
+    # redis:7 build otherwise.
+    image: redis:7-bookworm
     ports:
       - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]

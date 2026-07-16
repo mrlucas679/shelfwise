@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 from copy import deepcopy
+from threading import Lock
 from typing import Any
 
 from shelfwise_storage import auto_schema_enabled, connect, jsonb
@@ -11,9 +12,18 @@ from shelfwise_storage.rls import apply_tenant_rls
 
 
 class TaskWriteBackSink:
-    """Recommend-only write-back sink that creates idempotent manager tasks."""
+    """Recommend-only write-back sink that creates idempotent manager tasks.
+
+    `create_task`'s idempotency guarantee (never double-create a write-back task for the
+    same decision) and `complete_task`'s completion-receipt check are both check-then-write
+    sequences; without a lock, two concurrent callers (e.g. a duplicate approve request) can
+    both pass the check before either writes, producing two tasks - and two different task
+    IDs, since the ID was also derived from a live-read `len()` - for one idempotency key.
+    Found via a real concurrent-threads stress test, not just code reading.
+    """
 
     def __init__(self) -> None:
+        self._lock = Lock()
         self._tasks_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     def create_task(
@@ -28,29 +38,32 @@ class TaskWriteBackSink:
         rollback_instructions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         key = (tenant_id, data_domain, idempotency_key)
-        if key in self._tasks_by_key:
-            return deepcopy(self._tasks_by_key[key])
-        now = _now()
-        task = {
-            "id": f"task_{len(self._tasks_by_key) + 1}",
-            "idempotency_key": idempotency_key,
-            "tenant_id": tenant_id,
-            "data_domain": data_domain,
-            "assignee_role": assignee_role,
-            "title": title,
-            "action": deepcopy(action),
-            "status": "pending_external_write",
-            "rollback_instructions": deepcopy(rollback_instructions or {}),
-            "created_at": now,
-            "updated_at": now,
-        }
-        self._tasks_by_key[key] = task
-        return deepcopy(task)
+        with self._lock:
+            existing = self._tasks_by_key.get(key)
+            if existing is not None:
+                return deepcopy(existing)
+            now = _now()
+            task = {
+                "id": f"task_{len(self._tasks_by_key) + 1}",
+                "idempotency_key": idempotency_key,
+                "tenant_id": tenant_id,
+                "data_domain": data_domain,
+                "assignee_role": assignee_role,
+                "title": title,
+                "action": deepcopy(action),
+                "status": "pending_external_write",
+                "rollback_instructions": deepcopy(rollback_instructions or {}),
+                "created_at": now,
+                "updated_at": now,
+            }
+            self._tasks_by_key[key] = task
+            return deepcopy(task)
 
     def list(
         self, *, tenant_id: str | None = None, data_domain: str | None = None
     ) -> list[dict[str, Any]]:
-        tasks = list(self._tasks_by_key.values())
+        with self._lock:
+            tasks = list(self._tasks_by_key.values())
         if tenant_id is not None:
             tasks = [task for task in tasks if task.get("tenant_id") == tenant_id]
         if data_domain is not None:
@@ -65,30 +78,32 @@ class TaskWriteBackSink:
         receipt: dict[str, Any],
         data_domain: str = "operational_twin",
     ) -> dict[str, Any] | None:
-        task = next(
-            (
-                item
-                for item in self._tasks_by_key.values()
-                if item["id"] == task_id and item["tenant_id"] == tenant_id
-                and item["data_domain"] == data_domain
-            ),
-            None,
-        )
-        if task is None:
-            return None
-        if task["status"] == "completed":
-            if task.get("completion_receipt") != receipt:
-                raise ValueError("task already has a different completion receipt")
+        with self._lock:
+            task = next(
+                (
+                    item
+                    for item in self._tasks_by_key.values()
+                    if item["id"] == task_id and item["tenant_id"] == tenant_id
+                    and item["data_domain"] == data_domain
+                ),
+                None,
+            )
+            if task is None:
+                return None
+            if task["status"] == "completed":
+                if task.get("completion_receipt") != receipt:
+                    raise ValueError("task already has a different completion receipt")
+                return deepcopy(task)
+            now = _now()
+            task["status"] = "completed"
+            task["completion_receipt"] = deepcopy(receipt)
+            task["completed_at"] = now
+            task["updated_at"] = now
             return deepcopy(task)
-        now = _now()
-        task["status"] = "completed"
-        task["completion_receipt"] = deepcopy(receipt)
-        task["completed_at"] = now
-        task["updated_at"] = now
-        return deepcopy(task)
 
     def clear(self) -> None:
-        self._tasks_by_key.clear()
+        with self._lock:
+            self._tasks_by_key.clear()
 
 
 class PostgresTaskWriteBackSink:

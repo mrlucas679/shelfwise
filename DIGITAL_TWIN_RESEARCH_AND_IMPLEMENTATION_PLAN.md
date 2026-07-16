@@ -355,8 +355,8 @@ list first, then only re-verify an item if the surrounding code actually changed
 pick one up):**
 - [ ] `twin_projection_worker` built and unit-tested but never wired to run (see finding above) -
       needs an owner decision on replace-vs-supplement before implementing the wiring.
-- [ ] The five remaining `/demo/*/agentic` routes (procurement, sales, catalog-price,
-      expiry-risk, cold-chain) still hardcode `facts=world_facts` - only `/demo/golden/agentic`
+- [ ] The five remaining `/scenarios/*/agentic` routes (procurement, sales, catalog-price,
+      expiry-risk, cold-chain) still hardcode `facts=world_facts` - only `/scenarios/golden/agentic`
       has been given the `data_domain`/`store_id` operational-twin path (see the earlier "plan to
       fix everything" entry above). Same mechanical pattern, five routes left.
 
@@ -366,7 +366,7 @@ Live-exercised (not just unit-tested) the approve/reject loop end to end via `Te
 against the running `app`, since this is the safety-critical path the whole platform's
 recommend-only posture depends on:
 
-- [x] `POST /demo/golden` -> real pending decision -> `POST /decisions/{id}/approve` -> genuinely
+- [x] `POST /scenarios/golden` -> real pending decision -> `POST /decisions/{id}/approve` -> genuinely
       transitions to `approved`, creates a learning event, creates a write-back task
       (`writeback_sink.create_task`). Verified live, not from reading code.
 - [x] Double-approving the same decision is truly idempotent: second call returns the byte-
@@ -470,7 +470,7 @@ deterministic scenario type this codebase implements:
       `/mlops/observability` went from 0 to 1, and the updated value is queryable through the
       same `get_thresholds` platform tool an agent would call - not just written and forgotten.
 - [x] Cold-chain demo feed (`/cold-chain/feed`) correctly self-reports `enabled=False` when
-      `COLD_CHAIN_DEMO` is unset (matching `.env.example`'s default) rather than faking data.
+      `COLD_CHAIN_FEED_ENABLED` is unset (matching `.env.example`'s default) rather than faking data.
 - [x] Connector registry (`/connectors/systems`) lists all 7 declared systems
       (csv/odoo/square/sap/shopify/syspro/lightspeed). Shopify webhook intake correctly derives
       `source_object_id` as `{order_id}:{line_item_id}`.
@@ -4401,7 +4401,7 @@ values, not fake/stubbed numbers dressed up as math.
       seeded) - confirmed live, not read from code.
 - [x] `GET /mlops/accountability` returns a real report (`decisions_total`, `models_used`,
       `prompt_versions`, a non-empty markdown rendering) after a real decision exists;
-      `models_used` correctly stays empty for `/demo/golden` specifically because that route is
+      `models_used` correctly stays empty for `/scenarios/golden` specifically because that route is
       deterministic-only (hand-authored evidence, no model call) by its own docstring - not a
       bug, expected.
 - [x] Benchmark harness: 14/14 tests pass; hand-checked `percentile()` directly -
@@ -4410,7 +4410,7 @@ values, not fake/stubbed numbers dressed up as math.
 - [x] **Frontend chat UI live-exercised end to end through a real browser**, not just `tsc`/lint:
       started the actual Vite dev server + FastAPI backend, confirmed the "Live store"/
       "Simulation" tab split genuinely filters by `data_domain` (a `world_simulation` decision
-      triggered via `/demo/golden` correctly did NOT appear under "Live store" and correctly DID
+      triggered via `/scenarios/golden` correctly did NOT appear under "Live store" and correctly DID
       appear under "Simulation" - proving the frontend respects the same domain boundary audited
       throughout this session, not just the backend). Opened the approval queue, saw the real
       evidence card (Expiry agent, cold-chain conclusion, ZAR-at-risk figure, HIGH risk badge),
@@ -4440,7 +4440,7 @@ a Postgres test-isolation bug (RLS/ambient-tenant mismatch in a `.clear()` call)
 
 **Real architectural gaps found and clearly flagged, not silently built:** `twin_projection_worker`
 unwired; conversation memory/skill-registry genuinely unbuilt (only a 12-message sliding window
-exists, no rolling summary/retrieval); five of six `/demo/*/agentic` routes still need the
+exists, no rolling summary/retrieval); five of six `/scenarios/*/agentic` routes still need the
 operational-twin wiring pattern already proven on the golden route.
 
 **False alarms caught and correctly retracted, not reported as bugs:** double-approve

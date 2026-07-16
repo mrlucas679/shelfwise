@@ -188,6 +188,48 @@ def test_agentic_procurement_cascade_drives_real_tool_calls_and_produces_decisio
     assert decision["role"] == "procurement_manager"
 
 
+def test_approving_an_agentic_reorder_produces_real_learning_and_economics() -> None:
+    """Procurement had NO learning-metric route at all (not degraded, entirely absent, in
+    both the deterministic and agentic cascades) - approving a reorder never built
+    organizational memory and always showed "R0.00 recovered" on the `/mlops` economics
+    dashboard, so the app could never legitimately claim continuous learning for
+    procurement, one of the store positions the product is required to cover for real, not
+    as a demo slice (found 2026-07-15 by distrusting a run that reported 0 failures).
+    """
+    from shelfwise_backend.app import _attach_decision_governance
+
+    tools, decisions, memory, facts = _build_tools()
+    sku, order_units, supplier_id = _hero_procurement_facts(facts)
+    runtime = _FakeRuntime(_scripted_messages(sku, order_units, supplier_id))
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_procurement_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+    assert result["decision"]["action"]["type"] == "reorder"
+
+    decisions.upsert(result["decision"])
+    decision = decisions.approve(result["decision"]["id"])
+    assert decision is not None
+
+    learning_event = memory.record_approved_decision(decision)
+    assert learning_event["delta_units"] > 0, (
+        "approving an agentic reorder must move a real learning threshold, not silently "
+        "record zero exposure because procurement had no learning-metric route at all"
+    )
+
+    _attach_decision_governance(result)
+    economics = result["decision"]["economics"]
+    assert economics["recovered"]["minor_units"] > 0
+
+
 def test_agentic_procurement_cascade_hard_fails_when_live_required_sees_offline_provider() -> None:
     tools, decisions, memory, facts = _build_tools()
     sku, order_units, supplier_id = _hero_procurement_facts(facts)

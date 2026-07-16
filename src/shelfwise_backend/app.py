@@ -5,8 +5,9 @@ import hashlib
 import logging
 import os
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+from time import monotonic, sleep
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -30,7 +31,6 @@ from shelfwise_connectors import (
 )
 from shelfwise_contracts import Event, EventSource, EventType, Money
 from shelfwise_inference import (
-    SUBMISSION_TIMEOUT_LIMIT_S,
     InferenceError,
     OpenAICompatibleInferenceClient,
     ProviderKind,
@@ -53,6 +53,7 @@ from shelfwise_storage import (
 from shelfwise_worldgen.scenarios import build as build_worldgen_scenario
 
 from .agentic_cascade import (
+    AgenticCascadeDeadlineError,
     AgenticCascadeError,
     run_catalog_price_check_via_agents,
     run_cold_chain_cascade_via_agents,
@@ -77,6 +78,7 @@ from .chat_context import (
 from .chat_context import (
     bounded_chat_learning_events as select_chat_learning_events,
 )
+from .connector_poll_service import ConnectorPollService
 from .deps import (
     _COOKIE_OVERRIDE_ENV,
     _INSECURE_APP_ENV_NAMES,
@@ -109,7 +111,8 @@ from .state import (
     cascade_dispatcher,
     cascade_worker,
     chat_store,
-    cold_chain_demo,
+    cold_chain_feed,
+    connector_cursor_store,
     decision_store,
     event_bus,
     event_store,
@@ -159,13 +162,13 @@ def cors_allowed_origins() -> list[str]:
 
 
 def _request_timeout_seconds() -> float:
-    """Return the deployment request deadline, always below `SUBMISSION_TIMEOUT_LIMIT_S`."""
-    ceiling = float(SUBMISSION_TIMEOUT_LIMIT_S - 1)
-    raw = os.getenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", str(ceiling))
+    """Return the configurable request deadline for real application operation."""
+    ceiling = 900.0
+    raw = os.getenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
     try:
         value = float(raw)
     except ValueError:
-        value = ceiling
+        value = 120.0
     return min(max(value, 1.0), ceiling)
 
 
@@ -182,6 +185,29 @@ def _agentic_unavailable(exc: AgenticCascadeError) -> HTTPException:
     """Log provider diagnostics without exposing endpoint or credential details to clients."""
     _LOGGER.warning("agentic inference unavailable: %s", str(exc)[:500])
     return HTTPException(status_code=503, detail="Live agentic inference is unavailable")
+
+
+def _agentic_deadline_exceeded(exc: AgenticCascadeDeadlineError) -> HTTPException:
+    """Return a structured 503 when a cascade stops itself before the response deadline.
+
+    This is the deliberate alternative to letting the request run past
+    `_request_timeout_seconds()` and get killed by `enforce_request_deadline` - the cascade
+    reports how far it got instead of leaving the caller with a bare timeout.
+    """
+    _LOGGER.warning("agentic cascade stopped before its deadline: %s", str(exc)[:500])
+    return HTTPException(
+        status_code=503,
+        detail={
+            "detail": "cascade could not finish inside the response deadline",
+            "completed_model_calls": exc.completed_model_calls,
+            "elapsed_ms": exc.elapsed_ms,
+        },
+    )
+
+
+def _cascade_deadline() -> float:
+    """Absolute monotonic deadline a cascade must stop calling models before."""
+    return monotonic() + _request_timeout_seconds() - 1.0
 
 
 def _production_execution_mode(requested_live: bool) -> ExecutionMode:
@@ -251,8 +277,8 @@ if build_scan_router is not None:
 
 app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
-app.router.add_event_handler("startup", cold_chain_demo.start)
-app.router.add_event_handler("shutdown", cold_chain_demo.stop)
+app.router.add_event_handler("startup", cold_chain_feed.start)
+app.router.add_event_handler("shutdown", cold_chain_feed.stop)
 
 
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
@@ -546,7 +572,7 @@ def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
             "tenant_profile_store": type(tenant_profile_store).__name__,
             "worldgen_run_store": type(worldgen_run_store).__name__,
             "inbound_record_store": type(inbound_record_store).__name__,
-            "cold_chain_demo": cold_chain_demo.status(),
+            "cold_chain_feed": cold_chain_feed.status(),
             "auth_mode": _auth_mode(),
             "tenant_auth_secret_configured": bool(os.getenv("TENANT_AUTH_SECRET", "")),
             "tenant_scoped_tables": sorted(TENANT_SCOPED_TABLES),
@@ -579,9 +605,9 @@ def inference_readiness_payload() -> dict[str, object]:
         and bool(config.api_key_for_agent("executive"))
         and bool(config.strong_model)
     )
-    network_ready = (
-        routine_ready and strong_ready and config.timeout_seconds < SUBMISSION_TIMEOUT_LIMIT_S
-    )
+    # The former 30-second hackathon target is an observability metric, not a
+    # correctness gate.  A healthy live model may legitimately need longer.
+    network_ready = routine_ready and strong_ready and config.timeout_seconds > 0
     dual_ready = network_ready and config.dual_model_configured
     amd_ready = dual_ready and config.provider is ProviderKind.VLLM_MI300X
     return {
@@ -597,9 +623,7 @@ def inference_readiness_payload() -> dict[str, object]:
             "distinct_model_ids": "ok" if config.dual_model_configured else "missing",
             "routine_model": "ok" if config.routine_model else "missing",
             "strong_model": "ok" if config.strong_model else "missing",
-            "timeout_under_30s": (
-                "ok" if config.timeout_seconds < SUBMISSION_TIMEOUT_LIMIT_S else "risk"
-            ),
+            "timeout_configured": "ok" if config.timeout_seconds > 0 else "missing",
             "amd_mi300x_provider": (
                 "ok" if config.provider is ProviderKind.VLLM_MI300X else "pending"
             ),
@@ -631,9 +655,7 @@ def submission_readiness() -> dict[str, object]:
             "docker_image_required": "required",
             "amd_compute_usage": "ok" if inference_ready["ready_for_amd_demo"] else "pending",
             "response_timeout": (
-                "configured_under_30s"
-                if _request_timeout_seconds() < SUBMISSION_TIMEOUT_LIMIT_S
-                else "pending"
+                "configured" if _request_timeout_seconds() > 0 else "missing"
             ),
             "english_responses": "enforced_in_code",
             "unseen_inputs": "not_cached_by_question",
@@ -778,6 +800,7 @@ def ingest_event(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if _auth_mode() == "jwt" and event.tenant_id != ctx.tenant_id:
         raise HTTPException(status_code=403, detail="Event tenant does not match token")
+    _reject_stale_operational_event(event)
     if event.type is EventType.RECALL_NOTICE:
         try:
             validate_recall_notice(event)
@@ -790,6 +813,20 @@ def ingest_event(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return _record_pipeline_event(event)
+
+
+def _reject_stale_operational_event(event: Event) -> None:
+    """Reject implausibly stale live intake while allowing simulation replay and backfill."""
+    if event.data_domain is not DataDomain.OPERATIONAL_TWIN:
+        return
+    raw = os.getenv("SHELFWISE_MAX_EVENT_AGE_SECONDS", "31536000")
+    try:
+        max_age_seconds = max(1, int(raw))
+    except ValueError:
+        max_age_seconds = 31_536_000
+    age_seconds = (datetime.now(UTC) - event.ts).total_seconds()
+    if age_seconds > max_age_seconds:
+        raise HTTPException(status_code=422, detail="Event timestamp is too stale")
 
 
 @app.post(
@@ -815,6 +852,14 @@ def confirm_scan_candidate(
             detail="Scan candidates can only enter the operational data source",
         )
 
+    existing = event_store.get(
+        event.id,
+        tenant_id=event.tenant_id,
+        data_domain=event.data_domain,
+    )
+    if _same_reviewed_candidate(existing, event, body.review_note):
+        return _record_pipeline_event(Event.parse_wire(existing or {}))
+
     reviewed_event = replace(
         event,
         payload={
@@ -825,6 +870,20 @@ def confirm_scan_candidate(
         },
     )
     return _record_pipeline_event(reviewed_event)
+
+
+def _same_reviewed_candidate(
+    stored: dict[str, Any] | None,
+    event: Event,
+    review_note: str,
+) -> bool:
+    if stored is None or not isinstance(stored.get("payload"), dict):
+        return False
+    stored_payload = dict(stored["payload"])
+    stored_note = str(stored_payload.pop("review_note", ""))
+    stored_payload.pop("reviewed_by", None)
+    stored_payload.pop("reviewed_at", None)
+    return stored_payload == event.payload and stored_note == review_note
 
 
 @app.get("/events")
@@ -845,6 +904,24 @@ def list_events(
     if _auth_mode() == "jwt":
         events = [item for item in events if item.get("tenant_id") == ctx.tenant_id]
     return {"data_domain": resolved_domain, "events": events}
+
+
+@app.get("/candidates/{candidate_key}/history")
+def candidate_history(
+    candidate_key: str,
+    limit: int = 100,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    """Return the immutable lifecycle transitions recorded for one candidate."""
+    try:
+        entries = candidate_store.history(ctx.tenant_id, candidate_key, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "tenant_id": ctx.tenant_id,
+        "candidate_key": candidate_key,
+        "history": [entry.to_dict() for entry in entries],
+    }
 
 
 @app.get("/events/bus")
@@ -1098,7 +1175,7 @@ def _new_chat_response(
         conversation_id=conversation_id,
     )
     if conversation:
-        state["conversation_history"] = conversation["messages"][-12:]
+        state["conversation_history"] = _bounded_chat_history(conversation["messages"])
     client = OpenAICompatibleInferenceClient(
         recorder=lambda payload: _record_model_run(
             {**payload, "data_domain": chat_domain}
@@ -1210,10 +1287,10 @@ def list_platform_tool_audit(
 
 @app.get("/cold-chain/feed")
 def list_cold_chain_feed(limit: int = 100) -> dict[str, object]:
-    return {"status": cold_chain_demo.status(), "events": cold_chain_demo.list_events(limit=limit)}
+    return {"status": cold_chain_feed.status(), "events": cold_chain_feed.list_events(limit=limit)}
 
 
-@app.get("/demo/worldgen-runs")
+@app.get("/scenarios/worldgen-runs")
 def list_worldgen_runs(
     limit: int = 100,
     ctx: TenantContext = CURRENT_TENANT_DEP,
@@ -1225,7 +1302,7 @@ def list_worldgen_runs(
     return {"runs": runs}
 
 
-@app.get("/demo/worldgen-runs/{run_id}")
+@app.get("/scenarios/worldgen-runs/{run_id}")
 def get_worldgen_run(
     run_id: str, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
@@ -1493,6 +1570,21 @@ def _process_inbound_record(record: Any) -> dict[str, Any]:
     }
 
 
+connector_poll_service = ConnectorPollService(
+    cursors=connector_cursor_store,
+    process_record=_process_inbound_record,
+    tenant_id=default_tenant_context().tenant_id,
+)
+app.router.add_event_handler("startup", connector_poll_service.start)
+app.router.add_event_handler("shutdown", connector_poll_service.stop)
+
+
+@app.get("/connectors/poll/status")
+def connector_poll_status() -> dict[str, object]:
+    """Report the background ERP/WMS poll loop's configured systems and last run."""
+    return connector_poll_service.status()
+
+
 @app.get("/mlops/prompts")
 def list_prompt_versions(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     tenant_id = ctx.tenant_id if _auth_mode() == "jwt" else None
@@ -1665,7 +1757,7 @@ def process_one_worker_event() -> dict[str, object]:
     return {"result": result}
 
 
-_DEMO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
+_SCENARIO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
 def _demo_occurrence_suffix(
@@ -1695,7 +1787,32 @@ def _slug_tenant(value: str) -> str:
     return clean.strip("_") or "local"
 
 
-def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
+def _demo_run_scope(value: str | None) -> str:
+    """Return a bounded key suffix for an explicitly scoped automated demo run."""
+    if not value or not value.strip():
+        return ""
+    digest = hashlib.sha256(value.strip().encode()).hexdigest()[:12]
+    return f":run:{digest}"
+
+
+def _demo_occurrence_ts(today: date) -> datetime:
+    """Return a deterministic timestamp for a day-scoped, idempotent demo trigger.
+
+    `id`/`correlation_id` for these events are already deterministic per (tenant, type,
+    sku, day) so a resubmission of the same logical trigger reuses the same id - that is
+    the documented idempotency contract (`_demo_occurrence_suffix`). But `Event.ts` was
+    generated fresh via `datetime.now(UTC)` on every call, so `_same_event_payload` saw a
+    different timestamp on any resubmission more than an instant apart and rejected it with
+    409 "different content" - a legitimate repeat click or webhook retry, not a real
+    conflict. Pinning `ts` to midnight UTC of the same day keeps it inside the existing
+    day-bucket the key is already scoped to, so a real resubmission is byte-identical.
+    """
+    return datetime(today.year, today.month, today.day, tzinfo=UTC)
+
+
+def _demo_event(
+    ctx: TenantContext, event_type: EventType, *, variant: str = "deterministic"
+) -> Event:
     """Create a tenant-owned trigger from the tenant's generated world facts.
 
     The id is derived deterministically from (tenant, event type, sku, day) rather than a
@@ -1705,18 +1822,27 @@ def _demo_event(ctx: TenantContext, event_type: EventType) -> Event:
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
     supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
     today = datetime.now(UTC).date().isoformat()
-    key = f"{ctx.tenant_id}:{event_type.value}:{scenario.sku}:{today}"
+    variant_slug = _slug_tenant(variant)
+    legacy = variant_slug == "deterministic"
+    scope = "" if legacy else f":{variant_slug}"
+    prefix_scope = "" if legacy else f"_{variant_slug}"
+    key = f"{ctx.tenant_id}{scope}:{event_type.value}:{scenario.sku}:{today}"
+    id_prefix = f"evt_demo{prefix_scope}_{event_type.value}"
     suffix = _demo_occurrence_suffix(
-        key, id_prefix=f"evt_demo_{event_type.value}", tenant_id=ctx.tenant_id
+        key, id_prefix=id_prefix, tenant_id=ctx.tenant_id
     )
     return Event(
-        id=f"evt_demo_{event_type.value}_{suffix}",
+        id=f"{id_prefix}_{suffix}",
         type=event_type,
         ts=datetime.now(UTC),
         actor=ctx.user_id,
         tenant_id=ctx.tenant_id,
         data_domain=DataDomain.WORLD_SIMULATION,
-        correlation_id=f"demo_{event_type.value}_{suffix}",
+        correlation_id=(
+            f"demo_{event_type.value}_{suffix}"
+            if legacy
+            else f"demo_{variant_slug}_{event_type.value}_{suffix}"
+        ),
         payload={
             "sku": scenario.sku,
             "location": scenario.location,
@@ -1743,7 +1869,7 @@ def _agentic_cascade_context(
     """
     resolved_domain = data_domain or _chat_data_domain()
     if resolved_domain == DataDomain.WORLD_SIMULATION.value:
-        return world_facts, _demo_event(ctx, event_type)
+        return world_facts, _demo_event(ctx, event_type, variant="agentic")
 
     facts = operational_facts_for_query(ctx.tenant_id, store_id=store_id)
     scenario = facts.get_scenario_facts(ctx.tenant_id)
@@ -1842,27 +1968,31 @@ def _assign_result_tenant(result: dict[str, Any], tenant_id: str) -> dict[str, A
     return result
 
 
-@app.post("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/golden", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_golden_cascade(_demo_event(ctx, EventType.SCAN), facts=world_facts)
     )
 
 
-@app.post("/demo/recall", dependencies=_DEMO_WRITE_DEPS)
-def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+@app.post("/scenarios/recall", dependencies=_SCENARIO_WRITE_DEPS)
+def demo_recall(
+    run_scope: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
     """Drive a generated-world supplier recall through the real event and HITL pipeline."""
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
     supplier = world_facts.get_supplier_for_sku(ctx.tenant_id, scenario.sku)
-    today = datetime.now(UTC).date().isoformat()
-    key = f"{ctx.tenant_id}:recall:{scenario.sku}:{today}"
+    today_date = datetime.now(UTC).date()
+    today = today_date.isoformat()
+    key = f"{ctx.tenant_id}:recall:{scenario.sku}:{today}{_demo_run_scope(run_scope)}"
     suffix = _demo_occurrence_suffix(
         key, id_prefix="evt_demo_recall", tenant_id=ctx.tenant_id
     )
     event = Event(
         id=f"evt_demo_recall_{suffix}",
         type=EventType.RECALL_NOTICE,
-        ts=datetime.now(UTC),
+        ts=_demo_occurrence_ts(today_date),
         actor=f"supplier_{supplier['supplier_id']}",
         tenant_id=ctx.tenant_id,
         data_domain=DataDomain.WORLD_SIMULATION,
@@ -1879,18 +2009,22 @@ def demo_recall(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
         },
     )
     outcome = _record_pipeline_event(event)
-    cascade = outcome.get("cascade")
-    if not isinstance(cascade, dict):
-        raise HTTPException(status_code=500, detail="Recall demo did not produce a decision")
-    return cascade
+    return _resolve_demo_pipeline_cascade(outcome, event, ctx)
 
 
-@app.post("/demo/inventory-exception", dependencies=_DEMO_WRITE_DEPS)
-def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+@app.post("/scenarios/inventory-exception", dependencies=_SCENARIO_WRITE_DEPS)
+def demo_inventory_exception(
+    run_scope: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
     """Drive a generated-world shrink count through the real event and HITL pipeline."""
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
-    today = datetime.now(UTC).date().isoformat()
-    key = f"{ctx.tenant_id}:inventory_exception:{scenario.sku}:{today}"
+    today_date = datetime.now(UTC).date()
+    today = today_date.isoformat()
+    key = (
+        f"{ctx.tenant_id}:inventory_exception:{scenario.sku}:{today}"
+        f"{_demo_run_scope(run_scope)}"
+    )
     suffix = _demo_occurrence_suffix(
         key, id_prefix="evt_demo_inventory_exception", tenant_id=ctx.tenant_id
     )
@@ -1898,7 +2032,7 @@ def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[st
     event = Event(
         id=f"evt_demo_inventory_exception_{suffix}",
         type=EventType.INVENTORY_EXCEPTION,
-        ts=datetime.now(UTC),
+        ts=_demo_occurrence_ts(today_date),
         actor="cycle_count_team",
         tenant_id=ctx.tenant_id,
         data_domain=DataDomain.WORLD_SIMULATION,
@@ -1915,18 +2049,15 @@ def demo_inventory_exception(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[st
         },
     )
     outcome = _record_pipeline_event(event)
-    cascade = outcome.get("cascade")
-    if not isinstance(cascade, dict):
-        raise HTTPException(status_code=500, detail="Inventory demo did not produce a decision")
-    return cascade
+    return _resolve_demo_pipeline_cascade(outcome, event, ctx)
 
 
-@app.get("/demo/golden", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/golden", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_golden_get() -> dict[str, object]:
     return _preview_demo_cascade(run_golden_cascade(facts=world_facts))
 
 
-@app.post("/demo/golden/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/golden/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_golden_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -1935,7 +2066,7 @@ def demo_golden_agentic(
 ) -> dict[str, object]:
     """Run the golden scenario's Critic/Executive verdicts through a real Gemma tool loop.
 
-    Unlike /demo/golden (deterministic math + hand-authored evidence), this route requires
+    Unlike /scenarios/golden (deterministic math + hand-authored evidence), this route requires
     an actual model call and tool-calling round trip. With live_required=true (default) it
     hard-fails with 503 instead of silently falling back to an offline/deterministic answer.
 
@@ -1961,19 +2092,22 @@ def demo_golden_agentic(
             facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     return _record_cascade(result)
 
 
-@app.post("/demo/procurement/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/procurement/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_procurement_agentic(
     live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
     """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
 
-    Unlike /demo/procurement (deterministic math + hand-authored evidence), this route
+    Unlike /scenarios/procurement (deterministic math + hand-authored evidence), this route
     requires an actual model call and tool-calling round trip over get_reorder_policy and
     get_supplier_ranking. With live_required=true (default) it hard-fails with 503 instead
     of silently falling back to an offline/deterministic answer.
@@ -1981,26 +2115,29 @@ def demo_procurement_agentic(
     mode = _production_execution_mode(live_required)
     try:
         result = run_procurement_cascade_via_agents(
-            _demo_event(ctx, EventType.SUPPLIER_UPDATE),
+            _demo_event(ctx, EventType.SUPPLIER_UPDATE, variant="agentic"),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
             facts=world_facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     return _record_cascade(result)
 
 
-@app.post("/demo/sales/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/sales/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_sales_agentic(
     live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
     """Run the POS price-integrity verdict through a real Gemma tool loop.
 
-    Unlike /demo/sales (deterministic math + hand-authored evidence), this route requires
+    Unlike /scenarios/sales (deterministic math + hand-authored evidence), this route requires
     an actual model call and tool-calling round trip over check_price_integrity. With
     live_required=true (default) it hard-fails with 503 instead of silently falling back
     to an offline/deterministic answer.
@@ -2008,20 +2145,23 @@ def demo_sales_agentic(
     mode = _production_execution_mode(live_required)
     try:
         result = run_sales_cascade_via_agents(
-            _demo_event(ctx, EventType.SALE),
+            _demo_event(ctx, EventType.SALE, variant="agentic"),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
             facts=world_facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     return _record_cascade(result)
 
 
-@app.post("/demo/catalog-price/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/catalog-price/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_catalog_price_agentic(
     live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
@@ -2036,7 +2176,10 @@ def demo_catalog_price_agentic(
             facts=world_facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     if result is None:
@@ -2044,7 +2187,7 @@ def demo_catalog_price_agentic(
     return _record_cascade(result)
 
 
-@app.post("/demo/expiry-risk/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/expiry-risk/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_expiry_risk_agentic(
     live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
@@ -2059,7 +2202,10 @@ def demo_expiry_risk_agentic(
             facts=world_facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     if result is None:
@@ -2067,13 +2213,13 @@ def demo_expiry_risk_agentic(
     return _record_cascade(result)
 
 
-@app.post("/demo/cold-chain/agentic", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/cold-chain/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_cold_chain_agentic(
     live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
 ) -> dict[str, object]:
     """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
 
-    Unlike /demo/cold-chain (deterministic math + hand-authored evidence), this route
+    Unlike /scenarios/cold-chain (deterministic math + hand-authored evidence), this route
     requires an actual model call and tool-calling round trip over get_cold_chain_status.
     With live_required=true (default) it hard-fails with 503 instead of silently falling
     back to an offline/deterministic answer.
@@ -2081,68 +2227,71 @@ def demo_cold_chain_agentic(
     mode = _production_execution_mode(live_required)
     try:
         result = run_cold_chain_cascade_via_agents(
-            _demo_event(ctx, EventType.COLD_CHAIN_ALERT),
+            _demo_event(ctx, EventType.COLD_CHAIN_ALERT, variant="agentic"),
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
             facts=world_facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
+            deadline=_cascade_deadline(),
         )
+    except AgenticCascadeDeadlineError as exc:
+        raise _agentic_deadline_exceeded(exc) from exc
     except AgenticCascadeError as exc:
         raise _agentic_unavailable(exc) from exc
     return _record_cascade(result)
 
 
-@app.post("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/critic-rejection", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_critic_rejection(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         _assign_result_tenant(run_critic_rejection_cascade(facts=world_facts), ctx.tenant_id)
     )
 
 
-@app.get("/demo/critic-rejection", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/critic-rejection", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_critic_rejection_get() -> dict[str, object]:
     return _preview_demo_cascade(run_critic_rejection_cascade(facts=world_facts))
 
 
-@app.post("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/procurement", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_procurement(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE), facts=world_facts)
     )
 
 
-@app.get("/demo/procurement", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/procurement", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_procurement_get() -> dict[str, object]:
     return _preview_demo_cascade(run_procurement_cascade(facts=world_facts))
 
 
-@app.post("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/sales", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_sales(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_sales_cascade(_demo_event(ctx, EventType.SALE), facts=world_facts)
     )
 
 
-@app.get("/demo/sales", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/sales", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_sales_get() -> dict[str, object]:
     return _preview_demo_cascade(run_sales_cascade(facts=world_facts))
 
 
-@app.post("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
+@app.post("/scenarios/cold-chain", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_cold_chain(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT), facts=world_facts)
     )
 
 
-@app.get("/demo/cold-chain", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/cold-chain", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_cold_chain_get() -> dict[str, object]:
     return _preview_demo_cascade(run_cold_chain_cascade(facts=world_facts))
 
 
-@app.get("/demo/worldgen/{scenario_id}", dependencies=_DEMO_WRITE_DEPS)
+@app.get("/scenarios/worldgen/{scenario_id}", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_worldgen_drill(
     scenario_id: str,
     limit: int = 80,
@@ -2440,6 +2589,8 @@ _CHAT_RESOLVED_DECISION_LIMIT = 1
 _CHAT_LEARNING_EVENT_LIMIT = 5
 _CHAT_THRESHOLD_LIMIT = 6
 _CHAT_TRACE_LIMIT = 1
+_CHAT_HISTORY_LIMIT = 4
+_CHAT_HISTORY_TEXT_LIMIT = 600
 
 
 def _chat_data_domain() -> str:
@@ -2479,6 +2630,19 @@ def _bounded_chat_decisions(
         pending_limit=_CHAT_PENDING_DECISION_LIMIT,
         resolved_limit=_CHAT_RESOLVED_DECISION_LIMIT,
     )
+
+
+def _bounded_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Retain conversational meaning without recursively replaying tool metadata."""
+    compact: list[dict[str, str]] = []
+    for message in messages[-_CHAT_HISTORY_LIMIT:]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        text = str(message.get("text") or "")[:_CHAT_HISTORY_TEXT_LIMIT]
+        if role in {"user", "assistant"} and text:
+            compact.append({"role": role, "text": text})
+    return compact
 
 
 def _bounded_chat_learning_events(
@@ -2701,7 +2865,15 @@ def reject_decision(
         updated = decision_store.annotate(decision_id, correction=correction)
         if updated is not None:
             decision = updated
-    return {"decision": decision, "learning_event": None}
+    if decision.get("status") != "rejected":
+        return {"decision": decision, "learning_event": None}
+    learning_event = learning_store.record_rejected_decision(decision)
+    updated = decision_store.annotate(
+        decision_id,
+        outcome=learning_event["outcome"],
+        learning_event=learning_event,
+    )
+    return {"decision": updated or decision, "learning_event": learning_event}
 
 
 def _record_pipeline_event(event: Event) -> dict[str, Any]:
@@ -2712,20 +2884,28 @@ def _record_pipeline_event(event: Event) -> dict[str, Any]:
     # duplicate on resubmission; anything recorded-but-unpublished self-heals by publishing
     # on the next attempt with the same id.
     is_new = event_store.record(event)
+    if not is_new:
+        stored = event_store.get(
+            event.id,
+            tenant_id=event.tenant_id,
+            data_domain=event.data_domain,
+        )
+        if not _same_event_payload(stored, event):
+            raise HTTPException(status_code=409, detail="Event id already has different content")
+        if event_store.is_published(
+            event.id,
+            tenant_id=event.tenant_id,
+            data_domain=event.data_domain,
+        ):
+            return {
+                "status": "duplicate",
+                "event": event.to_dict(),
+                "bus_message_id": None,
+                "cascade": None,
+                "twin": {"status": "not_replayed"},
+            }
     open_order_store.observe_event(event)
     twin_projection = _project_twin_event(event)
-    if not is_new and event_store.is_published(
-        event.id,
-        tenant_id=event.tenant_id,
-        data_domain=event.data_domain,
-    ):
-        return {
-            "status": "duplicate",
-            "event": event.to_dict(),
-            "bus_message_id": None,
-            "cascade": None,
-            "twin": twin_projection,
-        }
 
     bus_message_id = event_bus.publish(event)
     event_store.mark_published(
@@ -2741,6 +2921,69 @@ def _record_pipeline_event(event: Event) -> dict[str, Any]:
         "cascade": cascade,
         "twin": twin_projection,
     }
+
+
+_DEMO_DRILL_WAIT_S = 15.0
+_DEMO_DRILL_POLL_S = 0.2
+
+
+def _await_worker_cascade(event: Event, ctx: TenantContext) -> dict[str, Any]:
+    """Wait for the async worker to actually process a just-published event.
+
+    In the real production topology (`WORKER_ENABLED=true`), a cascade is never computed
+    synchronously inline - `_record_pipeline_event` deliberately defers it to the queue
+    consumer, same as it would for a real recall or shrink count arriving from a source
+    system. A "drill" endpoint that immediately checked `cascade is None` and 500'd was a
+    leftover single-process demo assumption; the honest real-app behavior is to wait for
+    the worker (it polls every 0.25s) and return the decision it actually produces, or a
+    truthful still-processing signal if the wait bound is exceeded - never a fabricated
+    failure for a submission that in fact succeeded.
+    """
+    deadline = monotonic() + _DEMO_DRILL_WAIT_S
+    while monotonic() < deadline:
+        for row in decision_store.list():
+            caused_by = row.get("caused_by")
+            if isinstance(caused_by, (list, tuple)) and event.id in caused_by:
+                if str(row.get("tenant_id") or ctx.tenant_id) != ctx.tenant_id:
+                    continue
+                return _record_cascade({"decision": row})
+        sleep(_DEMO_DRILL_POLL_S)
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "event was accepted and queued but the worker has not produced a decision "
+            "yet; retry shortly"
+        ),
+    )
+
+
+def _resolve_demo_pipeline_cascade(
+    outcome: dict[str, Any], event: Event, ctx: TenantContext
+) -> dict[str, Any]:
+    """Return the real cascade for a pipeline-routed demo event, sync or async."""
+    cascade = outcome.get("cascade")
+    if isinstance(cascade, dict):
+        return cascade
+    if outcome.get("status") == "duplicate":
+        # A repeat drill click resubmits the same deterministic event id - the original
+        # decision already exists (or is still being produced by the worker); look it up
+        # instead of treating a legitimate idempotent resubmission as a hard failure.
+        for row in decision_store.list():
+            caused_by = row.get("caused_by")
+            if (
+                isinstance(caused_by, (list, tuple))
+                and event.id in caused_by
+                and str(row.get("tenant_id") or ctx.tenant_id) == ctx.tenant_id
+            ):
+                return _record_cascade({"decision": row})
+    return _await_worker_cascade(event, ctx)
+
+
+def _same_event_payload(stored: dict[str, Any] | None, event: Event) -> bool:
+    if stored is None:
+        return False
+    expected = event.to_dict()
+    return all(stored.get(key) == value for key, value in expected.items())
 
 
 def _project_twin_event(event: Event) -> dict[str, Any]:

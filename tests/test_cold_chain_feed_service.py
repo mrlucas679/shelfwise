@@ -5,15 +5,15 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
-from shelfwise_backend.cold_chain_demo import ColdChainDemoService
+from shelfwise_backend.cold_chain_feed import ColdChainFeedService
 
 
-def test_cold_chain_demo_service_stays_idle_when_disabled(monkeypatch) -> None:
+def test_cold_chain_feed_service_stays_idle_when_disabled(monkeypatch) -> None:
     async def runner(*args, **kwargs):  # pragma: no cover - should not be called
         raise AssertionError("runner should not start when disabled")
 
-    service = ColdChainDemoService(feed_runner=runner)
-    monkeypatch.delenv("COLD_CHAIN_DEMO", raising=False)
+    service = ColdChainFeedService(feed_runner=runner)
+    monkeypatch.delenv("COLD_CHAIN_FEED_ENABLED", raising=False)
 
     asyncio.run(service.start())
 
@@ -21,7 +21,7 @@ def test_cold_chain_demo_service_stays_idle_when_disabled(monkeypatch) -> None:
     assert service.status()["running"] is False
 
 
-def test_cold_chain_demo_service_starts_records_and_cancels(monkeypatch) -> None:
+def test_cold_chain_feed_service_starts_records_and_cancels(monkeypatch) -> None:
     ready = asyncio.Event()
 
     async def runner(publish, **kwargs):
@@ -30,9 +30,9 @@ def test_cold_chain_demo_service_starts_records_and_cancels(monkeypatch) -> None
         ready.set()
         await asyncio.Event().wait()
 
-    async def run() -> ColdChainDemoService:
-        service = ColdChainDemoService(feed_runner=runner)
-        monkeypatch.setenv("COLD_CHAIN_DEMO", "true")
+    async def run() -> ColdChainFeedService:
+        service = ColdChainFeedService(feed_runner=runner)
+        monkeypatch.setenv("COLD_CHAIN_FEED_ENABLED", "true")
         await service.start()
         await asyncio.wait_for(ready.wait(), timeout=1)
         assert service.status()["running"] is True

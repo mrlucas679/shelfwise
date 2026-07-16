@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+import os
 from abc import abstractmethod
 from collections.abc import AsyncIterator
 from threading import Lock
+from typing import Any, Protocol
+
+from shelfwise_storage import auto_schema_enabled, connect
+from shelfwise_storage.rls import apply_tenant_rls
 
 from ..canonical import SourceSystem
 from ..provenance import InboundRecord
 from .base import SourceConnector
+
+
+class CursorStore(Protocol):
+    """Per-(tenant, system) pagination cursor, shared by the memory and Postgres backends."""
+
+    async def get(self, *, tenant_id: str, system: SourceSystem) -> str | None: ...
+
+    async def set(self, *, tenant_id: str, system: SourceSystem, cursor: str) -> None: ...
+
+    def clear(self) -> None: ...
 
 
 class InMemoryCursorStore:
@@ -25,6 +40,78 @@ class InMemoryCursorStore:
     def clear(self) -> None:
         with self._lock:
             self._cursors.clear()
+
+
+class PostgresCursorStore:
+    """Durable poll cursor so a process restart resumes instead of re-polling from scratch.
+
+    An in-memory-only cursor is a real gap for a poll connector specifically: every restart
+    would silently re-fetch a system's entire history on the next poll rather than resuming
+    - `pull()`'s own dedup absorbs the duplicates, but at the cost of re-fetching everything
+    every time the process restarts, which does not scale to a real ERP catalogue.
+    """
+
+    def __init__(self, database_url: str) -> None:
+        if not database_url:
+            raise ValueError("DATABASE_URL is required for PostgresCursorStore")
+        self._database_url = database_url
+        if auto_schema_enabled():
+            self._ensure_schema()
+
+    async def get(self, *, tenant_id: str, system: SourceSystem) -> str | None:
+        with self._connect(tenant_id) as conn:
+            row = conn.execute(
+                "select cursor from shelfwise_connector_cursors "
+                "where tenant_id = %s and system = %s",
+                (tenant_id, system.value),
+            ).fetchone()
+        return str(row["cursor"]) if row else None
+
+    async def set(self, *, tenant_id: str, system: SourceSystem, cursor: str) -> None:
+        with self._connect(tenant_id) as conn:
+            conn.execute(
+                """
+                insert into shelfwise_connector_cursors (tenant_id, system, cursor)
+                values (%s, %s, %s)
+                on conflict (tenant_id, system) do update set cursor = excluded.cursor
+                """,
+                (tenant_id, system.value, cursor),
+            )
+            conn.commit()
+
+    def clear(self) -> None:
+        with self._connect(None) as conn:
+            conn.execute("delete from shelfwise_connector_cursors")
+            conn.commit()
+
+    def _ensure_schema(self) -> None:
+        with self._connect(None) as conn:
+            conn.execute(_CURSOR_SCHEMA_SQL)
+            apply_tenant_rls(conn, ("shelfwise_connector_cursors",))
+            conn.commit()
+
+    def _connect(self, tenant_id: str | None) -> Any:
+        return connect(self._database_url, tenant_id=tenant_id)
+
+
+_CURSOR_SCHEMA_SQL = """
+create table if not exists shelfwise_connector_cursors (
+    tenant_id text not null,
+    system text not null,
+    cursor text not null,
+    primary key (tenant_id, system)
+);
+"""
+
+
+def create_cursor_store() -> InMemoryCursorStore | PostgresCursorStore:
+    """Create the poll-cursor store using the existing storage backend switch."""
+    backend = os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower()
+    if backend == "memory":
+        return InMemoryCursorStore()
+    if backend == "postgres":
+        return PostgresCursorStore(os.getenv("DATABASE_URL", ""))
+    raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
 
 
 _MAX_POLL_PAGES = 10_000

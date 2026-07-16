@@ -27,6 +27,25 @@ from shelfwise_storage import InMemoryTenantProfileStore, create_tenant_profile_
 from shelfwise_worldgen import InMemoryWorldgenRunStore, create_worldgen_run_store
 
 
+def test_pending_upsert_preserves_evidence_fields_omitted_by_agentic_update() -> None:
+    store = InMemoryDecisionStore()
+    store.upsert(
+        {
+            "id": "dec_shared",
+            "status": "pending",
+            "summary": "deterministic",
+            "expected_outcome": {"stock_at_risk_minor_units": 220_777},
+        }
+    )
+
+    updated = store.upsert(
+        {"id": "dec_shared", "status": "pending", "summary": "agentic verdict"}
+    )
+
+    assert updated["summary"] == "agentic verdict"
+    assert updated["expected_outcome"] == {"stock_at_risk_minor_units": 220_777}
+
+
 def test_store_factories_default_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SHELFWISE_STORE_BACKEND", raising=False)
     monkeypatch.delenv("SHELFWISE_BUS_BACKEND", raising=False)

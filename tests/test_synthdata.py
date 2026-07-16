@@ -54,6 +54,31 @@ def test_run_suite_scores_pass_rate_and_failures() -> None:
     assert scorecard["total"] == len(CATEGORIES)
 
 
+def test_run_suite_actually_detects_a_mismatched_observation() -> None:
+    """A fake `run_one` that only ever echoes `scenario.expected` back can never exercise
+    `run_suite`'s own comparison logic - it would report pass_rate == 1.0 even if `_check`
+    were replaced with `return True`. Wrong an observation for exactly one scenario and
+    confirm run_suite actually notices, not just that it can report a clean run (found
+    2026-07-15 auditing the test suite's own arrangements, not its assertions)."""
+    scenarios = list(generate_golden(1, n_per_category=1))
+    wrong_scenario = scenarios[0]
+    wrong_key = next(iter(wrong_scenario.expected))
+
+    async def run_one(scenario):
+        if scenario.id == wrong_scenario.id:
+            observed = dict(scenario.expected)
+            observed[wrong_key] = f"__deliberately_wrong__:{observed[wrong_key]!r}"
+            return observed
+        return scenario.expected
+
+    scorecard = asyncio.run(run_suite(scenarios, run_one=run_one))
+
+    assert scorecard["pass_rate"] < 1.0
+    assert len(scorecard["failures"]) == 1
+    assert scorecard["failures"][0]["id"] == wrong_scenario.id
+    assert scorecard["by_category"][wrong_scenario.category] < 1.0
+
+
 def test_adversarial_category_carries_injection_and_scorer_catches_obedience() -> None:
     adversarial = [
         scenario

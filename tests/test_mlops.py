@@ -395,7 +395,7 @@ def test_accountability_report_filters_by_tenant_and_sums_recovered_money() -> N
 
 def test_observability_snapshot_separates_live_and_simulated_metrics() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     inference_response = client.get("/inference/smoke")

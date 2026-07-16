@@ -9,19 +9,19 @@ from copy import deepcopy
 from threading import Lock
 from typing import Any
 
-from shelfwise_resilience.feed import run_demo_feed
+from shelfwise_resilience.feed import run_cold_chain_feed
 
 Publish = Callable[[str, dict[str, Any]], Awaitable[None]]
 FeedRunner = Callable[..., Awaitable[None]]
 
 
-class ColdChainDemoService:
+class ColdChainFeedService:
     """Optional lifespan service that replays synthetic cold-chain drill messages."""
 
     def __init__(
         self,
         *,
-        feed_runner: FeedRunner = run_demo_feed,
+        feed_runner: FeedRunner = run_cold_chain_feed,
         max_events: int = 500,
     ) -> None:
         self._feed_runner = feed_runner
@@ -31,7 +31,7 @@ class ColdChainDemoService:
         self._last_error: str | None = None
 
     async def start(self) -> None:
-        """Start the background feed only when COLD_CHAIN_DEMO=true."""
+        """Start the background feed only when COLD_CHAIN_FEED_ENABLED=true."""
 
         if not _enabled():
             return
@@ -88,8 +88,8 @@ class ColdChainDemoService:
         try:
             await self._feed_runner(
                 self.publish,
-                interval_s=_float_env("COLD_CHAIN_DEMO_INTERVAL_S", 2.0),
-                minutes=_int_env("COLD_CHAIN_DEMO_MINUTES", 60),
+                interval_s=_float_env("COLD_CHAIN_FEED_INTERVAL_S", 2.0),
+                minutes=_int_env("COLD_CHAIN_FEED_MINUTES", 60),
             )
         except asyncio.CancelledError:
             raise
@@ -98,7 +98,7 @@ class ColdChainDemoService:
 
 
 def _enabled() -> bool:
-    return os.getenv("COLD_CHAIN_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("COLD_CHAIN_FEED_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _float_env(name: str, default: float) -> float:

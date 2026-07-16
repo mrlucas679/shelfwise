@@ -164,6 +164,41 @@ def test_agentic_sales_cascade_drives_real_tool_calls_and_produces_decision() ->
     assert decision["role"] == "sales_manager"
 
 
+def test_approving_an_agentic_sales_price_exception_produces_real_learning_movement() -> None:
+    """`Decision` objects built by the agentic cascades never carried `expected_outcome`,
+    so approving one always computed zero exposure in `record_approved_decision` - invisible
+    to every past test because nothing had ever approved an agentic decision and checked the
+    learning store afterward (found 2026-07-15 by distrusting a run that reported 0 failures).
+    """
+    tools, decisions, memory, facts = _build_tools()
+    sku, observed, catalog, delta = _hero_price_facts(facts)
+    runtime = _FakeRuntime(_scripted_messages(sku, observed, catalog, delta))
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_sales_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+    assert result["decision"]["action"]["type"] == "review_price_exception"
+
+    decisions.upsert(result["decision"])
+    decision = decisions.approve(result["decision"]["id"])
+    assert decision is not None
+
+    learning_event = memory.record_approved_decision(decision)
+    assert learning_event["delta_units"] > 0, (
+        "approving an agentic price-exception decision must move a real learning "
+        "threshold, not silently record zero exposure"
+    )
+    assert learning_event["outcome"]["measured_minor_units"] > 0
+
+
 def test_agentic_sales_cascade_hard_fails_when_live_required_sees_offline_provider() -> None:
     tools, decisions, memory, facts = _build_tools()
     sku, observed, catalog, delta = _hero_price_facts(facts)
