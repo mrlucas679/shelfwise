@@ -135,8 +135,12 @@ def run_prescreen(
             timeout=request_deadline,
         )
         answer = body.decode("utf-8")
-        if probe.elapsed_ms >= 30_000:
-            raise RuntimeError(f"chat response exceeded 30 seconds: {probe.elapsed_ms:.1f}ms")
+        # The retired 30s submission gate used to hard-fail here; the request timeout above
+        # is now the only latency bound, so a slow-but-successful live answer still passes.
+        if probe.elapsed_ms >= request_deadline * 1_000:
+            raise RuntimeError(
+                f"chat response exceeded the request deadline: {probe.elapsed_ms:.1f}ms"
+            )
         if not _english_compatible(answer):
             raise RuntimeError("chat response was not English-compatible")
         if headers.get("X-ShelfWise-Provider") != "vllm_mi300x":
@@ -180,13 +184,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True, help="Public backend or frontend origin")
     parser.add_argument("--startup-deadline", type=float, default=60.0)
-    parser.add_argument("--request-deadline", type=float, default=29.0)
+    # The retired 30s submission gate used to cap this below 30s, falsely failing live model
+    # routes that legitimately breathe longer. The default clears the app's 120s deadline.
+    parser.add_argument("--request-deadline", type=float, default=130.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if not 0 < args.startup_deadline <= 60:
         parser.error("--startup-deadline must be between 0 and 60 seconds")
-    if not 0 < args.request_deadline < 30:
-        parser.error("--request-deadline must be below 30 seconds")
+    if not 0 < args.request_deadline <= 900:
+        parser.error("--request-deadline must be between 0 and 900 seconds")
     receipt = run_prescreen(
         args.base_url,
         startup_deadline=args.startup_deadline,

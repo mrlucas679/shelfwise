@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +13,10 @@ from shelfwise_backend.cascade import (
     run_procurement_cascade,
     run_sales_cascade,
 )
+from shelfwise_backend.event_bus import stale_consumer_idle_ms
 from shelfwise_contracts import Event, EventType
+from shelfwise_runtime import DataDomain
+from shelfwise_storage import bind_tenant_context, reset_tenant_context
 
 from .journal import InMemoryJournal, PostgresJournal, journaled
 
@@ -61,14 +66,21 @@ class CascadeWorker:
         decision_store: Any,
         handler: CascadeHandler | None = None,
         group: str = "cascade",
-        consumer: str = "worker-1",
+        consumer: str | None = None,
     ) -> None:
         self._bus = bus
         self._journal = journal
         self._decision_store = decision_store
         self._handler = handler or default_cascade_handler
         self._group = group
-        self._consumer = consumer
+        # A fixed consumer name shared by every replica would make Redis treat all
+        # replicas as ONE consumer: each replica's pending-history read ("0" cursor)
+        # would re-deliver messages another replica is actively processing, double-
+        # running cascades. A per-process identity keeps pending entries owned by the
+        # process that read them; a crashed process's pending messages are recovered by
+        # WorkerLoopService's periodic reclaim_stale sweep (idle threshold derived from
+        # the per-request work budget - see stale_consumer_idle_ms), not identity reuse.
+        self._consumer = consumer or _process_consumer_name()
 
     def process_one(self, stream: str | None = None) -> WorkerResult:
         message = self._consume(stream)
@@ -77,10 +89,16 @@ class CascadeWorker:
 
         message_id = str(message["message_id"])
         message_stream = str(message["stream"])
+        tenant_token = None
         try:
             event = Event.parse_wire(message["event"])
-            run_id = event.id
-            self._journal.start_run(run_id, tenant_id=event.tenant_id)
+            tenant_token = bind_tenant_context(event.tenant_id)
+            run_id = _event_run_id(event)
+            self._journal.start_run(
+                run_id,
+                tenant_id=event.tenant_id,
+                data_domain=event.data_domain.value,
+            )
             cascade = journaled(
                 self._journal,
                 run_id,
@@ -112,6 +130,9 @@ class CascadeWorker:
                 error=str(exc),
                 dead_lettered=dead_lettered,
             )
+        finally:
+            if tenant_token is not None:
+                reset_tenant_context(tenant_token)
 
     def _persist_decision(self, run_id: str, cascade: dict[str, Any]) -> dict[str, Any] | None:
         decision = cascade.get("decision")
@@ -145,8 +166,48 @@ class CascadeWorker:
         except TypeError:
             return bool(self._bus.nack(stream, message_id))
 
+    def reclaim_stale(self, *, min_idle_ms: int | None = None) -> int:
+        """Reclaim stale bus entries through the configured bus implementation.
+
+        The idle threshold defaults to the budget-derived `stale_consumer_idle_ms()`
+        rather than a fixed constant, so "stale" always means "idle past everything the
+        system allows one unit of work to legitimately take", not an arbitrary number.
+        """
+        reclaim = getattr(self._bus, "reclaim_stale", None)
+        if not callable(reclaim):
+            return 0
+        resolved_idle_ms = stale_consumer_idle_ms() if min_idle_ms is None else min_idle_ms
+        try:
+            return int(
+                reclaim(
+                    None,
+                    group=self._group,
+                    consumer=self._consumer,
+                    min_idle_ms=resolved_idle_ms,
+                )
+            )
+        except TypeError:
+            return int(reclaim(None))
+
 
 def default_cascade_handler(event: Event) -> dict[str, Any]:
+    if event.data_domain is DataDomain.OPERATIONAL_TWIN and event.type in {
+        EventType.SCAN,
+        EventType.SUPPLIER_UPDATE,
+        EventType.SALE,
+        EventType.COLD_CHAIN_ALERT,
+    }:
+        return _attach_event_causality(
+            {
+                "scenario": "operational_dispatcher_required",
+                "decision": None,
+                "evidence": [],
+                "trace": [],
+                "status": "insufficient_operational_facts",
+                "missing_data": ["configured operational facts provider"],
+            },
+            event,
+        )
     if event.type is EventType.SCAN:
         return _attach_event_causality(run_golden_cascade(event), event)
     if event.type is EventType.SUPPLIER_UPDATE:
@@ -170,17 +231,32 @@ def default_cascade_handler(event: Event) -> dict[str, Any]:
     }
 
 
+def _process_consumer_name() -> str:
+    return f"worker-{socket.gethostname()}-{os.getpid()}"
+
+
 def _run_id_from_message(message: dict[str, Any]) -> str | None:
     event = message.get("event")
     if not isinstance(event, dict):
         return None
-    return str(event.get("id") or event.get("correlation_id") or "") or None
+    try:
+        return _event_run_id(Event.parse_wire(event))
+    except (TypeError, ValueError):
+        return str(event.get("id") or event.get("correlation_id") or "") or None
+
+
+def _event_run_id(event: Event) -> str:
+    """Scope journal identity to the same uniqueness boundary as persisted events."""
+    return f"event:{event.tenant_id}:{event.data_domain.value}:{event.id}"
 
 
 def _attach_event_causality(result: dict[str, Any], event: Event) -> dict[str, Any]:
     result["correlation_id"] = event.correlation_id
     result["tenant_id"] = event.tenant_id
+    result["data_domain"] = event.data_domain.value
     decision = result.get("decision")
     if isinstance(decision, dict):
         decision["caused_by"] = [event.id]
+        decision["tenant_id"] = event.tenant_id
+        decision["data_domain"] = event.data_domain.value
     return result

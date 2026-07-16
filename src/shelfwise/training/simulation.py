@@ -61,6 +61,13 @@ CASE_TYPES = (
     "high-risk supplier pattern",
     "normal safe transaction",
     "ambiguous missing evidence",
+    # Added to cover decision domains the app implements beyond procurement/delivery
+    # exceptions (golden markdown cascade, cold-chain, and catalog-price guardrail agents) -
+    # the original 12 case types were procurement/receiving-only and never trained the model
+    # on the store positions that actually generate most real recommendations.
+    "expiry markdown decision",
+    "cold-chain temperature breach",
+    "price integrity mismatch",
 )
 
 MIXTURE_WEIGHTS = DEFAULT_MIXTURE_WEIGHTS
@@ -124,6 +131,38 @@ EVIDENCE_BY_CASE = {
             "timestamp": "2026-07-09T06:30:00+02:00",
             "metadata": {"source": "receiving_system"},
         },
+    ],
+    "expiry markdown decision": [
+        {
+            "type": "structured_json",
+            "path": "data/evidence/smoke/product_metadata.json",
+            "mime_type": "application/json",
+            "description": "Shelf-life and days-to-expiry data for the deterministic markdown "
+            "tool.",
+            "timestamp": "2026-07-09T06:20:00+02:00",
+            "metadata": {"source": "generated_world", "tool": "simulate_markdown"},
+        }
+    ],
+    "cold-chain temperature breach": [
+        {
+            "type": "structured_json",
+            "path": "data/evidence/smoke/product_metadata.json",
+            "mime_type": "application/json",
+            "description": "Refrigeration sensor reading exceeding the configured temperature "
+            "limit.",
+            "timestamp": "2026-07-09T06:25:00+02:00",
+            "metadata": {"source": "generated_world", "sensor": "fridge_a"},
+        }
+    ],
+    "price integrity mismatch": [
+        {
+            "type": "structured_json",
+            "path": "data/evidence/smoke/product_metadata.json",
+            "mime_type": "application/json",
+            "description": "Till price vs. catalogue price comparison for the flagged SKU.",
+            "timestamp": "2026-07-09T06:15:00+02:00",
+            "metadata": {"source": "generated_world", "tool": "check_price_integrity"},
+        }
     ],
 }
 
@@ -240,6 +279,7 @@ def _world_event(
     invoiced = 36
     temperature_c = 9.2 if product.refrigerated and case_label != "normal safe transaction" else 4.0
     return {
+        "data_domain": "world_simulation",
         "event_id": f"world_evt_{seed}_{index:04d}",
         "ts": datetime.combine(current, time(8 + index % 10), tzinfo=UTC).isoformat(),
         "store_id": "store_obs_main",
@@ -271,6 +311,7 @@ def _row_from_event(
     expected = _expected_output(case_label, risk_level, event)
     return {
         "id": f"world-mm-{index:04d}",
+        "data_domain": "world_simulation",
         "case_type": _case_type(case_label),
         "case_label": case_label,
         "mixture": mixture,
@@ -307,6 +348,12 @@ def _case_type(case_label: str) -> str:
         return "delivery_dispute"
     if case_label == "warehouse worker voice complaint":
         return "compliance_evidence"
+    if case_label == "expiry markdown decision":
+        return "expiry_markdown"
+    if case_label == "cold-chain temperature breach":
+        return "cold_chain_risk"
+    if case_label == "price integrity mismatch":
+        return "price_integrity"
     return "general"
 
 
@@ -317,8 +364,11 @@ def _risk_level(case_label: str, event: dict[str, Any]) -> str:
         "fake delivery proof",
         "high-risk supplier pattern",
         "product quality failure",
+        "cold-chain temperature breach",
     }:
         return "high"
+    if case_label in {"expiry markdown decision", "price integrity mismatch"}:
+        return "medium"
     if case_label == "normal safe transaction":
         return "low"
     if case_label == "ambiguous missing evidence":
@@ -349,6 +399,30 @@ def _expected_output(case_label: str, risk_level: str, event: dict[str, Any]) ->
         actions.append("Ask for missing evidence before recommending write-back")
     if case_label == "normal safe transaction":
         actions = ["Continue monitoring", "Do not exaggerate risk"]
+    if case_label == "expiry markdown decision":
+        findings.append(f"{event['product']} is approaching its shelf-life limit")
+        actions = [
+            "Compute markdown discount using simulate_markdown, not a guess",
+            "Cite the incremental profit figure the tool actually returned",
+            "Route through Critic and Executive before any write-back",
+        ]
+    if case_label == "cold-chain temperature breach":
+        findings.append(
+            f"Refrigeration reading {event['temperature_c']}C exceeds the "
+            f"{event['temperature_limit_c']}C limit for {event['product']}"
+        )
+        actions = [
+            "Escalate to facilities for immediate refrigeration inspection",
+            "Quarantine affected refrigerated stock pending temperature confirmation",
+            "Record decision trace with the exact breach reading, not a rounded estimate",
+        ]
+    if case_label == "price integrity mismatch":
+        findings.append(f"Till price for {event['product']} does not match the catalogue price")
+        actions = [
+            "Call check_price_integrity before recommending any price correction",
+            "Cite the catalogue and till price the tool actually returned",
+            "Flag for manager review if the mismatch exceeds policy tolerance",
+        ]
     summary = (
         f"{case_label.title()} requires {risk_level} risk handling for {event['product']}."
     )

@@ -7,7 +7,7 @@ license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115",
   "httpx>=0.27",
-  "psycopg[binary]>=3.2",
+  "psycopg[binary,pool]>=3.2",
   "pydantic>=2.7",
   "python-multipart>=0.0.20",
   "redis>=5",
@@ -48,6 +48,7 @@ packages = [
   "src/shelfwise_contracts",
   "src/shelfwise_data",
   "src/shelfwise_decision_science",
+  "src/shelfwise_edge",
   "src/shelfwise_eval",
   "src/shelfwise_inference",
   "src/shelfwise_memory",
@@ -56,6 +57,7 @@ packages = [
   "src/shelfwise_resilience",
   "src/shelfwise_storage",
   "src/shelfwise_synthdata",
+  "src/shelfwise_twin",
   "src/shelfwise_worldgen",
 ]
 

@@ -58,7 +58,7 @@ Open:
 ```text
 http://127.0.0.1:5173                              # console
 http://localhost:8000/inference/smoke              # offline vs Fireworks vs MI300X/vLLM
-http://localhost:8000/demo/golden/agentic           # live agentic cascade (expiry/markdown)
+http://localhost:8000/scenarios/golden/agentic           # live agentic cascade (expiry/markdown)
 ```
 
 Set `LLM_BASE_URL` to any OpenAI-compatible vLLM endpoint serving `google/gemma-4-E4B-it` with
@@ -77,10 +77,10 @@ Open:
 http://localhost:5173                               # console
 http://localhost:8000/health
 http://localhost:8000/submission/readiness           # Track 3 gate self-check
-http://localhost:8000/demo/golden/agentic
-http://localhost:8000/demo/procurement/agentic
-http://localhost:8000/demo/cold-chain/agentic
-http://localhost:8000/demo/worldgen-runs             # digital-twin world simulation runs
+http://localhost:8000/scenarios/golden/agentic
+http://localhost:8000/scenarios/procurement/agentic
+http://localhost:8000/scenarios/cold-chain/agentic
+http://localhost:8000/scenarios/worldgen-runs             # digital-twin world simulation runs
 http://localhost:8000/products/attention
 http://localhost:8000/mlops/observability
 http://localhost:8000/connectors/systems
@@ -93,10 +93,10 @@ http://localhost:8000/connectors/systems
   (stock, forecast, sourcing, approvals) and answer from what they returned, not from guesswork.
 - **The grounding guarantee is enforced in code, not a prompt instruction** — see
   `assert_conclusion_grounded_in_tool_results` in `src/shelfwise_backend/`.
-- **Nothing writes back without a human.** Every `/demo/*/agentic` cascade and every chat action
+- **Nothing writes back without a human.** Every `/scenarios/*/agentic` cascade and every chat action
   that changes state produces a pending decision; approve/reject via the UI or the `/decisions`
   endpoints, and watch the learning loop move thresholds afterward (`/learning`).
-- **The digital twin is real, not decorative.** `/demo/worldgen-runs` lists actual continuous
+- **The digital twin is real, not decorative.** `/scenarios/worldgen-runs` lists actual continuous
   world-simulation runs the agents were trained and stress-tested against — this is the substrate
   the 15-minute soak evidence above was measured on.
 - **AMD compute is enforced, not claimed.** `/inference/smoke` reports whether a request is
@@ -104,7 +104,7 @@ http://localhost:8000/connectors/systems
   MI300X endpoint is rejected with HTTP 503 — there is no silent fallback path in production.
 - **Governed exception workflows** — recall quarantine, returns, damage, shrink investigation,
   misplaced-stock relocation — each carry required evidence, a Critic review step, and HITL
-  gating; runnable as generated-world drills via `/demo/worldgen/{scenario_id}`.
+  gating; runnable as generated-world drills via `/scenarios/worldgen/{scenario_id}`.
 - **Multi-tenant by construction.** The authenticated tenant always overrides anything the model
   writes into tool arguments; verify via `/tenants/me` and the tenant-scoped `/decisions` list.
 

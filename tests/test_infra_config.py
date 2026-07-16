@@ -49,6 +49,9 @@ def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> N
     assert 'SHELFWISE_AUTO_SCHEMA: "false"' in text
     assert "service_completed_successfully" in text
     assert "psql -h postgres" in text
+    assert "for attempt in $(seq 1 10)" in text
+    assert '"$$attempt" -eq 10' in text
+    assert "sleep 2" in text
 
 
 def test_production_cookie_config_is_secure_by_default(monkeypatch) -> None:
@@ -82,10 +85,12 @@ def test_disposable_ci_is_the_only_insecure_production_cookie_override(monkeypat
     assert _cookie_secure_setting() is False
 
 
-def test_frontend_proxy_includes_browser_session_route() -> None:
+def test_frontend_proxy_includes_all_browser_feature_route_prefixes() -> None:
     text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
 
     assert "^/(auth|" in text
+    for prefix in ("intelligence", "scan", "trace", "twin", "voice"):
+        assert f"|{prefix}|" in text
 
 
 def test_credentialed_cors_rejects_wildcard_origin(monkeypatch) -> None:
@@ -115,6 +120,12 @@ def test_backend_image_contains_seeded_runtime_datasets() -> None:
     assert "COPY data ./data" in text
 
 
+def test_frontend_image_contains_runtime_endpoint_configuration() -> None:
+    text = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY public ./public" in text
+
+
 def test_make_smoke_exercises_health_trace_approval_products_and_critic() -> None:
     text = (ROOT / "Makefile").read_text(encoding="utf-8")
     smoke = (ROOT / "scripts" / "smoke.py").read_text(encoding="utf-8")
@@ -124,8 +135,8 @@ def test_make_smoke_exercises_health_trace_approval_products_and_critic() -> Non
     assert "python scripts/smoke.py" in text
     assert "python scripts/smoke.py" in powershell_smoke
     assert "/health" in smoke
-    assert "/demo/golden" in smoke
-    assert "/demo/critic-rejection" in smoke
+    assert "/scenarios/golden" in smoke
+    assert "/scenarios/critic-rejection" in smoke
     assert "/trace/" in smoke
     assert "/approve" in smoke
     assert "/products/attention" in smoke
@@ -147,7 +158,7 @@ def test_ci_boots_and_smokes_production_public_origin() -> None:
 
     assert "docker-compose.production.yml up --build -d --wait" in workflow
     assert "--request POST http://127.0.0.1/auth/session" in workflow
-    assert "--request POST http://127.0.0.1/demo/golden" in workflow
+    assert "--request POST http://127.0.0.1/scenarios/golden" in workflow
     assert "logs --no-color backend postgres migrate frontend" in workflow
     assert "docker-compose.production.yml down --volumes" in workflow
 

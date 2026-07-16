@@ -32,6 +32,24 @@ from .retail_intelligence import (
 
 REFERENCE_NOW = datetime(2026, 7, 6, 8, 0, tzinfo=UTC)
 
+_default_facts_store: WorldSnapshotStoreLike | None = None
+
+
+def default_facts_provider() -> WorldFactsProvider:
+    """Return the process-wide default facts provider.
+
+    Backed by one lazily-created world snapshot store shared across every call
+    site (chat, deterministic cascades, agentic cascades). A per-module store
+    here would silently split world state: a write made through one code path
+    would not be visible through another under the in-memory backend.
+    """
+    global _default_facts_store
+    if _default_facts_store is None:
+        from shelfwise_worldgen import create_world_snapshot_store
+
+        _default_facts_store = create_world_snapshot_store()
+    return WorldFactsProvider(_default_facts_store)
+
 
 class UnknownSkuError(ValueError):
     """Raised when a tenant's generated world has no product matching the requested SKU."""
@@ -39,6 +57,10 @@ class UnknownSkuError(ValueError):
 
 class WorldFactsProvider:
     """Query the generated world for one tenant - the single source of retail facts."""
+
+    source_dataset = "generated_world"
+    source_method = "generated_world_projection"
+    data_domain = "world_simulation"
 
     def __init__(self, store: WorldSnapshotStoreLike, *, now: datetime = REFERENCE_NOW) -> None:
         self._store = store
@@ -82,6 +104,32 @@ class WorldFactsProvider:
 
     def list_stock(self, tenant_id: str) -> list[dict[str, Any]]:
         return list(self._snapshot(tenant_id)["stock"])
+
+    def get_recent_daily_units(
+        self, tenant_id: str, sku: str, *, limit: int = 14
+    ) -> tuple[Decimal, ...]:
+        """Expose bounded recent demand facts for deterministic candidate scoring."""
+        if limit <= 0 or limit > 90:
+            raise ValueError("limit must be between 1 and 90")
+        return self._recent_daily_units(self._snapshot(tenant_id), sku)[-limit:]
+
+    def list_product_operational_signals(self, tenant_id: str) -> dict[str, dict[str, Any]]:
+        """Build supplier and bounded demand signals from one tenant snapshot read."""
+        payload = self._snapshot(tenant_id)
+        suppliers = {row["name"]: row for row in payload["suppliers"]}
+        sales_by_sku: dict[str, list[Decimal]] = {}
+        for row in payload["sales"]:
+            sales_by_sku.setdefault(str(row["sku"]), []).append(Decimal(str(row["quantity"])))
+        for values in sales_by_sku.values():
+            del values[:-14]
+        signals: dict[str, dict[str, Any]] = {}
+        for product in payload["products"]:
+            supplier = suppliers.get(product["supplier"], {})
+            signals[str(product["sku"])] = {
+                "supplier": supplier,
+                "recent_daily_units": tuple(sales_by_sku.get(str(product["sku"]), ())),
+            }
+        return signals
 
     def get_scenario_facts(self, tenant_id: str, sku: str | None = None) -> SeededScenario:
         payload = self._snapshot(tenant_id)

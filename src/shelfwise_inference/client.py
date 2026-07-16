@@ -16,6 +16,15 @@ RunRecorder = Callable[[dict[str, Any]], None]
 _MAX_RECORDED_CHARS = 4_000
 
 
+def _is_transient_provider_error(exc: urllib.error.URLError | InferenceError) -> bool:
+    """Retry transport failures and explicitly transient HTTP responses once."""
+    if isinstance(exc, InferenceError):
+        return "error sentinel" in str(exc).casefold()
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in {429, 500, 502, 503, 504}
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class InferenceResult:
     provider: str
@@ -123,8 +132,14 @@ class OpenAICompatibleInferenceClient:
         schema_version: str = "v1",
         model: str | None = None,
         base_url: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> InferenceResult:
-        """Submit OpenAI-compatible messages and optional tools without SDK coupling."""
+        """Submit OpenAI-compatible messages and optional tools without SDK coupling.
+
+        `timeout_seconds`, when given, overrides `self.config.timeout_seconds` for this one
+        request - callers use it to bound the outbound HTTP call to whatever budget remains
+        under a response deadline rather than always requesting the full configured ceiling.
+        """
         started = perf_counter()
         run_id = f"mr_{uuid4().hex[:12]}"
         effective_correlation_id = correlation_id or run_id
@@ -203,12 +218,31 @@ class OpenAICompatibleInferenceClient:
             },
             method="POST",
         )
+        effective_timeout = (
+            timeout_seconds if timeout_seconds is not None else self.config.timeout_seconds
+        )
         try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-                raw = json.loads(response.read().decode("utf-8"))
-            message, finish_reason = _extract_message(raw, allow_tool_calls=bool(tools))
-            content = message.get("content")
-            content = content if isinstance(content, str) else ""
+            for attempt in range(2):
+                remaining_timeout = effective_timeout - (perf_counter() - started)
+                if remaining_timeout <= 0:
+                    raise InferenceError("Inference provider request timed out")
+                try:
+                    with urllib.request.urlopen(
+                        request, timeout=remaining_timeout
+                    ) as response:
+                        raw = json.loads(response.read().decode("utf-8"))
+                    message, finish_reason = _extract_message(
+                        raw, allow_tool_calls=bool(tools)
+                    )
+                    content = message.get("content")
+                    content = content if isinstance(content, str) else ""
+                    if _is_provider_error_sentinel(content):
+                        raise InferenceError("Inference provider returned an error sentinel")
+                    break
+                except (urllib.error.URLError, InferenceError) as exc:
+                    if attempt == 0 and _is_transient_provider_error(exc):
+                        continue
+                    raise
         except (urllib.error.URLError, json.JSONDecodeError, InferenceError) as exc:
             # A transport failure, a non-JSON 200 body, and a well-formed-but-wrong-shape
             # response (missing choices/message/content) are all provider failures - every
@@ -225,7 +259,7 @@ class OpenAICompatibleInferenceClient:
                 input_tokens=input_tokens,
                 latency_ms=_elapsed_ms(started),
                 user=user,
-                error_detail=str(exc),
+                error_detail=_provider_error_detail(exc),
             )
             raise InferenceError("Inference provider request failed") from exc
 
@@ -352,6 +386,29 @@ def _extract_message(
     normalized.setdefault("role", "assistant")
     finish_reason = choice.get("finish_reason")
     return normalized, finish_reason if isinstance(finish_reason, str) else ""
+
+
+def _is_provider_error_sentinel(content: str) -> bool:
+    """Reject reverse-proxy error text that was incorrectly wrapped in a HTTP 200."""
+    return content.strip().casefold() in {
+        "bad gateway",
+        "gateway timeout",
+        "internal server error",
+        "service unavailable",
+    }
+
+
+def _provider_error_detail(exc: Exception) -> str:
+    """Include a bounded provider error body so 4xx failures are diagnosable."""
+    detail = str(exc)
+    if not isinstance(exc, urllib.error.HTTPError):
+        return detail
+    try:
+        body = exc.read(512).decode("utf-8", errors="replace").strip()
+    except OSError:
+        return detail
+    safe_body = " ".join(body.split())
+    return f"{detail}: {safe_body}" if safe_body else detail
 
 
 def _chat_completions_url(base_url: str) -> str:

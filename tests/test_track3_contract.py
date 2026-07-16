@@ -99,11 +99,11 @@ def test_track3_production_forces_live_mode_even_when_requested_offline(monkeypa
     assert _production_execution_mode(False) is ExecutionMode.LIVE_REQUIRED
 
 
-def test_track3_request_deadline_is_strictly_below_thirty_seconds(monkeypatch) -> None:
+def test_track3_request_deadline_uses_operational_configuration(monkeypatch) -> None:
     monkeypatch.setenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "45")
-    assert _request_timeout_seconds() == 29.0
+    assert _request_timeout_seconds() == 45.0
 
 
-def test_track3_inference_timeout_is_strictly_below_thirty_seconds(monkeypatch) -> None:
+def test_track3_inference_timeout_uses_operational_configuration(monkeypatch) -> None:
     monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "45")
-    assert _timeout_seconds() == 29
+    assert _timeout_seconds() == 45

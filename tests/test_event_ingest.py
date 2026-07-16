@@ -22,6 +22,7 @@ def _scan_event(event_id: str = "evt_scan_hero") -> dict[str, object]:
         "actor": "store_12",
         "source": "scanner",
         "tenant_id": "sa_retail_demo",
+        "data_domain": "world_simulation",
         "payload": {"sku": _HERO_SKU, "location": "store_12"},
     }
 
@@ -34,6 +35,7 @@ def _supplier_event(event_id: str = "evt_supplier_hero") -> dict[str, object]:
         "actor": "procurement",
         "source": "manual",
         "tenant_id": "sa_retail_demo",
+        "data_domain": "world_simulation",
         "payload": {
             "supplier": _HERO_SUPPLIER,
             "avg_lead_time_days": "3",
@@ -50,6 +52,7 @@ def _sale_event(event_id: str = "evt_sale_hero") -> dict[str, object]:
         "actor": "store_12",
         "source": "pos_csv",
         "tenant_id": "sa_retail_demo",
+        "data_domain": "world_simulation",
         "payload": {
             "sku": _HERO_SKU,
             "location": "store_12",
@@ -67,6 +70,7 @@ def _cold_chain_event(event_id: str = "evt_cold_chain_fridge_dairy_1") -> dict[s
         "actor": "store_12",
         "source": "api",
         "tenant_id": "sa_retail_demo",
+        "data_domain": "world_simulation",
         "payload": {
             "site_id": "store_12",
             "asset_id": "fridge_dairy_1",
@@ -82,6 +86,7 @@ def _cold_chain_event(event_id: str = "evt_cold_chain_fridge_dairy_1") -> dict[s
 
 def test_event_contract_is_traceable_and_tolerant() -> None:
     wire = _scan_event()
+    wire["data_domain"] = "operational_twin"
     wire["future_field"] = "ignored"
 
     event = Event.parse_wire(wire)
@@ -89,11 +94,38 @@ def test_event_contract_is_traceable_and_tolerant() -> None:
 
     assert event.correlation_id == event.id
     assert event.tenant_id == "sa_retail_demo"
+    assert event.data_domain.value == "operational_twin"
     assert event.payload["sku"] == _HERO_SKU
     assert "future_field" not in event.to_dict()
     assert cloud["type"] == "shelfwise.scan"
     assert cloud["tenantid"] == "sa_retail_demo"
+    assert cloud["datadomain"] == "operational_twin"
     assert cloud["correlationid"] == event.id
+
+
+def test_event_contract_round_trips_and_validates_data_domain() -> None:
+    wire = {**_scan_event(), "data_domain": "world_simulation"}
+
+    event = Event.parse_wire(wire)
+
+    assert event.to_dict()["data_domain"] == "world_simulation"
+    with pytest.raises(ValueError, match="unsupported data_domain"):
+        Event.parse_wire({**wire, "data_domain": "unknown"})
+    with pytest.raises(ValueError, match="synthetic event payload"):
+        Event.parse_wire(
+            {
+                **_scan_event(),
+                "data_domain": "operational_twin",
+                "payload": {"synthetic": True},
+            }
+        )
+    with pytest.raises(ValueError, match="conflicts"):
+        Event.parse_wire(
+            {
+                **wire,
+                "payload": {"data_domain": "operational_twin"},
+            }
+        )
 
 
 def test_ingest_records_event_runs_supported_scan_once() -> None:
@@ -117,6 +149,80 @@ def test_ingest_records_event_runs_supported_scan_once() -> None:
     assert [event["id"] for event in events.json()["events"]] == ["evt_scan_hero"]
     assert bus.status_code == 200
     assert [message["event"]["id"] for message in bus.json()["messages"]] == ["evt_scan_hero"]
+
+
+def test_duplicate_event_id_with_different_content_is_rejected_without_side_effects() -> None:
+    client = TestClient(app)
+    event = _scan_event("evt_collision")
+    first = client.post("/ingest", json=event)
+    before_events = client.get("/events").json()["events"]
+    before_decisions = client.get("/decisions").json()
+
+    collision = client.post(
+        "/ingest",
+        json={**event, "payload": {"sku": "DIFFERENT", "location": "store_99"}},
+    )
+
+    assert first.status_code == 200
+    assert collision.status_code == 409
+    assert client.get("/events").json()["events"] == before_events
+    assert client.get("/decisions").json() == before_decisions
+
+
+def test_implausibly_stale_operational_event_is_rejected() -> None:
+    client = TestClient(app)
+    event = {
+        **_scan_event("evt_stale"),
+        "ts": "2000-01-01T00:00:00Z",
+        "data_domain": "operational_twin",
+    }
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Event timestamp is too stale"
+
+
+def test_complete_operational_scan_uses_only_measured_twin_sources() -> None:
+    client = TestClient(app)
+    event = {
+        **_scan_event("evt_operational_scan_complete"),
+        "tenant_id": "operational_scan_tenant",
+        "data_domain": "operational_twin",
+        "payload": {
+            "sku": "SKU-OPS-1",
+            "location": "store_ops",
+            "product": "Measured Milk 1L",
+            "category": "dairy",
+            "supplier": "SUP-OPS-1",
+            "on_hand": 40,
+            "reorder_point": 20,
+            "days_to_expiry": 2,
+            "recent_daily_units": [8, 9, 10, 11, 12],
+            "unit_cost": "12.50",
+            "catalog_unit_price": "20.00",
+            "lead_time_days": "2",
+            "recent_delay": False,
+            "payday_multiplier": "1.0",
+            "cold_chain_area": "fridge_ops",
+            "cold_chain_outage_hours": "2.5",
+            "cold_chain_average_temp_c": "6.5",
+        },
+    }
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 200
+    cascade = response.json()["cascade"]
+    assert cascade["data_domain"] == "operational_twin"
+    assert cascade["decision"]["data_domain"] == "operational_twin"
+    dataset_sources = {
+        source["ref"]
+        for evidence in cascade["evidence"]
+        for source in evidence["sources"]
+        if source["kind"] == "dataset"
+    }
+    assert dataset_sources == {"operational_twin"}
 
 
 def test_ingest_self_heals_when_bus_publish_fails_after_event_is_recorded(monkeypatch) -> None:
@@ -319,3 +425,35 @@ def test_write_path_api_key_guards_ingest_and_approval(monkeypatch) -> None:
     assert blocked_approve.status_code == 401
     assert allowed_approve.status_code == 200
     assert allowed_approve.json()["decision"]["status"] == "approved"
+
+
+def test_operational_cold_chain_alert_with_bare_temp_fails_closed_not_fabricated() -> None:
+    """A live alert carrying only temp_c must NOT have its diagnosis invented.
+
+    Before 2026-07-15 the operational guard required only temp_c, and the cold-chain
+    cascade silently defaulted the rest - diagnosis "generator_failed", severity 2,
+    18 minutes-to-unsafe, a 4h measured outage - fabricating story physics into a real
+    store's decision evidence. The edge/resilience layer genuinely computes those
+    fields (diagnose(), predict_time_to_unsafe()), so a live event that lacks them is
+    incomplete telemetry and must fail closed, never be embellished.
+    """
+    client = TestClient(app)
+    event = {
+        "id": "evt_operational_cold_chain_bare",
+        "type": "cold_chain_alert",
+        "ts": "2026-07-06T10:14:00Z",
+        "actor": "store_ops",
+        "source": "api",
+        "tenant_id": "operational_cold_chain_tenant",
+        "data_domain": "operational_twin",
+        "payload": {"site_id": "store_ops", "asset_id": "fridge_1", "temp_c": "9.1"},
+    }
+
+    response = client.post("/ingest", json=event)
+
+    assert response.status_code == 200
+    cascade = response.json()["cascade"]
+    assert cascade["status"] == "insufficient_operational_facts"
+    assert cascade["decision"] is None
+    missing = set(cascade["missing_data"])
+    assert {"diagnosis", "severity", "predicted_minutes_to_unsafe"} <= missing

@@ -55,6 +55,8 @@ def test_model_run_registry_records_runs_per_tenant() -> None:
 
     assert registry.list(tenant_id="tenant_1") == [run]
     assert registry.list(tenant_id="other") == []
+    assert registry.list(data_domain="world_simulation") == [run]
+    assert registry.list(data_domain="operational_twin") == []
     assert registry.list()[0].to_dict()["created_at"]
 
 
@@ -252,6 +254,55 @@ def test_memory_consolidation_only_promotes_repeated_successful_outcomes() -> No
     assert facts[0].evidence_refs == ("dec_1", "dec_2")
 
 
+def test_memory_consolidation_never_combines_live_and_simulation_outcomes() -> None:
+    facts = consolidate_outcomes(
+        [
+            OutcomeRecord(
+                "tenant_1",
+                "4011",
+                "markdown",
+                Decimal("0.85"),
+                ("dec_sim_1",),
+                "world_simulation",
+            ),
+            OutcomeRecord(
+                "tenant_1",
+                "4011",
+                "markdown",
+                Decimal("0.80"),
+                ("dec_sim_2",),
+                "world_simulation",
+            ),
+            OutcomeRecord(
+                "tenant_1",
+                "4011",
+                "markdown",
+                Decimal("0.90"),
+                ("dec_live_1",),
+                "operational_twin",
+            ),
+            OutcomeRecord(
+                "tenant_1",
+                "4011",
+                "markdown",
+                Decimal("0.88"),
+                ("dec_live_2",),
+                "operational_twin",
+            ),
+        ]
+    )
+    store = InMemoryTenantFactStore()
+    store.record_many(facts)
+
+    assert {fact.data_domain for fact in facts} == {
+        "world_simulation",
+        "operational_twin",
+    }
+    assert len({fact.id for fact in facts}) == 2
+    assert len(store.list(tenant_id="tenant_1", data_domain="world_simulation")) == 1
+    assert len(store.list(tenant_id="tenant_1", data_domain="operational_twin")) == 1
+
+
 def test_tenant_fact_store_filters_and_tombstones_governed_memory() -> None:
     store = InMemoryTenantFactStore()
     facts = consolidate_outcomes(
@@ -342,9 +393,9 @@ def test_accountability_report_filters_by_tenant_and_sums_recovered_money() -> N
     assert "Accountability Report - tenant_1" in report.to_markdown()
 
 
-def test_observability_snapshot_reports_tenant_operational_metrics() -> None:
+def test_observability_snapshot_separates_live_and_simulated_metrics() -> None:
     client = TestClient(app)
-    run_response = client.post("/demo/golden")
+    run_response = client.post("/scenarios/golden")
     decision = run_response.json()["decision"]
     approve_response = client.post(f"/decisions/{decision['id']}/approve")
     inference_response = client.get("/inference/smoke")
@@ -366,29 +417,43 @@ def test_observability_snapshot_reports_tenant_operational_metrics() -> None:
     )
     worker_response = client.post("/worker/process-one")
 
-    response = client.get("/mlops/observability")
+    simulated_response = client.get(
+        "/mlops/observability?data_domain=world_simulation"
+    )
+    operational_response = client.get(
+        "/mlops/observability?data_domain=operational_twin"
+    )
 
     assert approve_response.status_code == 200
     assert inference_response.status_code == 200
     assert connector_response.status_code == 200
     assert ingest_response.status_code == 200
     assert worker_response.status_code == 200
-    assert response.status_code == 200
-    snapshot = response.json()["snapshot"]
-    assert snapshot["tenant_id"] == "sa_retail_demo"
-    assert snapshot["decisions"]["total"] == 2
-    assert snapshot["decisions"]["approved"] == 1
-    assert snapshot["decisions"]["recovered"]["minor_units"] > 0
-    assert snapshot["inference"]["model_runs"] == 1
-    assert snapshot["inference"]["total_tokens"] > 0
-    assert snapshot["inference"]["estimated_cost"]["currency"] == "ZAR"
-    assert snapshot["connectors"]["inbound_records"] == 1
-    assert snapshot["connectors"]["invalid_records"] == 1
-    assert snapshot["connectors"]["by_system"] == {"shopify": 1}
-    assert snapshot["events"]["bus"]["messages_total"] >= 1
-    assert snapshot["writeback"]["pending_external_write"] == 1
-    assert snapshot["worker"]["done_runs"] == 1
-    assert snapshot["learning"]["learning_events"] == 1
+    assert simulated_response.status_code == 200
+    assert operational_response.status_code == 200
+    simulated = simulated_response.json()["snapshot"]
+    operational = operational_response.json()["snapshot"]
+    assert simulated["tenant_id"] == "sa_retail_demo"
+    assert simulated["data_domain"] == "world_simulation"
+    assert simulated["decisions"]["total"] == 1
+    assert simulated["decisions"]["approved"] == 1
+    assert simulated["decisions"]["recovered"]["minor_units"] > 0
+    assert simulated["inference"]["model_runs"] == 1
+    assert simulated["inference"]["total_tokens"] > 0
+    assert simulated["inference"]["estimated_cost"]["currency"] == "ZAR"
+    assert simulated["connectors"]["inbound_records"] == 0
+    assert simulated["writeback"]["pending_external_write"] == 1
+    assert simulated["learning"]["learning_events"] == 1
+    assert operational["data_domain"] == "operational_twin"
+    assert operational["decisions"]["total"] == 0
+    assert operational["inference"]["model_runs"] == 0
+    assert operational["connectors"]["inbound_records"] == 1
+    assert operational["connectors"]["invalid_records"] == 1
+    assert operational["connectors"]["by_system"] == {"shopify": 1}
+    assert operational["events"]["bus"]["messages_total"] >= 1
+    assert operational["worker"]["done_runs"] == 1
+    assert operational["candidates"]["total"] >= 0
+    assert operational["open_orders"]["total"] >= 0
 
 
 def test_skills_are_earned_governed_and_compile_to_plans() -> None:

@@ -6,7 +6,7 @@ from shelfwise_backend.cascade import run_golden_cascade, run_sales_cascade
 from shelfwise_contracts import Event, EventSource, EventType
 
 
-def _sale(event_id: str) -> Event:
+def _sale(event_id: str, *, tenant_id: str = "sa_retail_demo") -> Event:
     return Event(
         id=event_id,
         type=EventType.SALE,
@@ -14,7 +14,7 @@ def _sale(event_id: str) -> Event:
         actor="store_obs_main",
         payload={"sku": "4011", "quantity": 3, "unit_price": "38.99"},
         source=EventSource.POS_CSV,
-        tenant_id="sa_retail_demo",
+        tenant_id=tenant_id,
         correlation_id="world_shared_run",
     )
 
@@ -40,3 +40,10 @@ def test_event_decision_identity_is_replay_safe_and_not_correlation_scoped() -> 
     assert first["id"] != second["id"]
     assert first["caused_by"] == [first_event.id]
     assert second["caused_by"] == [second_event.id]
+
+
+def test_event_decision_identity_includes_tenant_scope() -> None:
+    first = run_sales_cascade(_sale("shared-source-id", tenant_id="tenant-a"))["decision"]
+    second = run_sales_cascade(_sale("shared-source-id", tenant_id="tenant-b"))["decision"]
+
+    assert first["id"] != second["id"]

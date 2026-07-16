@@ -16,6 +16,7 @@ import { applyTheme, currentTheme, type Theme } from './theme'
 // Contract types - mirror src/shelfwise_contracts serialized shapes.
 // ---------------------------------------------------------------------------
 type RecommendedAction = { type?: string; params?: Record<string, unknown>; risk_tier?: string }
+type DataDomain = 'operational_twin' | 'world_simulation'
 type SourceRef = { kind?: string; ref?: string; locator?: string | null }
 type SupportingFact = { fact?: string; value?: unknown; source?: string; method?: string }
 type EvidenceObject = {
@@ -38,12 +39,14 @@ type Decision = {
   updated_at?: string
   review?: { reviewer?: string; status?: string; reviewed_at?: string } | null
   outcome?: { units_cleared?: number; waste_units?: number; rand_recovered?: unknown; success_score?: string }
+  data_domain?: DataDomain
 }
 type LearningEvent = {
   id?: string
   decision_id?: string
   message?: string
   outcome?: Decision['outcome']
+  data_domain?: DataDomain
 }
 type TraceSpan = { name?: string; status?: string; ms?: number; detail?: Record<string, unknown> }
 type InferenceConfig = {
@@ -137,6 +140,7 @@ type ProductCatalogItem = {
   supplier?: string
   source?: string
   synthetic?: boolean
+  data_domain?: DataDomain
   price?: unknown
   on_hand?: number
   reorder_point?: number
@@ -173,6 +177,7 @@ type DeliveryException = {
   conclusion?: string
 }
 type ProductAttentionPayload = {
+  data_domain?: DataDomain
   limit?: number
   truncated?: boolean
   totals?: JsonObject
@@ -183,13 +188,14 @@ type ProductAttentionPayload = {
   deliveries?: DeliveryException[]
 }
 type ProductSearchPayload = {
+  data_domain?: DataDomain
   query?: string
   limit?: number
   truncated?: boolean
   products?: ProductCatalogItem[]
   source_counts?: JsonObject
 }
-type GoldenDemo = {
+type GoldenScenario = {
   correlation_id?: string
   scenario?: string
   evidence?: EvidenceObject[]
@@ -230,6 +236,7 @@ type EventRow = {
   tenant_id?: string
   correlation_id?: string
   payload?: JsonObject
+  data_domain?: DataDomain
 }
 type BusMessageRow = {
   id?: string
@@ -244,8 +251,10 @@ type WritebackTaskRow = {
   assignee_role?: string
   action?: RecommendedAction
   created_at?: string
+  data_domain?: DataDomain
 }
 type OperationalSnapshot = {
+  dataDomain: DataDomain
   apiPaths: string[]
   health: JsonObject
   readiness: JsonObject
@@ -286,6 +295,19 @@ type WorkspaceOpenOptions = { query?: string }
 // decision rendered twice, in two different places, with two different ways to act on it).
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
 type ChatReply = { answer: string; conversationId: string; messageId: string }
+type ConversationSummary = {
+  id: string
+  title?: string
+  data_domain?: DataDomain
+  updated_at?: string
+  message_count?: number
+}
+type StoredChatMessage = {
+  id?: string
+  role?: 'user' | 'assistant'
+  text?: string
+}
+type ChatConversation = ConversationSummary & { messages?: StoredChatMessage[] }
 type AgenticRunStatus = { state: 'running' | 'ok' | 'error'; detail: string }
 type UiIconName = 'attach' | 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
 
@@ -302,7 +324,7 @@ declare global {
 // API
 // ---------------------------------------------------------------------------
 const DEFAULT_API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
-const DEMO_PATH = '/demo/golden'
+const SCENARIO_PATH = '/scenarios/golden'
 
 // Runtime config (public/shelfwise-config.js) lets a deployed bundle point at any backend
 // without a rebuild; build-time VITE_* vars stay as the fallback.
@@ -324,17 +346,17 @@ function joinUrl(base: string, path: string): string {
   return base ? `${base.replace(/\/+$/, '')}${path}` : path
 }
 function requestUrls(path: string): string[] {
-  const configured = configuredBase()
-  return [joinUrl(configured || DEFAULT_API_BASE, path)]
-}
-function backendRequestUrls(path: string): string[] {
   return [joinUrl(configuredBase() || DEFAULT_API_BASE, path)]
+}
+function withDataDomain(path: string, dataDomain: DataDomain): string {
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}data_domain=${encodeURIComponent(dataDomain)}`
 }
 async function fetchJson<T>(path: string, init: RequestInit, signal: AbortSignal): Promise<T> {
   return fetchFromUrls<T>(requestUrls(path), path, init, signal)
 }
 async function fetchBackendJson<T>(path: string, init: RequestInit, signal: AbortSignal): Promise<T> {
-  return fetchFromUrls<T>(backendRequestUrls(path), path, init, signal)
+  return fetchFromUrls<T>(requestUrls(path), path, init, signal)
 }
 async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit, signal: AbortSignal): Promise<T> {
   let lastError = 'Unknown error'
@@ -342,7 +364,9 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
     try {
       const res = await fetch(url, {
         ...init,
-        credentials: 'same-origin',
+        // The dev frontend and backend use different ports; session cookies must
+        // still accompany requests when the configured origin is cross-origin.
+        credentials: 'include',
         headers: { Accept: 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
         signal,
       })
@@ -358,13 +382,36 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
 async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
   await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
 }
-const fetchDemo = (path: string, signal: AbortSignal) => fetchJson<GoldenDemo>(path, { method: 'POST' }, signal)
+const fetchScenario = (path: string, signal: AbortSignal) => fetchJson<GoldenScenario>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
   try {
     return await fetchBackendJson<T>(path, { method: 'GET' }, signal)
   } catch {
     return null
   }
+}
+async function fetchConversationSummaries(
+  dataDomain: DataDomain,
+  signal: AbortSignal,
+): Promise<ConversationSummary[]> {
+  const payload = await fetchBackendJson<{ conversations?: ConversationSummary[] }>(
+    withDataDomain('/chat/conversations', dataDomain),
+    { method: 'GET' },
+    signal,
+  )
+  return Array.isArray(payload.conversations) ? payload.conversations : []
+}
+async function fetchChatConversation(
+  conversationId: string,
+  signal: AbortSignal,
+): Promise<ChatConversation> {
+  const payload = await fetchBackendJson<{ conversation?: ChatConversation }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}`,
+    { method: 'GET' },
+    signal,
+  )
+  if (!payload.conversation) throw new Error('Conversation response was empty.')
+  return payload.conversation
 }
 async function postTransition(id: string, transition: 'approve' | 'reject', signal: AbortSignal): Promise<TransitionResult> {
   const payload = await fetchJson<TransitionResult>(
@@ -379,6 +426,7 @@ async function postChat(
   question: string,
   conversationId: string,
   messageId: string,
+  dataDomain: DataDomain,
   signal: AbortSignal,
 ): Promise<ChatReply> {
   let lastError = 'Unknown error'
@@ -386,13 +434,18 @@ async function postChat(
     try {
       const res = await fetch(url, {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'include',
         headers: {
           Accept: 'text/plain',
           'Content-Type': 'application/json',
           ...authHeaders(),
         },
-        body: JSON.stringify({ question, conversation_id: conversationId, message_id: messageId }),
+        body: JSON.stringify({
+          question,
+          conversation_id: conversationId,
+          message_id: messageId,
+          data_domain: dataDomain,
+        }),
         signal,
       })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'HTTP error'}`.trim())
@@ -418,7 +471,7 @@ async function postAttachment(path: string, file: File, signal: AbortSignal): Pr
     try {
       const res = await fetch(url, {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'include',
         headers: { Accept: 'application/json', ...authHeaders() },
         body: formData,
         signal,
@@ -493,8 +546,9 @@ function formatValue(value: unknown): string {
     return String(value)
   }
 }
-function emptyOps(): OperationalSnapshot {
+function emptyOps(dataDomain: DataDomain = 'operational_twin'): OperationalSnapshot {
   return {
+    dataDomain,
     apiPaths: [],
     health: {},
     readiness: {},
@@ -652,29 +706,6 @@ function moneyAtRisk(evidence?: EvidenceObject[]): string | null {
 function whyLine(decision: Decision, evidence?: EvidenceObject[]): string {
   const ev = firstActionEvidence(evidence, decision.action?.type)
   return humanizeOperationalText(ev?.conclusion ?? decision.summary ?? 'Recommended by the ShelfWise cascade.')
-}
-
-/** Demo intent-matching. Real streaming /chat is the follow-up; this never fabricates numbers.
- *  Chat only ever points at the status bar now - it never renders the decisions itself. */
-function replyFor(text: string, data: GoldenDemo | null, pending: Decision[]): string {
-  const q = text.toLowerCase()
-  // Risk intent is checked before the approvals intent: "what's at risk today?" is a risk
-  // question even though it also mentions the day.
-  if (/risk|waste|expir|cold|fridge|warm|spoil/.test(q)) {
-    const ev = firstActionEvidence(data?.evidence)
-    const atRisk = moneyAtRisk(data?.evidence)
-    const base = humanizeOperationalText(ev?.conclusion ?? 'Nothing is flagged at risk right now.')
-    return atRisk ? `${base} About ${atRisk} of stock is exposed.` : base
-  }
-  if (/approv|decision|queue|pending|what.*do/.test(q)) {
-    return pending.length
-      ? `${pending.length} approval${pending.length > 1 ? 's' : ''} waiting. Open the status bar to review the evidence.`
-      : 'Queue clear. No approvals are waiting.'
-  }
-  if (/why|reason|explain|how/.test(q)) {
-    return 'Open the status bar, then choose Why? on a decision to see the agent chain and numbers.'
-  }
-  return 'Ask about approvals, stock risk, deliveries, or evidence.'
 }
 
 /** Local calendar-day label for grouping the receipt timeline ("Today", "Yesterday", or a date). */
@@ -1117,6 +1148,7 @@ function UserBubble({ text }: { text: string }) {
 type SidebarPage = 'settings'
 type WorkspaceSurface =
   | 'products'
+  | 'twin'
   | 'to-order'
   | 'sell-first'
   | 'deliveries'
@@ -1162,8 +1194,8 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Platform tools', method: 'GET', path: '/tools/platform', detail: 'Read-only tool catalogue exposed to agents.' },
   { label: 'Platform audit', method: 'GET', path: '/tools/platform/audit', detail: 'Tool-call audit events.' },
   { label: 'Cold-chain feed', method: 'GET', path: '/cold-chain/feed', detail: 'Cold-chain status and buffered feed events.' },
-  { label: 'Worldgen runs', method: 'GET', path: '/demo/worldgen-runs', detail: 'Synthetic drill run history.' },
-  { label: 'Worldgen run detail', method: 'GET', path: '/demo/worldgen-runs/{run_id}', detail: 'Parameterized synthetic drill run detail.' },
+  { label: 'Worldgen runs', method: 'GET', path: '/scenarios/worldgen-runs', detail: 'Synthetic drill run history.' },
+  { label: 'Worldgen run detail', method: 'GET', path: '/scenarios/worldgen-runs/{run_id}', detail: 'Parameterized synthetic drill run detail.' },
   { label: 'Tenant profile', method: 'GET', path: '/tenants/me', detail: 'Current tenant/store profile and connector policy.' },
   { label: 'Inventory positions', method: 'GET', path: '/inventory/positions', detail: 'Tenant shelf, backroom, bin, quarantine, and returns ledger.' },
   { label: 'Connector catalogue', method: 'GET', path: '/connectors/systems', detail: 'Supported source-system connector capabilities.' },
@@ -1176,10 +1208,19 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Tenant facts', method: 'GET', path: '/mlops/tenant-facts', detail: 'Governed learning facts.' },
   { label: 'Worker status', method: 'GET', path: '/worker/status', detail: 'Background worker runtime state.' },
   { label: 'Worker runs', method: 'GET', path: '/worker/runs', detail: 'Background cascade processing journal.' },
+  { label: 'Connector poll status', method: 'GET', path: '/connectors/poll/status', detail: 'ERP/WMS background poll loop: configured systems, runs, and last error.' },
   { label: 'Catalog products', method: 'GET', path: '/catalog/products', detail: 'Product-identity master list for the tenant.' },
   { label: 'Catalog product detail', method: 'GET', path: '/catalog/products/{product_id}', detail: 'Parameterized product-identity record.' },
   { label: 'Catalog variants', method: 'GET', path: '/catalog/products/{product_id}/variants', detail: 'Sellable variants (pack size, unit) for a product.' },
   { label: 'Catalog resolve', method: 'GET', path: '/catalog/resolve', detail: 'Resolve a GTIN/barcode/SKU/PLU/source id to its variant.' },
+  { label: 'Store twin', method: 'GET', path: '/twin/stores/{store_id}', detail: 'Tenant-scoped exact-store topology, current state, observations, and fidelity.' },
+  { label: 'Twin snapshot', method: 'GET', path: '/twin/stores/{store_id}/snapshot', detail: 'Deterministic projection hash and bounded state counts.' },
+  { label: 'Twin entity', method: 'GET', path: '/twin/entities/{twin_id}', detail: 'Entity properties, provenance history, and relationships.' },
+  { label: 'Twin observations', method: 'GET', path: '/twin/observations', detail: 'Bounded derived observations with no raw media.' },
+  { label: 'Twin fidelity', method: 'GET', path: '/twin/fidelity', detail: 'Dimensioned identity, freshness, provenance, projection, and guard score.' },
+  { label: 'Twin devices', method: 'GET', path: '/twin/stores/{store_id}/devices', detail: 'Tenant-scoped edge device health without signing secrets.' },
+  { label: 'Twin scenario compare', method: 'GET', path: '/twin/stores/{store_id}/scenarios/{branch_id}', detail: 'Observed-versus-predicted branch comparison.' },
+  { label: 'Candidate history', method: 'GET', path: '/candidates/{candidate_key}/history', detail: 'Immutable lifecycle transitions recorded for one fleet candidate.' },
 ]
 
 const GATED_ENDPOINTS = [
@@ -1187,7 +1228,14 @@ const GATED_ENDPOINTS = [
   { label: 'Chat stream', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
+  { label: 'Twin observation ingest', method: 'POST', path: '/twin/observations', group: 'connections', detail: 'Tenant-bound derived observation intake; raw media is rejected.' },
+  { label: 'Twin onboarding', method: 'POST', path: '/twin/onboarding', group: 'connections', detail: 'Binds one named shop and seeds its tenant-scoped topology.' },
+  { label: 'Twin event bootstrap', method: 'POST', path: '/twin/stores/{store_id}/bootstrap', group: 'operations', detail: 'Replays existing canonical events into the twin without rerunning cascades.' },
+  { label: 'Signed edge observations', method: 'POST', path: '/twin/edge/observations', group: 'connections', detail: 'HMAC-authenticated derived edge facts; raw frames never enter the twin.' },
+  { label: 'Twin calibration', method: 'POST', path: '/twin/stores/{store_id}/calibration', group: 'connections', detail: 'Records a bounded sensor/reference calibration result.' },
+  { label: 'Twin scenario', method: 'POST', path: '/twin/stores/{store_id}/scenarios', group: 'intelligence', detail: 'Runs an isolated what-if branch without changing reported state.' },
   { label: 'Barcode scan', method: 'POST', path: '/scan/barcode', group: 'connections', detail: 'Multimodal SKU lookup from barcode input.' },
+  { label: 'Confirm reviewed scan', method: 'POST', path: '/scan/candidates/confirm', group: 'connections', detail: 'Promotes one manager-reviewed scanner candidate into canonical ingest.' },
   { label: 'Image scan', method: 'POST', path: '/scan/image', group: 'connections', detail: 'Shelf/image extraction path for SKU and expiry candidates.' },
   { label: 'Receipt scan', method: 'POST', path: '/scan/receipt', group: 'connections', detail: 'Receipt line intake for POS evidence.' },
   { label: 'Voice in', method: 'POST', path: '/voice/in', group: 'connections', detail: 'Speech-to-command intake.' },
@@ -1208,21 +1256,21 @@ const GATED_ENDPOINTS = [
   { label: 'Chat conversation detail', method: 'GET', path: '/chat/conversations/{conversation_id}', group: 'operations', detail: 'Full transcript for one conversation.' },
   { label: 'Trace detail', method: 'GET', path: '/trace/{correlation_id}', group: 'operations', detail: 'Parameterized trace detail from the trace registry.' },
   { label: 'Root-cause analysis', method: 'GET', path: '/detective/root-cause/{target_id}', group: 'operations', detail: 'Parameterized root-cause traversal for decisions/events.' },
-  { label: 'Golden demo', method: 'GET/POST', path: '/demo/golden', group: 'operations', detail: 'Demo cascade endpoint used by smoke and runbook flows.' },
-  { label: 'Recall quarantine drill', method: 'POST', path: '/demo/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
-  { label: 'Inventory exception drill', method: 'POST', path: '/demo/inventory-exception', group: 'operations', detail: 'Runs a seeded shrink count through event ingest, type-specific evidence, HITL, and write-back.' },
-  { label: 'Golden demo (agentic)', method: 'POST', path: '/demo/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Procurement demo', method: 'GET/POST', path: '/demo/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
-  { label: 'Procurement demo (agentic)', method: 'POST', path: '/demo/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Sales demo', method: 'GET/POST', path: '/demo/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
-  { label: 'Sales demo (agentic)', method: 'POST', path: '/demo/sales/agentic', group: 'operations', detail: 'Runs the POS price-integrity verdict through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Catalog price guardrail (agentic)', method: 'POST', path: '/demo/catalog-price/agentic', group: 'operations', detail: 'Runs the conditional POS catalog-price exception guardrail through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Expiry risk guardrail (agentic)', method: 'POST', path: '/demo/expiry-risk/agentic', group: 'operations', detail: 'Runs the conditional imminent-expiry guardrail through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Cold-chain demo', method: 'GET/POST', path: '/demo/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
-  { label: 'Cold-chain demo (agentic)', method: 'POST', path: '/demo/cold-chain/agentic', group: 'operations', detail: 'Runs the cold-chain facilities-escalation verdict through a real Gemma tool-calling loop; live_required by default.' },
-  { label: 'Critic rejection demo', method: 'GET/POST', path: '/demo/critic-rejection', group: 'operations', detail: 'Scenario endpoint for the critic-rejection path.' },
-  { label: 'Worldgen run detail', method: 'GET', path: '/demo/worldgen-runs/{run_id}', group: 'operations', detail: 'Parameterized synthetic drill run detail.' },
-  { label: 'Worldgen drill', method: 'GET', path: '/demo/worldgen/{scenario_id}', group: 'operations', detail: 'Synthetic scenario execution; not auto-run from the sidebar.' },
+  { label: 'Golden scenario', method: 'GET/POST', path: '/scenarios/golden', group: 'operations', detail: 'Scenario cascade endpoint used by smoke and runbook flows.' },
+  { label: 'Recall quarantine drill', method: 'POST', path: '/scenarios/recall', group: 'operations', detail: 'Runs a seeded lot recall through event ingest, quarantine policy, HITL, and write-back.' },
+  { label: 'Inventory exception drill', method: 'POST', path: '/scenarios/inventory-exception', group: 'operations', detail: 'Runs a seeded shrink count through event ingest, type-specific evidence, HITL, and write-back.' },
+  { label: 'Golden scenario (agentic)', method: 'POST', path: '/scenarios/golden/agentic', group: 'operations', detail: 'Runs the golden scenario Critic/Executive verdicts through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Procurement scenario', method: 'GET/POST', path: '/scenarios/procurement', group: 'operations', detail: 'Scenario endpoint that persists a procurement decision.' },
+  { label: 'Procurement scenario (agentic)', method: 'POST', path: '/scenarios/procurement/agentic', group: 'operations', detail: 'Runs the procurement reorder/supplier verdicts through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Sales scenario', method: 'GET/POST', path: '/scenarios/sales', group: 'operations', detail: 'Scenario endpoint that persists a POS decision.' },
+  { label: 'Sales scenario (agentic)', method: 'POST', path: '/scenarios/sales/agentic', group: 'operations', detail: 'Runs the POS price-integrity verdict through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Catalog price guardrail (agentic)', method: 'POST', path: '/scenarios/catalog-price/agentic', group: 'operations', detail: 'Runs the conditional POS catalog-price exception guardrail through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Expiry risk guardrail (agentic)', method: 'POST', path: '/scenarios/expiry-risk/agentic', group: 'operations', detail: 'Runs the conditional imminent-expiry guardrail through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Cold-chain scenario', method: 'GET/POST', path: '/scenarios/cold-chain', group: 'operations', detail: 'Scenario endpoint that persists a facilities decision.' },
+  { label: 'Cold-chain scenario (agentic)', method: 'POST', path: '/scenarios/cold-chain/agentic', group: 'operations', detail: 'Runs the cold-chain facilities-escalation verdict through a real Gemma tool-calling loop; live_required by default.' },
+  { label: 'Critic rejection scenario', method: 'GET/POST', path: '/scenarios/critic-rejection', group: 'operations', detail: 'Scenario endpoint for the critic-rejection path.' },
+  { label: 'Worldgen run detail', method: 'GET', path: '/scenarios/worldgen-runs/{run_id}', group: 'operations', detail: 'Parameterized synthetic drill run detail.' },
+  { label: 'Worldgen drill', method: 'GET', path: '/scenarios/worldgen/{scenario_id}', group: 'operations', detail: 'Synthetic scenario execution; not auto-run from the sidebar.' },
   { label: 'Catalog product upsert', method: 'POST', path: '/catalog/products', group: 'intelligence', detail: 'Create or update a product-identity record.' },
   { label: 'Catalog variant upsert', method: 'POST', path: '/catalog/products/{product_id}/variants', group: 'intelligence', detail: 'Create or update a sellable variant of a product.' },
   { label: 'Catalog identifier upsert', method: 'POST', path: '/catalog/identifiers', group: 'intelligence', detail: 'Map a GTIN/barcode/SKU/PLU/source id to a variant; rejects conflicting remaps.' },
@@ -1305,29 +1353,31 @@ function InfoRow({ label, value, tone }: { label: string; value?: ReactNode; ton
   )
 }
 
-function inferenceProviderLabel(config?: InferenceConfig | null): string {
+function inferenceProviderLabel(config?: InferenceConfig | null, verified = false): string {
   if (!config?.provider) return 'Unknown'
-  if (config.provider === 'vllm_mi300x') return 'AMD vLLM'
+  if (config.provider === 'vllm_mi300x') return verified ? 'AMD vLLM' : 'AMD configured'
   if (config.provider === 'fireworks') return 'Fireworks'
   return 'Offline'
 }
 
-function inferenceTone(config?: InferenceConfig | null): Tone {
-  if (config?.provider === 'vllm_mi300x') return 'ok'
+function inferenceTone(config?: InferenceConfig | null, verified = false): Tone {
+  if (config?.provider === 'vllm_mi300x') return verified ? 'ok' : 'info'
   if (config?.provider === 'fireworks') return 'info'
   return 'mute'
 }
 
 /** Top-bar badge: which inference backend answered this snapshot (AMD vLLM, Fireworks, offline). */
-function InferencePill({ config }: { config?: InferenceConfig | null }) {
-  const label = inferenceProviderLabel(config)
-  const tone = inferenceTone(config)
+function InferencePill({ config, verified = false }: { config?: InferenceConfig | null; verified?: boolean }) {
+  const label = inferenceProviderLabel(config, verified)
+  const tone = inferenceTone(config, verified)
   const host = config?.base_url_host
   const title = config?.provider === 'vllm_mi300x'
-    ? `AMD Developer Cloud / vLLM${host ? ` via ${host}` : ''}`
+    ? verified
+      ? `Verified AMD Developer Cloud / vLLM call${host ? ` via ${host}` : ''}`
+      : `AMD vLLM endpoint configured but not yet verified by a successful call${host ? ` via ${host}` : ''}`
     : config?.provider === 'fireworks'
       ? 'Fireworks fallback configured'
-      : 'Deterministic offline mode; set LLM_BASE_URL before the MI300X demo'
+      : 'Deterministic offline mode; set LLM_BASE_URL before the MI300X run'
   return (
     <span className={`inference-pill tone-${tone}`} title={title}>
       <span className="inference-pill-label">{label}</span>
@@ -1353,14 +1403,14 @@ function Sidebar({
 }: {
   open: boolean
   onClose: () => void
-  onSelectRecent: () => void
+  onSelectRecent: (conversationId: string) => void
   onNewChat: () => void
   onOpenApprovals: () => void
   onOpenWorkspace: (surface: WorkspaceSurface, options?: WorkspaceOpenOptions) => void
   activeWorkspace: WorkspaceSurface | null
   recents: Recent[]
   queue: Decision[]
-  data: GoldenDemo | null
+  data: GoldenScenario | null
   seed: SeedSummary | null
   ops: OperationalSnapshot
   recoveredToday: string | null
@@ -1427,7 +1477,9 @@ function Sidebar({
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true
   const coldChainValue = data?.scenario === 'cold_chain' || ops.coldChainEvents.length ? 'review' : coldRunning ? 'live' : coldEnabled ? 'armed' : 'clear'
-  const operationsValue = data ? 'live' : 'loading'
+  const operationsValue = data
+    ? ops.dataDomain === 'world_simulation' ? 'simulation' : 'live'
+    : 'loading'
   const connectorRows = ops.tenantConnectors.length || ops.connectorSystems.length
   const connectorCount = connectorRows || CONNECTOR_SYSTEMS.length
   // Page stack is intentionally tiny: settings lives in the sidebar; operational detail opens
@@ -1522,7 +1574,7 @@ function Sidebar({
                         <div className="sidebar-kicker mini">Conversations</div>
                         {shownRecents.length ? (
                           shownRecents.map((r) => (
-                            <button key={r.id} className={`recent-row ${r.active ? 'is-active' : ''}`} type="button" onClick={onSelectRecent}>
+                            <button key={r.id} className={`recent-row ${r.active ? 'is-active' : ''}`} type="button" onClick={() => onSelectRecent(r.id)}>
                               {r.title}
                             </button>
                           ))
@@ -1567,7 +1619,7 @@ function Sidebar({
                     <div className="recents-list">
                       {shownRecents.length ? (
                       shownRecents.map((r) => (
-                        <button key={r.id} className={`recent-row ${r.active ? 'is-active' : ''}`} type="button" onClick={onSelectRecent}>
+                        <button key={r.id} className={`recent-row ${r.active ? 'is-active' : ''}`} type="button" onClick={() => onSelectRecent(r.id)}>
                           {r.title}
                         </button>
                       ))
@@ -1625,6 +1677,12 @@ function Sidebar({
                     tone={recoveredToday ? 'ok' : undefined}
                     active={activeWorkspace === 'results'}
                     onOpen={() => openWorkspace('results')}
+                  />
+                  <NavRow
+                    label="Store twin"
+                    value="state + scenarios"
+                    active={activeWorkspace === 'twin'}
+                    onOpen={() => openWorkspace('twin')}
                   />
                 </div>
 
@@ -1818,7 +1876,7 @@ function productDetail(item: ProductCatalogItem): string {
     item.attention_summary,
     item.sku ? `SKU ${item.sku}` : null,
     item.barcode ? `Barcode ${item.barcode}` : null,
-    item.lot_count ? `${item.lot_count} lots` : null,
+    item.lot_count ? pluralLabel(item.lot_count, 'lot') : null,
     item.shelf_location ? `Shelf ${item.shelf_location}` : null,
     item.storage_requirements,
   ].filter(Boolean)
@@ -1851,6 +1909,13 @@ function productRows(items: ProductCatalogItem[]): WorkspaceRowProps[] {
 
 function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: string; status: string; subtitle: string } {
   switch (surface) {
+    case 'twin':
+      return {
+        title: 'Store twin',
+        kicker: 'Exact-store state',
+        status: 'observed + predicted',
+        subtitle: 'One synchronized view of topology, freshness, provenance, calibration, and what-if branches.',
+      }
     case 'products':
       return {
         title: 'Products',
@@ -1913,6 +1978,7 @@ function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: stri
 function WorkspaceScreen({
   surface,
   initialQuery,
+  dataDomain,
   onBack,
   data,
   seed,
@@ -1924,8 +1990,9 @@ function WorkspaceScreen({
 }: {
   surface: WorkspaceSurface
   initialQuery?: string
+  dataDomain: DataDomain
   onBack: () => void
-  data: GoldenDemo | null
+  data: GoldenScenario | null
   seed: SeedSummary | null
   queue: Decision[]
   ops: OperationalSnapshot
@@ -1994,6 +2061,7 @@ function WorkspaceScreen({
       const cleanQuery = productQuery.trim()
       if (cleanQuery) params.set('q', cleanQuery)
       params.set('limit', '20')
+      params.set('data_domain', dataDomain)
       const payload = await fetchOptional<ProductSearchPayload>(`/products/search?${params.toString()}`, controller.signal)
       if (controller.signal.aborted) return
       if (payload) {
@@ -2011,7 +2079,7 @@ function WorkspaceScreen({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [surface, productQuery])
+  }, [surface, productQuery, dataDomain])
 
   const apiAttentionItems = asArray<ProductCatalogItem>(ops.productAttention.items)
   const attentionProductItems: ProductCatalogItem[] = [...apiAttentionItems]
@@ -2078,11 +2146,11 @@ function WorkspaceScreen({
   const selectedProductBatches = selectedProduct ? asArray<FefoBatch>(selectedProduct.fefo_batches) : []
   const productResultTitle = productQuery.trim() ? 'Catalogue results' : 'Attention products'
   const productResultCount = catalogSearchState === 'loading' ? 'searching' : pluralLabel(productResultRows.length, 'shown', 'shown')
-  // The backend now serves the whole generated world directly - no separate seed/synthetic
-  // split or scan-budget layer, so the receipt reports the real counts it actually returns:
-  // how many matches came back and whether the result set was capped by `limit`.
   const catalogSourceCounts = asObject(catalogSearchReceipt?.source_counts)
-  const catalogMatches = fieldNumber(catalogSourceCounts, 'generated_world')
+  const catalogMatches = Object.values(catalogSourceCounts).reduce<number>((total, value) => {
+    const count = Number(value)
+    return total + (Number.isFinite(count) ? count : 0)
+  }, 0)
   const catalogScanned = catalogMatches || catalogResults.length
   const searchReceiptVisible = Boolean(productQuery.trim() && catalogSearchReceipt)
   const connectorRows: ConnectorSystemRow[] = ops.tenantConnectors.length
@@ -2169,16 +2237,20 @@ function WorkspaceScreen({
         <WorkspaceSection title="Search receipt">
           <div className="workspace-list">
             <WorkspaceRow
-              label="Generated-world scan"
+              label={dataDomain === 'operational_twin' ? 'Live catalogue scan' : 'Simulation catalogue scan'}
               meta={`${pluralLabel(catalogScanned, 'match', 'matches')} returned`}
-              detail="Attention products are ranked first; the generated world is the whole catalogue, so this is a live query against it, not a synthetic sample."
+              detail={dataDomain === 'operational_twin'
+                ? 'Attention products are ranked from measured catalogue, stock, and twin records only.'
+                : 'Attention products are ranked from the generated test world only.'}
               value={catalogSearchReceipt?.truncated ? 'truncated' : 'complete'}
               tone={catalogSearchReceipt?.truncated ? 'info' : 'ok'}
             />
             <WorkspaceRow
               label="Query"
               meta={`Result limit ${formatValue(catalogSearchReceipt?.limit ?? 20)}`}
-              detail="Every row comes from the tenant's generated world - no seed or synthetic-catalogue blend."
+              detail={dataDomain === 'operational_twin'
+                ? 'Every row comes from this tenant\'s measured operational records.'
+                : 'Every row comes from this tenant\'s generated test world.'}
               value={formatLabel(catalogSearchReceipt?.query ?? productQuery)}
             />
           </div>
@@ -2799,7 +2871,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'operations').map((item) => {
             const isAgentic = item.path.endsWith('/agentic')
-            const isRunnable = isAgentic || item.path === '/demo/recall' || item.path === '/demo/inventory-exception'
+            const isRunnable = isAgentic || item.path === '/scenarios/recall' || item.path === '/scenarios/inventory-exception'
             const run = agenticRuns[item.path]
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
@@ -2879,8 +2951,29 @@ function WorkspaceScreen({
     </>
   )
 
+  const renderTwin = () => (
+    <>
+      <WorkspaceSection title="Twin proof rail" count="tenant scoped">
+        <div className="workspace-metrics">
+          <WorkspaceMetric label="Reported lane" value="source facts" tone="ok" />
+          <WorkspaceMetric label="Predicted lane" value="isolated branches" tone="info" />
+          <WorkspaceMetric label="Raw media" value="never stored" tone="ok" />
+        </div>
+      </WorkspaceSection>
+      <WorkspaceSection title="Operator actions">
+        <div className="workspace-list">
+          <WorkspaceRow label="Snapshot" meta="GET /twin/stores/{store_id}/snapshot" detail="Projection hash anchors assistant and scenario context." value="available" tone="ok" />
+          <WorkspaceRow label="Fidelity" meta="GET /twin/fidelity" detail="Freshness, provenance, agreement, projection health, and calibration." value="dimensioned" tone="info" />
+          <WorkspaceRow label="Scenario compare" meta="POST/GET /twin/stores/{store_id}/scenarios" detail="Test replenishment, markdown, or cold-chain responses safely." value="isolated" tone="info" />
+        </div>
+      </WorkspaceSection>
+    </>
+  )
+
   const renderContent = () => {
     switch (surface) {
+      case 'twin':
+        return renderTwin()
       case 'products':
         return renderProducts()
       case 'to-order':
@@ -3035,12 +3128,14 @@ function isOverlayViewport(): boolean {
 // App
 // ---------------------------------------------------------------------------
 function App() {
-  const [data, setData] = useState<GoldenDemo | null>(null)
+  const [dataDomain, setDataDomain] = useState<DataDomain>('operational_twin')
+  const [data, setData] = useState<GoldenScenario | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [seed, setSeed] = useState<SeedSummary | null>(null)
-  const [ops, setOps] = useState<OperationalSnapshot>(() => emptyOps())
+  const [ops, setOps] = useState<OperationalSnapshot>(() => emptyOps('operational_twin'))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [conversationId, setConversationId] = useState(() => newChatId('conv'))
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [agenticRuns, setAgenticRuns] = useState<Record<string, AgenticRunStatus>>({})
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -3075,21 +3170,33 @@ function App() {
     return cents > 0 ? `R${Math.round(cents / 100).toLocaleString('en-ZA')}` : null
   }, [resolved])
 
-  // Recents: the current live conversation only. When Postgres persistence lands, resolved
-  // conversations join this list; New chat archives the current one instead of clearing it.
   const recents = useMemo<Recent[]>(() => {
     const firstUser = messages.find((m) => m.role === 'user')
-    return [{ id: 'current', title: firstUser ? firstUser.text : "Today's operations", active: true }]
-  }, [messages])
+    const rows = conversations.map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title?.trim() || 'ShelfWise conversation',
+      active: conversation.id === conversationId,
+    }))
+    if (!rows.some((row) => row.id === conversationId)) {
+      rows.unshift({
+        id: conversationId,
+        title: firstUser?.text.trim() || "Today's operations",
+        active: true,
+      })
+    }
+    return rows
+  }, [conversationId, conversations, messages])
 
   useEffect(() => {
     const controller = new AbortController()
     setLoadState('loading')
     setError(null)
-    setOps(emptyOps())
+    setOps(emptyOps(dataDomain))
     async function load() {
       await ensureBrowserSession(controller.signal)
-      const payload = await fetchDemo(DEMO_PATH, controller.signal)
+      const payload = dataDomain === 'world_simulation'
+        ? await fetchScenario(SCENARIO_PATH, controller.signal)
+        : ({} as GoldenScenario)
       const openApi = await fetchOptional<{ paths?: JsonObject }>('/openapi.json', controller.signal)
       const apiPaths = Object.keys(asObject(openApi?.paths)).sort()
       const available = (path: string) => Boolean(asObject(openApi?.paths)[path])
@@ -3100,6 +3207,7 @@ function App() {
         readinessPayload,
         inferenceConfigPayload,
         logPayload,
+        conversationsPayload,
         seedPayload,
         connectorCatalog,
         tenantConnectors,
@@ -3127,29 +3235,39 @@ function App() {
         fetchIfAvailable<JsonObject>('/health'),
         fetchIfAvailable<JsonObject>('/readiness'),
         fetchIfAvailable<JsonObject>('/inference/config'),
-        fetchIfAvailable<DecisionLogResponse>('/decisions'),
-        fetchIfAvailable<{ seed_data?: SeedSummary }>('/data/seed/summary'),
+        fetchIfAvailable<DecisionLogResponse>(withDataDomain('/decisions', dataDomain), '/decisions'),
+        fetchIfAvailable<{ conversations?: ConversationSummary[] }>(
+          withDataDomain('/chat/conversations', dataDomain),
+          '/chat/conversations',
+        ),
+        fetchIfAvailable<{ seed_data?: SeedSummary }>(withDataDomain('/data/seed/summary', dataDomain), '/data/seed/summary'),
         fetchIfAvailable<{ systems?: ConnectorSystemRow[] }>('/connectors/systems'),
         fetchIfAvailable<{ systems?: ConnectorSystemRow[] }>('/connectors/me'),
-        fetchIfAvailable<{ records?: InboundRecordRow[] }>('/connectors/inbound-records?limit=50', '/connectors/inbound-records'),
-        fetchIfAvailable<{ events?: EventRow[] }>('/events?limit=80', '/events'),
-        fetchIfAvailable<{ messages?: BusMessageRow[] }>('/events/bus'),
-        fetchIfAvailable<{ status?: JsonObject; events?: JsonObject[] }>('/cold-chain/feed'),
-        fetchIfAvailable<{ traces?: JsonObject[] }>('/traces'),
-        fetchIfAvailable<{ tools?: JsonObject[] }>('/tools/platform'),
-        fetchIfAvailable<{ events?: JsonObject[] }>('/tools/platform/audit'),
-        fetchIfAvailable<{ tasks?: WritebackTaskRow[] }>('/writeback/tasks'),
-        fetchIfAvailable<{ thresholds?: JsonObject; events?: JsonObject[] }>('/learning'),
-        fetchIfAvailable<ProductAttentionPayload>('/products/attention?limit=20', '/products/attention'),
-        fetchIfAvailable<{ model_runs?: JsonObject[] }>('/mlops/model-runs'),
+        dataDomain === 'operational_twin'
+          ? fetchIfAvailable<{ records?: InboundRecordRow[] }>('/connectors/inbound-records?limit=50', '/connectors/inbound-records')
+          : Promise.resolve(null),
+        fetchIfAvailable<{ events?: EventRow[] }>(withDataDomain('/events?limit=80', dataDomain), '/events'),
+        fetchIfAvailable<{ messages?: BusMessageRow[] }>(withDataDomain('/events/bus', dataDomain), '/events/bus'),
+        dataDomain === 'world_simulation'
+          ? fetchIfAvailable<{ status?: JsonObject; events?: JsonObject[] }>('/cold-chain/feed')
+          : Promise.resolve(null),
+        fetchIfAvailable<{ traces?: JsonObject[] }>(withDataDomain('/traces', dataDomain), '/traces'),
+        fetchIfAvailable<{ tools?: JsonObject[] }>(withDataDomain('/tools/platform', dataDomain), '/tools/platform'),
+        fetchIfAvailable<{ events?: JsonObject[] }>(withDataDomain('/tools/platform/audit', dataDomain), '/tools/platform/audit'),
+        fetchIfAvailable<{ tasks?: WritebackTaskRow[] }>(withDataDomain('/writeback/tasks', dataDomain), '/writeback/tasks'),
+        fetchIfAvailable<{ thresholds?: JsonObject; events?: JsonObject[] }>(withDataDomain('/learning', dataDomain), '/learning'),
+        fetchIfAvailable<ProductAttentionPayload>(withDataDomain('/products/attention?limit=20', dataDomain), '/products/attention'),
+        fetchIfAvailable<{ model_runs?: JsonObject[] }>(withDataDomain('/mlops/model-runs', dataDomain), '/mlops/model-runs'),
         fetchIfAvailable<{ prompt_versions?: JsonObject[] }>('/mlops/prompts'),
-        fetchIfAvailable<{ report?: JsonObject; markdown?: string }>('/mlops/accountability'),
-        fetchIfAvailable<{ facts?: JsonObject[] }>('/mlops/tenant-facts'),
+        fetchIfAvailable<{ report?: JsonObject; markdown?: string }>(withDataDomain('/mlops/accountability', dataDomain), '/mlops/accountability'),
+        fetchIfAvailable<{ facts?: JsonObject[] }>(withDataDomain('/mlops/tenant-facts', dataDomain), '/mlops/tenant-facts'),
         fetchIfAvailable<{ profile?: JsonObject }>('/tenants/me'),
-        fetchIfAvailable<{ runs?: JsonObject[] }>('/worker/runs'),
-        fetchIfAvailable<{ snapshot?: JsonObject }>('/mlops/observability?limit=200', '/mlops/observability'),
+        fetchIfAvailable<{ runs?: JsonObject[] }>(withDataDomain('/worker/runs', dataDomain), '/worker/runs'),
+        fetchIfAvailable<{ snapshot?: JsonObject }>(withDataDomain('/mlops/observability?limit=200', dataDomain), '/mlops/observability'),
         fetchIfAvailable<{ worker?: JsonObject }>('/worker/status'),
-        fetchIfAvailable<{ runs?: JsonObject[] }>('/demo/worldgen-runs?limit=20', '/demo/worldgen-runs'),
+        dataDomain === 'world_simulation'
+          ? fetchIfAvailable<{ runs?: JsonObject[] }>('/scenarios/worldgen-runs?limit=20', '/scenarios/worldgen-runs')
+          : Promise.resolve(null),
         fetchIfAvailable<{ sql?: string }>('/detective/root-cause-sql'),
       ])
       const log = Array.isArray(logPayload?.decisions) ? logPayload.decisions : payload.decision ? [payload.decision] : []
@@ -3157,8 +3275,10 @@ function App() {
       if (controller.signal.aborted) return
       setData(payload)
       setDecisions(log)
+      setConversations(asArray<ConversationSummary>(conversationsPayload?.conversations))
       setSeed(seedData)
       setOps({
+        dataDomain,
         apiPaths,
         health: asObject(healthPayload),
         readiness: asObject(readinessPayload),
@@ -3197,7 +3317,7 @@ function App() {
       setLoadState('error')
     })
     return () => controller.abort()
-  }, [reloadKey])
+  }, [dataDomain, reloadKey])
 
   useEffect(() => () => {
     transitionCtrl.current?.abort()
@@ -3241,8 +3361,64 @@ function App() {
     if (isOverlayViewport()) setSidebarOpen(false)
   }
 
+  const openRecent = (selectedConversationId: string) => {
+    if (selectedConversationId === conversationId) {
+      if (isOverlayViewport()) setSidebarOpen(false)
+      return
+    }
+    chatCtrl.current?.abort()
+    const controller = new AbortController()
+    chatCtrl.current = controller
+    setError(null)
+    fetchChatConversation(selectedConversationId, controller.signal)
+      .then((conversation) => {
+        if (conversation.data_domain && conversation.data_domain !== dataDomain) {
+          throw new Error('That conversation belongs to another data source.')
+        }
+        const restored: ChatMessage[] = []
+        for (const message of conversation.messages ?? []) {
+          if (
+            (message.role === 'user' || message.role === 'assistant')
+            && typeof message.text === 'string'
+          ) {
+            restored.push({
+              id: message.id || newMsgId(),
+              role: message.role,
+              text: message.text,
+            })
+          }
+        }
+        setApprovalOpen(false)
+        setActiveWorkspace(null)
+        setConversationId(conversation.id)
+        setMessages(restored)
+        if (isOverlayViewport()) setSidebarOpen(false)
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return
+        setError(reason instanceof Error ? reason.message : 'Conversation could not be opened.')
+      })
+  }
+
+  const selectDataDomain = (nextDomain: DataDomain) => {
+    if (nextDomain === dataDomain) return
+    chatCtrl.current?.abort()
+    transitionCtrl.current?.abort()
+    attachCtrl.current?.abort()
+    setApprovalOpen(false)
+    setActiveWorkspace(null)
+    setData(null)
+    setDecisions([])
+    setSeed(null)
+    setOps(emptyOps(nextDomain))
+    setMessages([])
+    setConversations([])
+    setAgenticRuns({})
+    setConversationId(newChatId('conv'))
+    setDataDomain(nextDomain)
+  }
+
   const send = (text: string) => {
-    const fallback = replyFor(text, data, pendingQueue(decisions, data?.decision))
     const assistantId = newMsgId()
     const messageId = newChatId('msg')
     const controller = new AbortController()
@@ -3252,17 +3428,23 @@ function App() {
       { id: newMsgId(), role: 'user', text },
       { id: assistantId, role: 'assistant', text: 'Checking current ShelfWise state...' },
     ])
-    postChat(text, conversationId, messageId, controller.signal)
+    postChat(text, conversationId, messageId, dataDomain, controller.signal)
       .then((reply) => {
         setConversationId(reply.conversationId)
-        const clean = reply.answer.trim() || fallback
+        const clean = reply.answer.trim() || 'Gemma returned no answer. No decision or store data changed.'
         setMessages((prev) => prev.map((message) => (
           message.id === assistantId ? { ...message, text: clean } : message
         )))
+        fetchConversationSummaries(dataDomain, controller.signal)
+          .then(setConversations)
+          .catch(() => undefined)
       })
       .catch(() => {
+        const source = dataDomain === 'operational_twin' ? 'the live store' : 'the simulation'
         setMessages((prev) => prev.map((message) => (
-          message.id === assistantId ? { ...message, text: fallback } : message
+          message.id === assistantId
+            ? { ...message, text: `Gemma could not answer from ${source}. No decision or store data changed.` }
+            : message
         )))
       })
   }
@@ -3278,6 +3460,10 @@ function App() {
     const finish = (text: string) => {
       setMessages((prev) => prev.map((message) => (message.id === assistantId ? { ...message, text } : message)))
       setAttaching(false)
+    }
+    if (dataDomain !== 'operational_twin') {
+      finish('Switch to Live store before scanning an operational image or recording.')
+      return
     }
     const path = file.type.startsWith('image/') ? '/scan/image' : file.type.startsWith('audio/') ? '/voice/in' : ''
     if (!path) {
@@ -3311,8 +3497,15 @@ function App() {
       })
   }
 
-  const runAgenticDemo = (path: string) => {
+  const runAgenticScenario = (path: string) => {
     if (agenticRuns[path]?.state === 'running') return
+    if (dataDomain !== 'world_simulation') {
+      setAgenticRuns((prev) => ({
+        ...prev,
+        [path]: { state: 'error', detail: 'Switch to Simulation before running a scenario.' },
+      }))
+      return
+    }
     setAgenticRuns((prev) => ({
       ...prev,
       [path]: {
@@ -3407,9 +3600,7 @@ function App() {
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        onSelectRecent={() => {
-          if (isOverlayViewport()) setSidebarOpen(false)
-        }}
+        onSelectRecent={openRecent}
         onNewChat={newChat}
         onOpenApprovals={openApprovals}
         onOpenWorkspace={openWorkspace}
@@ -3440,8 +3631,33 @@ function App() {
             <span className="brand-mark" />
             <span className="brand-name">ShelfWise</span>
           </span>
+          <div className="data-source-switch" role="group" aria-label="Workspace data source">
+            <button
+              type="button"
+              className={dataDomain === 'operational_twin' ? 'is-active' : ''}
+              aria-pressed={dataDomain === 'operational_twin'}
+              title="Measured store and connector data"
+              onClick={() => selectDataDomain('operational_twin')}
+            >
+              Live store
+            </button>
+            <button
+              type="button"
+              className={dataDomain === 'world_simulation' ? 'is-active' : ''}
+              aria-pressed={dataDomain === 'world_simulation'}
+              title="Generated test scenarios"
+              onClick={() => selectDataDomain('world_simulation')}
+            >
+              Simulation
+            </button>
+          </div>
           <div className="topbar-right">
-            <InferencePill config={data?.inference} />
+            <InferencePill
+              config={data?.inference ?? (ops.inferenceConfig as InferenceConfig)}
+              verified={ops.modelRuns.some((run) => (
+                run.provider === 'vllm_mi300x' && run.status === 'ok'
+              ))}
+            />
             <span className={`conn conn-${conn}`}>
               <span className="conn-dot" /> {conn === 'live' ? 'Live' : conn === 'error' ? 'Offline' : 'Connecting'}
             </span>
@@ -3466,6 +3682,7 @@ function App() {
             <WorkspaceScreen
               surface={activeWorkspace.surface}
               initialQuery={activeWorkspace.query}
+              dataDomain={dataDomain}
               onBack={() => setActiveWorkspace(null)}
               data={data}
               seed={seed}
@@ -3473,7 +3690,7 @@ function App() {
               ops={ops}
               recoveredToday={recoveredToday}
               agenticRuns={agenticRuns}
-              onRunAgentic={runAgenticDemo}
+              onRunAgentic={runAgenticScenario}
             />
           ) : (
             <>

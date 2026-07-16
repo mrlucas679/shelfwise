@@ -44,12 +44,26 @@ jobs:
           docker logs shelfwise-ci-postgres
           exit 1
 
+      - name: Boot Redis integration bus
+        run: |
+          docker rm -f shelfwise-ci-redis >/dev/null 2>&1 || true
+          docker run --name shelfwise-ci-redis -d -p 6379:6379 redis:7-bookworm
+          for attempt in $(seq 1 30); do
+            if docker exec shelfwise-ci-redis redis-cli ping | grep -q PONG; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs shelfwise-ci-redis
+          exit 1
+
       - name: Lint backend
         run: python -m ruff check src tests scripts
 
       - name: Test backend
         env:
           SHELFWISE_TEST_DATABASE_URL: postgresql://shelfwise_app:ci-app-password@127.0.0.1:5432/shelfwise
+          SHELFWISE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
         run: python -m pytest -q
 
       - name: Run ShelfWise eval gate
@@ -73,6 +87,24 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser E2E suite
+        working-directory: frontend
+        env:
+          CI: "true"
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
       - name: Validate Compose
         run: docker compose config --quiet
 
@@ -81,7 +113,7 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
-          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_COOKIE_SECURE: "true"
           DOCKER_DEFAULT_PLATFORM: linux/amd64
         run: |
           docker compose -f docker-compose.production.yml build
@@ -103,15 +135,18 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
           TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: "true"
         run: |
           trap 'docker compose -f docker-compose.production.yml logs --no-color backend postgres migrate frontend' ERR
+          docker compose -f docker-compose.production.yml up -d --wait
           curl --fail --silent --show-error http://127.0.0.1/ > /dev/null
           curl --fail --silent --show-error \
             --cookie-jar /tmp/shelfwise.cookies \
             --request POST http://127.0.0.1/auth/session > /tmp/session.json
           curl --fail --silent --show-error \
             --cookie /tmp/shelfwise.cookies \
-            --request POST http://127.0.0.1/demo/golden > /tmp/golden.json
+            --request POST http://127.0.0.1/scenarios/golden > /tmp/golden.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -124,8 +159,20 @@ jobs:
           assert golden['decision']['tenant_id'] == session['session']['tenant_id']
           PY
 
+      - name: Shakedown deployed public topology
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_APP_PASSWORD: ci-app-password
+          TENANT_AUTH_SECRET: ci-only-tenant-auth-secret
+          SHELFWISE_COOKIE_SECURE: "false"
+          SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: "true"
+        run: |
+          python scripts/deployment_shakedown.py \
+            --base-url http://127.0.0.1 \
+            --cycles 3 \
+            --output reports/deployment-shakedown.json
+
       - name: Track 3 live response and language gate
-        if: ${{ secrets.LLM_ROUTINE_BASE_URL != '' && secrets.LLM_API_KEY != '' }}
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_APP_PASSWORD: ci-app-password
@@ -137,6 +184,11 @@ jobs:
           LLM_ROUTINE_MODEL: ${{ secrets.LLM_ROUTINE_MODEL || 'google/gemma-4-E4B-it' }}
           LLM_STRONG_MODEL: ${{ secrets.LLM_STRONG_MODEL || 'google/gemma-4-31B-it' }}
         run: |
+          if [ -z "$LLM_ROUTINE_BASE_URL" ] || [ -z "$LLM_ROUTINE_API_KEY" ]; then
+            echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
+            echo "Production topology and fail-closed behavior are covered by the application tests."
+            exit 0
+          fi
           docker compose -f docker-compose.production.yml up -d --wait
           python - <<'PY'
           import json
@@ -173,12 +225,6 @@ jobs:
           print('Track 3 request/language/unseen-input gate: PASS')
           PY
 
-      - name: Track 3 fail-closed gate without AMD endpoint
-        if: ${{ secrets.LLM_ROUTINE_BASE_URL == '' || secrets.LLM_API_KEY == '' }}
-        run: |
-          echo "No AMD endpoint credentials configured in CI; live proof is required in the cloud run."
-          echo "Production topology and fail-closed behavior are covered by the application tests."
-
       - name: Stop production topology
         if: always()
         env:
@@ -190,3 +236,7 @@ jobs:
       - name: Stop Postgres integration database
         if: always()
         run: docker rm -f shelfwise-ci-postgres >/dev/null 2>&1 || true
+
+      - name: Stop Redis integration bus
+        if: always()
+        run: docker rm -f shelfwise-ci-redis >/dev/null 2>&1 || true

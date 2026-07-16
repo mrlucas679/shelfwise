@@ -63,12 +63,14 @@ class ChatConversationStore:
                 key,
                 {
                     "id": conversation_id,
+                    "data_domain": _metadata_domain(metadata),
                     "title": question[:80],
                     "created_at": now,
                     "updated_at": now,
                     "messages": [],
                 },
             )
+            conversation.setdefault("data_domain", _metadata_domain(metadata))
             conversation["messages"].extend(
                 [
                     {
@@ -181,11 +183,13 @@ class PostgresChatConversationStore:
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id
         ) or {
             "id": conversation_id,
+            "data_domain": _metadata_domain(metadata),
             "title": question[:80],
             "created_at": now,
             "updated_at": now,
             "messages": [],
         }
+        conversation.setdefault("data_domain", _metadata_domain(metadata))
         conversation["messages"].extend(
             [
                 {"id": message_id, "role": "user", "text": question, "created_at": now},
@@ -256,6 +260,10 @@ def create_chat_store() -> ChatConversationStore | PostgresChatConversationStore
 def _advisory_lock_id(tenant_id: str, user_id: str, conversation_id: str) -> int:
     raw = f"{tenant_id}\0{user_id}\0{conversation_id}".encode()
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big", signed=True)
+
+
+def _metadata_domain(metadata: dict[str, Any]) -> str:
+    return str(metadata.get("data_domain") or "world_simulation")
 
 
 _CHAT_SCHEMA_SQL = """

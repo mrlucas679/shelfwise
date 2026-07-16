@@ -6,6 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from shelfwise_runtime import DataDomain
+from shelfwise_storage import bind_tenant_context, reset_tenant_context
+
 from .journal import InMemoryJournal, PostgresJournal, journaled
 
 CapabilityHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -56,6 +59,7 @@ class Plan(BaseModel):
 
     plan_id: str = Field(min_length=1, max_length=128)
     tenant_id: str = Field(min_length=1, max_length=128)
+    data_domain: DataDomain = DataDomain.OPERATIONAL_TWIN
     actor_role: str = Field(min_length=1, max_length=64)
     steps: list[PlanStep] = Field(min_length=1, max_length=32)
 
@@ -90,11 +94,23 @@ class PlanRunner:
         self._publish = publish
 
     async def run(self, plan: Plan) -> PlanResult:
+        tenant_token = bind_tenant_context(plan.tenant_id)
+        try:
+            return await self._run_bound(plan)
+        finally:
+            reset_tenant_context(tenant_token)
+
+    async def _run_bound(self, plan: Plan) -> PlanResult:
         problems = validate_plan(plan, self._registry)
         if problems:
             return PlanResult(plan.plan_id, "failed", failed_step=f"validation: {problems[0]}")
 
-        self._journal.start_run(plan.plan_id, tenant_id=plan.tenant_id)
+        run_id = _plan_run_id(plan)
+        self._journal.start_run(
+            run_id,
+            tenant_id=plan.tenant_id,
+            data_domain=plan.data_domain.value,
+        )
         result = PlanResult(plan.plan_id, "done")
         total = len(plan.steps)
         for index, step in enumerate(plan.steps, start=1):
@@ -104,7 +120,7 @@ class PlanRunner:
                 result.failed_step = step.key
                 break
             try:
-                output = await self._run_step(plan, step, capability)
+                output = await self._run_step(run_id, step, capability)
             except Exception as exc:
                 result.status = "failed"
                 result.failed_step = step.key
@@ -112,6 +128,8 @@ class PlanRunner:
                     "progress",
                     {
                         "plan_id": plan.plan_id,
+                        "tenant_id": plan.tenant_id,
+                        "data_domain": plan.data_domain.value,
                         "step": step.key,
                         "i": index,
                         "total": total,
@@ -125,28 +143,30 @@ class PlanRunner:
                 "progress",
                 {
                     "plan_id": plan.plan_id,
+                    "tenant_id": plan.tenant_id,
+                    "data_domain": plan.data_domain.value,
                     "step": step.key,
                     "i": index,
                     "total": total,
                     "status": "ok",
                 },
             )
-        self._journal.finish_run(plan.plan_id, status=result.status)
+        self._journal.finish_run(run_id, status=result.status)
         return result
 
     async def _run_step(
         self,
-        plan: Plan,
+        run_id: str,
         step: PlanStep,
         capability: Capability,
     ) -> dict[str, Any]:
-        seen = self._journal.get(plan.plan_id, step.key)
+        seen = self._journal.get(run_id, step.key)
         if seen is not None:
             return seen
         output = await capability.handler(dict(step.params))
         journaled(
             self._journal,
-            plan.plan_id,
+            run_id,
             step.key,
             lambda: output,
             compensation=step.compensation,
@@ -172,4 +192,10 @@ def validate_plan(plan: Plan, registry: CapabilityRegistry) -> list[str]:
             )
         if capability.writes and step.compensation is None:
             problems.append(f"write step without compensation: {step.key}")
+        if capability.writes and plan.data_domain is not DataDomain.OPERATIONAL_TWIN:
+            problems.append(f"write step outside operational domain: {step.key}")
     return problems
+
+
+def _plan_run_id(plan: Plan) -> str:
+    return f"plan:{plan.tenant_id}:{plan.data_domain.value}:{plan.plan_id}"

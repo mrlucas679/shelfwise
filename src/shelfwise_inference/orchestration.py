@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from inspect import isawaitable
-from time import perf_counter
+from time import monotonic, perf_counter
 from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -17,6 +17,7 @@ from .tool_calling import (
     FinalAnswerValidationError,
     PlatformToolLike,
     PlatformToolRegistry,
+    ToolCallParseError,
     ToolExecution,
     openai_json_schema_response_format,
     parse_and_validate_json_answer,
@@ -27,6 +28,19 @@ _ROLE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _OK_STATUSES = {"ok", "success"}
 _OFFLINE_PROVIDERS = {"offline", "fallback"}
 _MAX_FINAL_ANSWER_RETRIES = 2
+# Gemma occasionally ignores tool_choice="required" and answers directly on the forced opening
+# call (seen reproducibly on the 31B strong tier for the expiry/cold-chain critics under the
+# 2026-07-15 hot soak). Re-forcing the opening tool call a bounded number of times recovers
+# from that nondeterministic non-compliance without a silent fallback - identical in spirit to
+# the final-answer decoding-stall retry. Viable only because the 30s submission gate is retired;
+# each retry is a full live model call.
+_MAX_OPENING_TOOL_RETRIES = 2
+# Audit-measured strong-tier fixed overhead (~3.1s median, 2026-07-14 live campaign) plus
+# margin: the minimum wall-clock budget a cascade must still have before it is honest to start
+# one more sequential model call. Below this, the call cannot possibly finish before the
+# caller's own deadline, so starting it only wastes real GPU time on behalf of a client that
+# has already timed out (the "zombie inference" defect the 2026-07-14 forensic audit found).
+_MIN_CALL_BUDGET_S = 4.0
 # Strict json_schema-constrained decoding (response_format={"type": "json_schema", ...})
 # was found live against Gemma-4-E4B-it/vLLM to cause a reproducible, non-token-budget-
 # fixable failure: after closing the first string value the guided-decoding grammar falls
@@ -63,6 +77,29 @@ class AgentOrchestrationError(RuntimeError):
 
 class LiveInferenceRequiredError(AgentOrchestrationError):
     """Raised when live-required execution observes offline or fallback output."""
+
+
+class CascadeDeadlineExceeded(AgentOrchestrationError):
+    """Raised when a cascade cannot safely start another model call before its deadline.
+
+    A typed, fast failure the caller can catch and turn into a 503 with real evidence about
+    how far the cascade got - the alternative (letting `enforce_request_deadline` middleware
+    cancel the client's wait while the cascade keeps calling the model) burns full GPU cost on
+    behalf of a request nobody is waiting for anymore.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        completed_model_calls: int,
+        elapsed_ms: int,
+        tool_calls: tuple[ToolExecution, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.completed_model_calls = completed_model_calls
+        self.elapsed_ms = elapsed_ms
+        self.tool_calls = tool_calls
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +235,14 @@ class ModelRuntime(Protocol):
         max_tokens: int,
         tenant_id: str,
         schema_version: str,
+        deadline: float | None = None,
     ) -> ModelCall | Awaitable[ModelCall]:
-        """Return one normalized OpenAI-compatible model response."""
+        """Return one normalized OpenAI-compatible model response.
+
+        `deadline` (a `time.monotonic()` timestamp) lets the runtime bound its own outbound
+        HTTP timeout to what's actually left, instead of always requesting the configured
+        ceiling on behalf of a client that may already be gone (see `CascadeDeadlineExceeded`).
+        """
         ...
 
 
@@ -274,8 +317,14 @@ class AgentOrchestrator:
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
         required_tool_names: Sequence[str] = (),
+        deadline: float | None = None,
     ) -> AgentRunResult:
-        """Run from a system/user prompt and return one validated agent answer."""
+        """Run from a system/user prompt and return one validated agent answer.
+
+        `deadline` is a `time.monotonic()` timestamp (not a duration). When set, the loop
+        refuses to start a model call that cannot finish before it and raises
+        `CascadeDeadlineExceeded` instead - see that class for why this matters.
+        """
         guarded_system = (
             f"{system.rstrip()}\n\n"
             "All natural-language values in your JSON response must be written in English. "
@@ -284,7 +333,16 @@ class AgentOrchestrator:
             "calculator: any number in your conclusion must be one the tools actually "
             "returned, not a guess or a paraphrase. Explain your reasoning by citing the "
             "specific figures you computed, not just a bare verdict. When evidence "
-            "gathering is complete, return only JSON matching the required response schema."
+            "gathering is complete, return only JSON matching the required response schema.\n"
+            "When you call a tool, emit ONLY the tool call - no analysis, no plan, no "
+            "preamble text. Save every word of reasoning for your final JSON conclusion, "
+            "after the tool results are in."
+            # The no-prose rule is a measured SLO fix, not style: on the 2026-07-15 MI300X
+            # D1 run, critics whose prompts invited explanation wrote a 400-token essay
+            # (the full cap, 14.3s at ~28 tok/s) on their forced tool-calling turn, while
+            # directive prompts produced the same tool calls in 25-31 tokens (~1.7s).
+            # That single turn was the difference between the golden cascade finishing
+            # inside the 29s ceiling and it timing out.
         )
         messages = [
             {"role": "system", "content": guarded_system},
@@ -301,6 +359,7 @@ class AgentOrchestrator:
             tenant_id=tenant_id,
             require_tool_call_first=require_tool_call_first,
             required_tool_names=required_tool_names,
+            deadline=deadline,
         )
 
     async def run_messages(
@@ -316,6 +375,7 @@ class AgentOrchestrator:
         tenant_id: str = "default",
         require_tool_call_first: bool = False,
         required_tool_names: Sequence[str] = (),
+        deadline: float | None = None,
     ) -> AgentRunResult:
         """Run a bounded tool loop from pre-built OpenAI-compatible messages.
 
@@ -323,18 +383,22 @@ class AgentOrchestrator:
         tools are registered. Some providers' "auto" tool choice will, under certain prompts,
         skip straight to a (often degenerate, schema-violating) final answer instead of
         gathering evidence first - forcing the first call closes that gap.
+
+        `deadline` is a `time.monotonic()` timestamp. See `CascadeDeadlineExceeded`.
         """
         normalized_role = _normalized_role(role)
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
-        response_format = _final_response_format(
+        answer_response_format = _final_response_format(
             model=self._runtime.architecture.target_for(normalized_role).model,
             schema_name=schema_name,
             schema=final_schema,
         )
         openai_tools = self._registry.openai_tools()
         available_tool_names = {tool["function"]["name"] for tool in openai_tools}
-        required_names = tuple(dict.fromkeys(name.strip() for name in required_tool_names if name.strip()))
+        required_names = tuple(
+            dict.fromkeys(name.strip() for name in required_tool_names if name.strip())
+        )
         unknown_required = set(required_names).difference(available_tool_names)
         if unknown_required:
             raise ValueError(f"required tools are not registered: {sorted(unknown_required)}")
@@ -355,30 +419,56 @@ class AgentOrchestrator:
         seen_call_ids: set[str] = set()
         started = perf_counter()
         final_answer_retries = 0
+        opening_tool_retries = 0
 
-        for call_index in range(self._max_model_calls):
+        for _call_index in range(self._max_model_calls):
+            if deadline is not None and monotonic() + _MIN_CALL_BUDGET_S > deadline:
+                raise CascadeDeadlineExceeded(
+                    f"cascade could not finish inside the response deadline after "
+                    f"{len(model_calls)} model call(s)",
+                    completed_model_calls=len(model_calls),
+                    elapsed_ms=_elapsed_ms(started),
+                    tool_calls=tuple(tool_executions),
+                )
             tool_choice: str | dict[str, Any] | None
             executed_names = {execution.name for execution in tool_executions}
-            next_required = next((name for name in required_names if name not in executed_names), None)
+            next_required = next(
+                (name for name in required_names if name not in executed_names),
+                None,
+            )
             if next_required is not None:
                 tool_choice = {"type": "function", "function": {"name": next_required}}
             elif not openai_tools:
                 tool_choice = None
-            elif require_tool_call_first and call_index == 0:
+            elif require_tool_call_first and not tool_executions:
+                # Keep forcing an opening tool call until the model actually makes one, not
+                # just on call 0 - if it ignores the forced choice, the next call must force
+                # it again (bounded by _MAX_OPENING_TOOL_RETRIES at the miss handler below).
                 tool_choice = "required"
             else:
                 tool_choice = "auto"
+            # Only constrain output to the answer schema on turns where the model is actually
+            # allowed to produce the final answer. On a forced-tool-call turn, strong-tier
+            # json_schema guided decoding competes with tool_choice="required" and can make
+            # the 31B model emit schema-shaped JSON instead of the tool call (seen live on the
+            # 2026-07-15 hot soak for the expiry/cold-chain critics). Text on those turns lets
+            # the forced tool call win cleanly; the answer turn still gets the schema.
+            forcing_tool_call = tool_choice == "required" or isinstance(tool_choice, dict)
+            turn_response_format = (
+                _TEXT_RESPONSE_FORMAT if forcing_tool_call else answer_response_format
+            )
             result = self._runtime.complete(
                 role=normalized_role,
                 messages=[dict(message) for message in conversation],
                 tools=deepcopy_tools(openai_tools),
                 tool_choice=tool_choice,
-                response_format=response_format,
+                response_format=turn_response_format,
                 correlation_id=effective_correlation_id,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 tenant_id=tenant_id,
                 schema_version=schema_name,
+                deadline=deadline,
             )
             model_call = await result if isawaitable(result) else result
             if not isinstance(model_call, ModelCall):
@@ -390,8 +480,40 @@ class AgentOrchestrator:
             enforce_execution_mode(model_call, self._execution_mode)
             model_calls.append(model_call)
 
-            parsed_calls = parse_tool_calls(model_call.message)
+            try:
+                parsed_calls = parse_tool_calls(model_call.message)
+            except ToolCallParseError:
+                # A forced opening call is not useful until both its name and arguments are
+                # parseable. Gemma can select the requested function yet truncate or corrupt
+                # its JSON arguments under live load. Retry the same forced request within
+                # the existing strict bound; never execute partial arguments or fall back.
+                if (
+                    forcing_tool_call
+                    and not tool_executions
+                    and opening_tool_retries < _MAX_OPENING_TOOL_RETRIES
+                ):
+                    opening_tool_retries += 1
+                    conversation.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Your previous forced function call had invalid JSON "
+                                "arguments. Retry the required function now. Emit exactly "
+                                "one native tool call whose arguments are one complete JSON "
+                                "object; emit no prose and do not repeat any key."
+                            ),
+                        }
+                    )
+                    continue
+                raise
             if not parsed_calls:
+                if require_tool_call_first and openai_tools and not tool_executions:
+                    if opening_tool_retries >= _MAX_OPENING_TOOL_RETRIES:
+                        raise AgentOrchestrationError(
+                            "model ignored the required opening tool call after retries"
+                        )
+                    opening_tool_retries += 1
+                    continue
                 content = model_call.message.get("content")
                 try:
                     if not isinstance(content, str):

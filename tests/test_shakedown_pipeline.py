@@ -28,6 +28,13 @@ def test_world_simulation_builds_mixed_training_rows(tmp_path) -> None:
     assert summary["modalities"]["video"] >= 1
     assert "simulation_incident" in report["dataset_mixture_breakdown"]
     assert "ambiguous missing evidence" in report["case_breakdown"]
+    # Decision domains beyond procurement/delivery (golden markdown, cold-chain, catalog-price
+    # guardrail) must be represented too, not just receiving exceptions.
+    assert "expiry markdown decision" in report["case_breakdown"]
+    assert "cold-chain temperature breach" in report["case_breakdown"]
+    assert "price integrity mismatch" in report["case_breakdown"]
+    case_types = {row.case_type for row in rows}
+    assert {"expiry_markdown", "cold_chain_risk", "price_integrity"} <= case_types
 
 
 def test_shakedown_dry_run_writes_report_and_eval() -> None:

@@ -24,6 +24,8 @@ class LearningEvent:
     outcome: dict[str, Any]
     message: str
     created_at: str
+    tenant_id: str = "default"
+    data_domain: str = "world_simulation"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +39,8 @@ class LearningEvent:
             "outcome": deepcopy(self.outcome),
             "message": self.message,
             "created_at": self.created_at,
+            "tenant_id": self.tenant_id,
+            "data_domain": self.data_domain,
         }
 
 
@@ -45,16 +49,30 @@ class InMemoryLearningStore:
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._thresholds: dict[str, int] = {}
-        self._events_by_decision: dict[str, LearningEvent] = {}
+        self._thresholds: dict[tuple[str, str, str], int] = {}
+        self._events_by_decision: dict[tuple[str, str, str], LearningEvent] = {}
 
-    def thresholds(self) -> dict[str, int]:
+    def thresholds(
+        self, tenant_id: str | None = None, data_domain: str | None = None
+    ) -> dict[str, int]:
         with self._lock:
-            return dict(self._thresholds)
+            return {
+                metric: threshold
+                for (event_tenant_id, event_domain, metric), threshold in self._thresholds.items()
+                if tenant_id is None or event_tenant_id == tenant_id
+                if data_domain is None or event_domain == data_domain
+            }
 
-    def list_events(self) -> list[dict[str, Any]]:
+    def list_events(
+        self, tenant_id: str | None = None, data_domain: str | None = None
+    ) -> list[dict[str, Any]]:
         with self._lock:
-            return [event.to_dict() for event in self._events_by_decision.values()]
+            return [
+                event.to_dict()
+                for event in self._events_by_decision.values()
+                if tenant_id is None or event.tenant_id == tenant_id
+                if data_domain is None or event.data_domain == data_domain
+            ]
 
     def clear(self) -> None:
         """Reset test state for the shared, process-wide store."""
@@ -69,19 +87,33 @@ class InMemoryLearningStore:
         if not decision_id:
             raise ValueError("decision must include id")
 
+        tenant_id = _tenant_id(decision)
+        data_domain = _data_domain(decision)
         with self._lock:
-            existing = self._events_by_decision.get(decision_id)
+            event_key = (tenant_id, data_domain, decision_id)
+            existing = self._events_by_decision.get(event_key)
             if existing is not None:
                 return existing.to_dict()
 
             metric, _subject = _routed_metric(decision)
             event = _build_learning_event(
                 decision,
-                previous_threshold=self._thresholds.get(metric),
+                previous_threshold=self._thresholds.get((tenant_id, data_domain, metric)),
             )
-            self._thresholds[metric] = event.updated_threshold
-            self._events_by_decision[decision_id] = event
+            self._thresholds[(tenant_id, data_domain, metric)] = event.updated_threshold
+            self._events_by_decision[event_key] = event
             return event.to_dict()
+
+    def record_rejected_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        """Record a terminal rejection without moving an approval-derived threshold."""
+        event = _build_rejection_event(decision)
+        with self._lock:
+            key = (event.tenant_id, event.data_domain, event.decision_id)
+            existing = self._events_by_decision.get(key)
+            if existing is not None:
+                return existing.to_dict()
+            self._events_by_decision[key] = event
+        return event.to_dict()
 
 
 class PostgresLearningStore:
@@ -94,23 +126,51 @@ class PostgresLearningStore:
         if auto_schema_enabled():
             self._ensure_schema()
 
-    def thresholds(self) -> dict[str, int]:
+    def thresholds(
+        self, tenant_id: str | None = None, data_domain: str | None = None
+    ) -> dict[str, int]:
         with self._connect() as conn:
+            clauses: list[str] = []
+            params: list[str] = []
+            if tenant_id is not None:
+                clauses.append("tenant_id = %s")
+                params.append(tenant_id)
+            if data_domain is not None:
+                clauses.append("data_domain = %s")
+                params.append(data_domain)
+            where = " where " + " and ".join(clauses) if clauses else ""
             rows = conn.execute(
-                "select metric, threshold_units from shelfwise_learning_thresholds"
+                "select metric, threshold_units from shelfwise_learning_thresholds" + where,
+                tuple(params),
             ).fetchall()
         return {row["metric"]: int(row["threshold_units"]) for row in rows}
 
-    def list_events(self) -> list[dict[str, Any]]:
+    def list_events(
+        self, tenant_id: str | None = None, data_domain: str | None = None
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            clauses: list[str] = []
+            params: list[str] = []
+            if tenant_id is not None:
+                clauses.append("tenant_id = %s")
+                params.append(tenant_id)
+            if data_domain is not None:
+                clauses.append("data_domain = %s")
+                params.append(data_domain)
+            where = " where " + " and ".join(clauses) if clauses else ""
             rows = conn.execute(
-                """
-                select payload
-                from shelfwise_learning_events
-                order by created_at desc, decision_id
-                """
+                "select tenant_id, data_domain, payload from shelfwise_learning_events"
+                + where
+                + " order by created_at desc, decision_id",
+                tuple(params),
             ).fetchall()
-        return [deepcopy(row["payload"]) for row in rows]
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event = deepcopy(row["payload"])
+            event["tenant_id"] = str(row["tenant_id"])
+            event["data_domain"] = str(row["data_domain"])
+            events.append(event)
+        return events
 
     def clear(self) -> None:
         with self._connect() as conn:
@@ -125,24 +185,29 @@ class PostgresLearningStore:
         if not decision_id:
             raise ValueError("decision must include id")
 
+        tenant_id = _tenant_id(decision)
+        data_domain = _data_domain(decision)
         with self._connect() as conn:
             existing = conn.execute(
-                "select payload from shelfwise_learning_events where decision_id = %s",
-                (decision_id,),
+                """
+                select payload
+                from shelfwise_learning_events
+                where tenant_id = %s and data_domain = %s and decision_id = %s
+                """,
+                (tenant_id, data_domain, decision_id),
             ).fetchone()
             if existing is not None:
                 return deepcopy(existing["payload"])
 
-            tenant_id = _tenant_id(decision)
             metric, _subject = _routed_metric(decision)
             threshold_row = conn.execute(
                 """
                 select threshold_units
                 from shelfwise_learning_thresholds
-                where tenant_id = %s and metric = %s
+                where tenant_id = %s and data_domain = %s and metric = %s
                 for update
                 """,
-                (tenant_id, metric),
+                (tenant_id, data_domain, metric),
             ).fetchone()
             previous_threshold = (
                 int(threshold_row["threshold_units"]) if threshold_row is not None else None
@@ -152,23 +217,90 @@ class PostgresLearningStore:
             conn.execute(
                 """
                 insert into shelfwise_learning_thresholds
-                    (tenant_id, metric, sku, threshold_units, updated_at)
-                values (%s, %s, %s, %s, %s)
-                on conflict (tenant_id, metric) do update
+                    (tenant_id, data_domain, metric, sku, threshold_units, updated_at)
+                values (%s, %s, %s, %s, %s, %s)
+                on conflict (tenant_id, data_domain, metric) do update
                 set threshold_units = excluded.threshold_units,
                     updated_at = excluded.updated_at
                 """,
-                (tenant_id, event.metric, event.sku, event.updated_threshold, event.created_at),
+                (
+                    tenant_id,
+                    data_domain,
+                    event.metric,
+                    event.sku,
+                    event.updated_threshold,
+                    event.created_at,
+                ),
             )
-            conn.execute(
+            # Two concurrent approvals of the same decision can both pass the
+            # existing-event check above (the decision-store transition lets the loser
+            # through with the already-approved record), so the insert must absorb the
+            # race at the database level instead of surfacing a unique-violation 500 to
+            # a client whose approval actually succeeded. Both racers compute an
+            # identical event from the same previous_threshold, so returning the
+            # winner's persisted row is exact, not approximate.
+            inserted = conn.execute(
                 """
-                insert into shelfwise_learning_events (tenant_id, decision_id, payload, created_at)
-                values (%s, %s, %s, %s)
+                insert into shelfwise_learning_events
+                    (tenant_id, data_domain, decision_id, payload, created_at)
+                values (%s, %s, %s, %s, %s)
+                on conflict (tenant_id, data_domain, decision_id) do nothing
+                returning payload
                 """,
-                (tenant_id, event.decision_id, jsonb(payload), event.created_at),
-            )
+                (tenant_id, data_domain, event.decision_id, jsonb(payload), event.created_at),
+            ).fetchone()
+            if inserted is None:
+                winner = conn.execute(
+                    """
+                    select payload
+                    from shelfwise_learning_events
+                    where tenant_id = %s and data_domain = %s and decision_id = %s
+                    """,
+                    (tenant_id, data_domain, event.decision_id),
+                ).fetchone()
+                conn.commit()
+                return deepcopy(winner["payload"]) if winner else payload
             conn.commit()
             return payload
+
+    def record_rejected_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        """Persist a terminal rejection outcome while leaving thresholds unchanged."""
+        event = _build_rejection_event(decision)
+        payload = event.to_dict()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """select payload from shelfwise_learning_events
+                   where tenant_id = %s and data_domain = %s and decision_id = %s""",
+                (event.tenant_id, event.data_domain, event.decision_id),
+            ).fetchone()
+            if existing is not None:
+                return deepcopy(existing["payload"])
+            # Same double-submit race as record_approved_decision: absorb the conflict
+            # in the database rather than 500ing the losing (but equally valid) caller.
+            inserted = conn.execute(
+                """insert into shelfwise_learning_events
+                   (tenant_id, data_domain, decision_id, payload, created_at)
+                   values (%s, %s, %s, %s, %s)
+                   on conflict (tenant_id, data_domain, decision_id) do nothing
+                   returning payload""",
+                (
+                    event.tenant_id,
+                    event.data_domain,
+                    event.decision_id,
+                    jsonb(payload),
+                    event.created_at,
+                ),
+            ).fetchone()
+            if inserted is None:
+                winner = conn.execute(
+                    """select payload from shelfwise_learning_events
+                       where tenant_id = %s and data_domain = %s and decision_id = %s""",
+                    (event.tenant_id, event.data_domain, event.decision_id),
+                ).fetchone()
+                conn.commit()
+                return deepcopy(winner["payload"]) if winner else payload
+            conn.commit()
+        return payload
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -176,47 +308,63 @@ class PostgresLearningStore:
                 """
                 create table if not exists shelfwise_learning_thresholds (
                     tenant_id text not null default 'default',
+                    data_domain text not null default 'world_simulation',
                     metric text not null,
                     sku text not null,
                     threshold_units integer not null,
                     updated_at timestamptz not null,
-                    primary key (tenant_id, metric)
+                    primary key (tenant_id, data_domain, metric)
                 )
                 """
             )
             conn.execute(
                 """
                 alter table shelfwise_learning_thresholds
-                add column if not exists tenant_id text not null default 'default'
+                add column if not exists tenant_id text not null default 'default';
+                alter table shelfwise_learning_thresholds
+                add column if not exists data_domain text not null default 'world_simulation';
+                alter table shelfwise_learning_thresholds
+                drop constraint if exists shelfwise_learning_thresholds_pkey;
+                alter table shelfwise_learning_thresholds
+                add primary key (tenant_id, data_domain, metric)
                 """
             )
             conn.execute(
                 """
-                create unique index if not exists ux_shelfwise_learning_thresholds_tenant_metric
-                on shelfwise_learning_thresholds (tenant_id, metric)
+                drop index if exists ux_shelfwise_learning_thresholds_tenant_metric;
+                create unique index if not exists ux_shelfwise_learning_thresholds_domain_metric
+                on shelfwise_learning_thresholds (tenant_id, data_domain, metric)
                 """
             )
             conn.execute(
                 """
                 create table if not exists shelfwise_learning_events (
                     tenant_id text not null default 'default',
+                    data_domain text not null default 'world_simulation',
                     decision_id text not null,
                     payload jsonb not null,
                     created_at timestamptz not null,
-                    primary key (tenant_id, decision_id)
+                    primary key (tenant_id, data_domain, decision_id)
                 )
                 """
             )
             conn.execute(
                 """
                 alter table shelfwise_learning_events
-                add column if not exists tenant_id text not null default 'default'
+                add column if not exists tenant_id text not null default 'default';
+                alter table shelfwise_learning_events
+                add column if not exists data_domain text not null default 'world_simulation';
+                alter table shelfwise_learning_events
+                drop constraint if exists shelfwise_learning_events_pkey;
+                alter table shelfwise_learning_events
+                add primary key (tenant_id, data_domain, decision_id)
                 """
             )
             conn.execute(
                 """
+                drop index if exists idx_shelfwise_learning_events_tenant_created;
                 create index if not exists idx_shelfwise_learning_events_tenant_created
-                on shelfwise_learning_events (tenant_id, created_at desc)
+                on shelfwise_learning_events (tenant_id, data_domain, created_at desc)
                 """
             )
             apply_tenant_rls(
@@ -249,6 +397,13 @@ def _tenant_id(decision: dict[str, Any]) -> str:
     return tenant_id or "default"
 
 
+def _data_domain(decision: dict[str, Any]) -> str:
+    domain = str(decision.get("data_domain") or "world_simulation").strip()
+    if domain not in {"operational_twin", "world_simulation"}:
+        raise ValueError("learning requires an operational or simulation decision domain")
+    return domain
+
+
 def _routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
     """Choose the learning metric for a decision by what was actually decided.
 
@@ -268,6 +423,9 @@ def _routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
     if action_type == "review_expiry_markdown":
         sku = str(params.get("sku") or "unknown")
         return f"{sku}:expiry_review_days_to_expiry", sku
+    if action_type == "reorder":
+        sku = str(params.get("sku") or "unknown")
+        return f"{sku}:reorder_stockout_exposure_minor_units", sku
     sku = str(params.get("sku") or "unknown")
     return f"{sku}:markdown_sell_through_target_units", sku
 
@@ -314,6 +472,8 @@ def _exposure_event(
             f"largest confirmed is now {updated}."
         ),
         created_at=datetime.now(UTC).isoformat(),
+        tenant_id=_tenant_id(decision),
+        data_domain=_data_domain(decision),
     )
 
 
@@ -349,6 +509,8 @@ def _expiry_review_event(
             f"review window threshold now {updated}."
         ),
         created_at=datetime.now(UTC).isoformat(),
+        tenant_id=_tenant_id(decision),
+        data_domain=_data_domain(decision),
     )
 
 
@@ -387,7 +549,54 @@ def _build_learning_event(
             metric=metric,
             subject=subject,
         )
+    if action_type == "reorder":
+        # Procurement decisions had no learning-metric route at all (not degraded, entirely
+        # absent) in both the deterministic and agentic cascades - approving a reorder never
+        # built organizational memory, so the app could never legitimately claim continuous
+        # learning for procurement, one of the store positions the product is required to
+        # cover for real, not as a demo slice. `stockout_exposure_minor_units` is the
+        # deterministic cascade's existing real field (money at risk of stockout, avoided by
+        # reordering) - reused here rather than inventing a new one, so both paths agree.
+        return _exposure_event(
+            decision,
+            previous_threshold=previous_threshold,
+            metric=metric,
+            subject=subject,
+            exposure_keys=(
+                "stockout_exposure_minor_units",
+                "incremental_profit_minor_units",
+            ),
+            label="Reorder stockout exposure avoided",
+        )
     return _markdown_learning_event(decision, previous_threshold=previous_threshold)
+
+
+def _build_rejection_event(decision: dict[str, Any]) -> LearningEvent:
+    if decision.get("status") != "rejected":
+        raise ValueError("rejection learning requires a rejected decision")
+    decision_id = str(decision.get("id") or "")
+    if not decision_id:
+        raise ValueError("decision must include id")
+    action = decision.get("action") if isinstance(decision.get("action"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    subject = str(params.get("sku") or params.get("site_id") or "unknown")
+    return LearningEvent(
+        id=f"learn_{decision_id.removeprefix('dec_')}",
+        decision_id=decision_id,
+        sku=subject,
+        metric=f"{subject}:rejection_outcome",
+        previous_threshold=0,
+        updated_threshold=0,
+        delta_units=0,
+        outcome={
+            "decision_status": "rejected",
+            "action_prevented": str(action.get("type") or "unknown"),
+        },
+        message=f"Rejected {action.get('type') or 'unknown'} for {subject}; no write-back created.",
+        created_at=datetime.now(UTC).isoformat(),
+        tenant_id=_tenant_id(decision),
+        data_domain=_data_domain(decision),
+    )
 
 
 def _markdown_learning_event(
@@ -439,6 +648,8 @@ def _markdown_learning_event(
             f"measured {actual_units}; next markdown target is {updated_threshold}."
         ),
         created_at=datetime.now(UTC).isoformat(),
+        tenant_id=_tenant_id(decision),
+        data_domain=_data_domain(decision),
     )
 
 

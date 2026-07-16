@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Any
 
 from shelfwise_storage import auto_schema_enabled, connect, jsonb
+from shelfwise_storage import validate_limit as _validate_limit
 from shelfwise_storage.rls import apply_tenant_rls
 
 from .provenance import InboundRecord
@@ -66,65 +67,82 @@ class PostgresInboundRecordStore:
         *,
         event_id: str | None = None,
     ) -> tuple[bool, dict[str, Any]]:
+        from psycopg.errors import UniqueViolation
+
         payload = _stored_payload(record, event_id=event_id)
         with self._connect(record.tenant_id) as conn:
-            row = conn.execute(
-                """
-                insert into shelfwise_inbound_records
-                    (
-                        id,
-                        tenant_id,
-                        source_system,
-                        source_object_type,
-                        source_object_id,
-                        raw_payload_hash,
-                        event_id,
-                        payload,
-                        ingested_at,
-                        event_time
-                    )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                on conflict (tenant_id, source_system, raw_payload_hash, source_object_id)
-                    do nothing
-                returning payload
-                """,
-                (
-                    payload["id"],
-                    record.tenant_id,
-                    record.source_system.value,
-                    record.source_object_type,
-                    record.source_object_id,
-                    record.payload_hash,
-                    event_id,
-                    jsonb(payload),
-                    payload["ingested_at"],
-                    record.event_time.isoformat(),
-                ),
-            ).fetchone()
-            if row is not None:
-                conn.commit()
-                return True, _public_payload(row["payload"])
+            for _attempt in range(2):
+                try:
+                    row = conn.execute(
+                        """
+                        insert into shelfwise_inbound_records
+                            (
+                                id,
+                                tenant_id,
+                                source_system,
+                                source_object_type,
+                                source_object_id,
+                                raw_payload_hash,
+                                event_id,
+                                payload,
+                                ingested_at,
+                                event_time
+                            )
+                        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        on conflict
+                            (tenant_id, source_system, raw_payload_hash, source_object_id)
+                            do nothing
+                        returning payload
+                        """,
+                        (
+                            payload["id"],
+                            record.tenant_id,
+                            record.source_system.value,
+                            record.source_object_type,
+                            record.source_object_id,
+                            record.payload_hash,
+                            event_id,
+                            jsonb(payload),
+                            payload["ingested_at"],
+                            record.event_time.isoformat(),
+                        ),
+                    ).fetchone()
+                except UniqueViolation:
+                    # ON CONFLICT only arbitrates on its named dedup key. The primary key
+                    # `id` is a pure function of those same fields, so two truly
+                    # simultaneous inserts of one record can surface the pkey violation
+                    # before the arbiter resolves (found live by the 2026-07-14 Phase C
+                    # 32-thread intake race: 2/32 requests 500ed). A concurrent duplicate
+                    # is a duplicate, not a server error - fall through to the select.
+                    conn.rollback()
+                    row = None
+                else:
+                    if row is not None:
+                        conn.commit()
+                        return True, _public_payload(row["payload"])
 
-            row = conn.execute(
-                """
-                select payload
-                from shelfwise_inbound_records
-                where tenant_id = %s
-                    and source_system = %s
-                    and raw_payload_hash = %s
-                    and source_object_id = %s
-                """,
-                (
-                    record.tenant_id,
-                    record.source_system.value,
-                    record.payload_hash,
-                    record.source_object_id,
-                ),
-            ).fetchone()
-            conn.commit()
-        if row is None:
-            raise RuntimeError("inbound record insert failed without existing row")
-        return False, _public_payload(row["payload"])
+                row = conn.execute(
+                    """
+                    select payload
+                    from shelfwise_inbound_records
+                    where tenant_id = %s
+                        and source_system = %s
+                        and raw_payload_hash = %s
+                        and source_object_id = %s
+                    """,
+                    (
+                        record.tenant_id,
+                        record.source_system.value,
+                        record.payload_hash,
+                        record.source_object_id,
+                    ),
+                ).fetchone()
+                conn.commit()
+                if row is not None:
+                    return False, _public_payload(row["payload"])
+                # The concurrent writer aborted after blocking our insert: its row never
+                # became visible. Retry the insert once rather than failing the request.
+        raise RuntimeError("inbound record insert failed without existing row")
 
     def list(
         self,
@@ -282,11 +300,13 @@ def _record_key(record: InboundRecord) -> tuple[str, str, str, str]:
 
 
 def _record_id(record: InboundRecord) -> str:
-    basis = f"{record.tenant_id}:{record.source_system.value}:{record.payload_hash}"
+    # Must include source_object_id, same as `_record_key` above: a single raw webhook
+    # payload can map to several distinct records (e.g. one line item per SKU on a
+    # multi-item order), all sharing one payload_hash. Hashing only tenant/system/hash
+    # here would collide their `id` primary key and raise on insert.
+    basis = (
+        f"{record.tenant_id}:{record.source_system.value}:"
+        f"{record.payload_hash}:{record.source_object_id}"
+    )
     digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()
     return f"inbound_{digest[:16]}"
-
-
-def _validate_limit(limit: int) -> None:
-    if limit <= 0 or limit > 500:
-        raise ValueError("limit must be between 1 and 500")

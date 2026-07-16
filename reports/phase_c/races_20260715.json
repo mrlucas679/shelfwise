@@ -1,0 +1,43 @@
+{
+  "duration_seconds": 26.05,
+  "generated_at": "2026-07-14T22:07:48.542180+00:00",
+  "races": [
+    {
+      "decision_id": "dec_sa_retail_demo_world_simulation_evt_demo_scan_b9a3834e88bc",
+      "final_status": "rejected",
+      "passed": true,
+      "race": "hitl_approve_reject",
+      "server_errors": 0,
+      "terminal_states_claimed": [
+        "rejected"
+      ],
+      "threads": 32,
+      "writeback_tasks_for_decision": 0
+    },
+    {
+      "observation_id": "obs_phase_c_race_fee0cba2e0",
+      "passed": true,
+      "projected_count": 1,
+      "race": "twin_duplicate_observations",
+      "result_statuses": {
+        "duplicate": 31,
+        "projected": 1
+      },
+      "server_errors": 0,
+      "threads": 32
+    },
+    {
+      "accepted_count": 1,
+      "passed": true,
+      "race": "connector_duplicate_intake",
+      "server_errors": 0,
+      "statuses": {
+        "accepted": 1,
+        "duplicate": 31
+      },
+      "threads": 32
+    }
+  ],
+  "schema_version": "phase-c-races/v1",
+  "verdict": "PASS"
+}

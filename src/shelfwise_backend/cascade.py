@@ -32,20 +32,11 @@ from shelfwise_decision_science import (
     simulate_markdown,
 )
 from shelfwise_inference import load_inference_config
-from shelfwise_worldgen import create_world_snapshot_store
 
+from .product_policies import resolve_product_policy
 from .tenant import default_tenant_context
 from .world_facts import WorldFactsProvider
-
-_default_facts_store: Any = None
-
-
-def _default_facts() -> WorldFactsProvider:
-    """Lazily-shared facts provider for callers that don't inject their own."""
-    global _default_facts_store
-    if _default_facts_store is None:
-        _default_facts_store = create_world_snapshot_store()
-    return WorldFactsProvider(_default_facts_store)
+from .world_facts import default_facts_provider as _default_facts
 
 
 def _event_tenant_id(event: Event | None) -> str:
@@ -57,6 +48,23 @@ _GOLDEN_SCENARIO_ID = "stage4_loadshedding_x_payday_yoghurt"
 _PROCUREMENT_SCENARIO_ID = "procurement_reorder_supplier_cover"
 _SALES_SCENARIO_ID = "pos_sale_price_integrity"
 _COLD_CHAIN_SCENARIO_ID = "cold_chain_generator_failure_facilities_review"
+
+# Story physics for the two simulation scenarios above, applied ONLY when a
+# world_simulation event does not carry its own telemetry (scenario drills replay the
+# named story: a 3h loadshedding outage on payday, and a generator failure with a
+# measured 4h outage). Live operational events can never inherit these - the cascade
+# dispatcher fails closed on missing telemetry before this code runs
+# (_require_operational_context in cascade_dispatcher.py), so invented physics cannot
+# reach a real store's decisions.
+_GOLDEN_STORY_COLD_AREA = "fridge_a"
+_GOLDEN_STORY_OUTAGE_HOURS = "3"
+_GOLDEN_STORY_AVERAGE_TEMP_C = "7"
+_GOLDEN_STORY_PAYDAY_MULTIPLIER = "1.35"
+_COLD_CHAIN_STORY_DIAGNOSIS = "generator_failed"
+_COLD_CHAIN_STORY_SEVERITY = 2
+_COLD_CHAIN_STORY_MINUTES_TO_UNSAFE = Decimal("18")
+_COLD_CHAIN_STORY_OUTAGE_HOURS = Decimal("4")
+_COLD_CHAIN_STORY_AVERAGE_TEMP_C = Decimal("8.2")
 _RECALL_SCENARIO_ID = "supplier_lot_recall_quarantine"
 _INVENTORY_EXCEPTION_SCENARIO_ID = "inventory_exception_review"
 _INVENTORY_EXCEPTION_TYPES = frozenset({"return", "damage", "shrink", "misplaced_stock"})
@@ -72,6 +80,35 @@ def _span(name: str, start: float, detail: dict[str, Any] | None = None) -> Trac
     return TraceSpan(name=name, status="ok", ms=elapsed_ms, detail=detail or {})
 
 
+def _monitor_action(sku: str) -> RecommendedAction:
+    """The low-risk "hold, no action needed" verdict shared by every scenario's routing.
+
+    Both the deterministic cascades below and the agentic tracks in agentic_cascade.py
+    construct this identical fallback action - shared here instead of five independent
+    literal copies.
+    """
+    return RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+
+
+def _facts_source_dataset(facts: object) -> str:
+    """Name the measured source without assuming every provider is the demo world."""
+    return str(getattr(facts, "source_dataset", "generated_world"))
+
+
+def _facts_source_method(facts: object) -> str:
+    """Describe how source facts entered the cascade evidence."""
+    return str(getattr(facts, "source_method", "generated_world_projection"))
+
+
+def _event_source_dataset(event: Event, simulation_source: str) -> str:
+    """Use the live twin label for operational events and demo labels only in simulation."""
+    return (
+        "operational_twin"
+        if event.data_domain.value == "operational_twin"
+        else simulation_source
+    )
+
+
 def run_golden_cascade(
     event: Event | None = None, *, facts: WorldFactsProvider | None = None
 ) -> dict[str, Any]:
@@ -81,12 +118,26 @@ def run_golden_cascade(
     those facts into evidence; the critic checks them; the executive emits one pending HITL action.
     """
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
-    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_outage = SourceRef.dataset("load_shedding", f"{scenario.location}:fridge_a")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_method = _facts_source_method(resolved_facts)
+    source_stock = SourceRef.dataset(source_dataset, f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    payload = event.payload if event is not None else {}
+    cold_area = str(payload.get("cold_chain_area") or _GOLDEN_STORY_COLD_AREA)
+    outage_hours = Decimal(
+        str(payload.get("cold_chain_outage_hours") or _GOLDEN_STORY_OUTAGE_HOURS)
+    )
+    average_temp_c = Decimal(
+        str(payload.get("cold_chain_average_temp_c") or _GOLDEN_STORY_AVERAGE_TEMP_C)
+    )
+    payday_multiplier = Decimal(
+        str(payload.get("payday_multiplier") or _GOLDEN_STORY_PAYDAY_MULTIPLIER)
+    )
+    source_outage = SourceRef.dataset(source_dataset, f"{scenario.location}:{cold_area}")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
     inference = load_inference_config()
@@ -96,6 +147,7 @@ def run_golden_cascade(
         sku=sku,
         recent_daily_units=list(scenario.recent_daily_units),
         horizon_days=3,
+        payday_multiplier=payday_multiplier,
     )
     spans.append(
         _span(
@@ -107,9 +159,9 @@ def run_golden_cascade(
 
     started = perf_counter()
     cold = score_cold_chain_risk(
-        area="fridge_a",
-        outage_hours=Decimal("3"),
-        average_temp_c=Decimal("7"),
+        area=cold_area,
+        outage_hours=outage_hours,
+        average_temp_c=average_temp_c,
     )
     spans.append(_span("decision_science.score_cold_chain_risk", started, {"risk": str(cold.risk)}))
 
@@ -126,6 +178,10 @@ def run_golden_cascade(
     spans.append(_span("decision_science.score_expiry_risk", started, {"risk": str(expiry.risk)}))
 
     started = perf_counter()
+    # The candidate markdown is a per-family business rule owned by the product-policy
+    # layer, never an inline literal in decision logic.
+    product_policy = resolve_product_policy(scenario.category)
+    markdown_discount = Decimal(product_policy.markdown_discount_pct)
     simulation = simulate_markdown(
         sku=sku,
         units_on_hand=Decimal(scenario.units_on_hand),
@@ -133,9 +189,11 @@ def run_golden_cascade(
         base_daily_units=demand.daily_units,
         unit_price=scenario.unit_price,
         unit_cost=scenario.unit_cost,
-        discount_pct=Decimal("0.20"),
+        discount_pct=markdown_discount,
     )
-    markdown_margin = (scenario.unit_price * Decimal("0.80")) - scenario.unit_cost
+    markdown_margin = (
+        scenario.unit_price * (Decimal("1") - markdown_discount)
+    ) - scenario.unit_cost
     spans.append(
         _span(
             "decision_science.simulate_markdown",
@@ -144,10 +202,14 @@ def run_golden_cascade(
         )
     )
 
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
     markdown = RecommendedAction(
         "apply_markdown",
-        {"sku": sku, "discount_pct": "0.20", "duration_hours": 24},
+        {
+            "sku": sku,
+            "discount_pct": product_policy.markdown_discount_pct,
+            "duration_hours": product_policy.markdown_duration_hours,
+        },
         RiskTier.HIGH,
     )
 
@@ -162,7 +224,7 @@ def run_golden_cascade(
                     "units_on_hand",
                     scenario.units_on_hand,
                     str(source_stock),
-                    "generated_world_stock",
+                    source_method,
                 )
             ],
             confidence=Decimal("0.92"),
@@ -327,9 +389,7 @@ def run_golden_cascade(
         "trace": [span.to_dict() for span in spans],
         "inference": inference.to_public_dict(),
         "seed_data": scenario.to_dict(),
-        "store_intelligence": (facts or _default_facts()).get_store_intelligence(
-            _event_tenant_id(event)
-        ),
+        "store_intelligence": resolved_facts.get_store_intelligence(_event_tenant_id(event)),
         "learning": {
             "status": "armed",
             "message": "After approval, compare actual sell-through with simulated sell-through.",
@@ -343,12 +403,15 @@ def run_procurement_cascade(
     """Run the procurement role path: reorder policy plus measured supplier choice."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = scenario.sku
     product = scenario.product_name
-    source_stock = SourceRef.dataset("generated_world", f"stock:sku:{sku}")
-    source_sales = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_suppliers = SourceRef.dataset("generated_world", "suppliers")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_method = _facts_source_method(resolved_facts)
+    source_stock = SourceRef.dataset(source_dataset, f"stock:sku:{sku}")
+    source_sales = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    source_suppliers = SourceRef.dataset(source_dataset, "suppliers")
     spans: list[TraceSpan] = []
     evidence: list[EvidenceObject] = []
 
@@ -384,10 +447,8 @@ def run_procurement_cascade(
     )
 
     graph = RelationStore()
-    current = (facts or _default_facts()).get_supplier_for_sku(
-        _event_tenant_id(event), sku
-    )
-    alternate = (facts or _default_facts()).get_alternate_supplier(
+    current = resolved_facts.get_supplier_for_sku(_event_tenant_id(event), sku)
+    alternate = resolved_facts.get_alternate_supplier(
         _event_tenant_id(event), exclude=current["supplier_id"]
     )
     current_supplier = str(current["supplier_id"])
@@ -432,7 +493,7 @@ def run_procurement_cascade(
         },
         RiskTier.MEDIUM,
     )
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
 
     evidence.append(
         EvidenceObject(
@@ -491,7 +552,7 @@ def run_procurement_cascade(
                     "profiled_supplier_count",
                     len(profiles),
                     str(source_suppliers),
-                    "generated_world_supplier_profiles",
+                    source_method,
                 ),
             ],
             confidence=ranking.coverage,
@@ -564,6 +625,10 @@ def run_procurement_cascade(
         "supplier_coverage": str(ranking.coverage),
         "stockout_exposure": policy.zar_exposure.to_dict(),
         "stockout_exposure_minor_units": policy.zar_exposure.minor_units,
+        # `/mlops`'s decision-economics dashboard (`_attach_decision_governance`) reads only
+        # `incremental_profit_minor_units` - without it every approved reorder displayed
+        # "R0.00 recovered" despite the real, computed stockout exposure above.
+        "incremental_profit_minor_units": policy.zar_exposure.minor_units,
     }
 
     return {
@@ -589,7 +654,8 @@ def run_sales_cascade(
     """Run the Sales/POS role path over a sale event and catalogue price reference."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     sku = _payload_value(event, "sku", scenario.sku)
     location = _payload_value(event, "location", scenario.location)
     quantity = Decimal(str(_payload_value(event, "quantity", scenario.recent_daily_units[-1])))
@@ -598,8 +664,9 @@ def run_sales_cascade(
     line_revenue = Money.zar(unit_price * quantity)
     expected_revenue = scenario.unit_price * quantity
     price_delta = unit_price - expected_price
-    source_pos = SourceRef.dataset("generated_world", f"sales:sku:{sku}")
-    source_product = SourceRef.dataset("generated_world", f"products:sku:{sku}")
+    source_dataset = _facts_source_dataset(resolved_facts)
+    source_pos = SourceRef.dataset(source_dataset, f"sales:sku:{sku}")
+    source_product = SourceRef.dataset(source_dataset, f"products:sku:{sku}")
     spans: list[TraceSpan] = []
 
     started = perf_counter()
@@ -799,8 +866,10 @@ def run_catalog_price_check(event: Event) -> dict[str, Any] | None:
     catalog = Money(minor_units=catalog_price_c)
     exposure = Money(minor_units=(unit_price_c - catalog_price_c) * max(units, 1))
     delta_display = f"{(delta_pct * 100).quantize(Decimal('0.1'))}%"
-    source_pos = SourceRef.dataset("worldgen_pos", f"sale:{event.id}")
-    source_catalog = SourceRef.dataset("worldgen_catalog", f"catalog:sku:{sku}")
+    source_pos = SourceRef.dataset(_event_source_dataset(event, "worldgen_pos"), f"sale:{event.id}")
+    source_catalog = SourceRef.dataset(
+        _event_source_dataset(event, "worldgen_catalog"), f"catalog:sku:{sku}"
+    )
 
     action = RecommendedAction(
         "review_price_exception",
@@ -920,7 +989,7 @@ def run_expiry_risk_check(event: Event) -> dict[str, Any] | None:
         started,
         {"days_to_expiry": str(days), "max_days": str(EXPIRY_REVIEW_MAX_DAYS)},
     )
-    source = SourceRef.dataset("worldgen_wms", f"expiry:{event.id}")
+    source = SourceRef.dataset(_event_source_dataset(event, "worldgen_wms"), f"expiry:{event.id}")
     action = RecommendedAction(
         "review_expiry_markdown",
         {"sku": sku, "batch_id": batch_id, "days_to_expiry": str(days)},
@@ -993,18 +1062,23 @@ def run_cold_chain_cascade(
     """Run the measured cold-chain alert path into facilities HITL review."""
 
     correlation_id = event.correlation_id if event is not None else new_id("cor")
-    scenario = (facts or _default_facts()).get_scenario_facts(_event_tenant_id(event))
+    resolved_facts = facts or _default_facts()
+    scenario = resolved_facts.get_scenario_facts(_event_tenant_id(event))
     payload = event.payload if event is not None else {}
     site_id = str(payload.get("site_id") or _payload_value(event, "location", scenario.location))
     asset_id = str(
         payload.get("asset_id") or f"cold-chain:{scenario.location}:{scenario.category}"
     )
     category = str(payload.get("category") or scenario.category)
-    diagnosis = str(payload.get("diagnosis") or "generator_failed")
-    severity = _int_payload(payload, "severity", 2)
-    predicted_minutes = _decimal_payload(payload, "predicted_minutes_to_unsafe", Decimal("18"))
-    measured_outage_hours = _decimal_payload(payload, "measured_outage_hours", Decimal("4"))
-    average_temp_c = _decimal_payload(payload, "temp_c", Decimal("8.2"))
+    diagnosis = str(payload.get("diagnosis") or _COLD_CHAIN_STORY_DIAGNOSIS)
+    severity = _int_payload(payload, "severity", _COLD_CHAIN_STORY_SEVERITY)
+    predicted_minutes = _decimal_payload(
+        payload, "predicted_minutes_to_unsafe", _COLD_CHAIN_STORY_MINUTES_TO_UNSAFE
+    )
+    measured_outage_hours = _decimal_payload(
+        payload, "measured_outage_hours", _COLD_CHAIN_STORY_OUTAGE_HOURS
+    )
+    average_temp_c = _decimal_payload(payload, "temp_c", _COLD_CHAIN_STORY_AVERAGE_TEMP_C)
     stock_at_risk = _money_payload(
         payload.get("stock_at_risk"),
         default=scenario.unit_price * scenario.units_on_hand,
@@ -1576,7 +1650,7 @@ def run_critic_rejection_cascade(*, facts: WorldFactsProvider | None = None) -> 
     scenario = (facts or _default_facts()).get_scenario_facts(tenant_id)
     sku = scenario.sku
     source_supplier = SourceRef.dataset("generated_world", f"suppliers:{scenario.supplier}")
-    monitor = RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
+    monitor = _monitor_action(sku)
     supplier_switch = RecommendedAction(
         "supplier_switch",
         {
@@ -1710,7 +1784,11 @@ def _whole_units(value: Decimal) -> int:
 
 def _decision_id(event: Event | None) -> str:
     """Use immutable event identity for replays; mint a fresh id for manual runs."""
-    return f"dec_{_slug(event.id)}" if event is not None else new_id("dec")
+    return (
+        f"dec_{_slug(event.tenant_id)}_{_slug(event.data_domain.value)}_{_slug(event.id)}"
+        if event is not None
+        else new_id("dec")
+    )
 
 
 def _cause_id(event: Event | None, correlation_id: str) -> str:

@@ -1,0 +1,144 @@
+{
+  "auth": {
+    "api_key_configured": false,
+    "cookie_name": "shelfwise_session",
+    "cookie_received": true,
+    "mode": "jwt",
+    "session_route_ok": true,
+    "tenant_id": "sa_retail_demo"
+  },
+  "base_url_host": "localhost",
+  "chat": {
+    "calls": 0,
+    "fallback_answers": 0,
+    "headers": [],
+    "model_answers": 0,
+    "replay_checks": 0,
+    "replay_matches": 0
+  },
+  "cycles_completed": 0,
+  "cycles_requested": 3,
+  "duration_seconds": 0.178,
+  "failures": [
+    "readiness_not_ready",
+    "route_failure:GET /readiness"
+  ],
+  "frontend": {
+    "content_type": "text/html",
+    "ok": true,
+    "status_code": 200
+  },
+  "generated_at": "2026-07-14T20:33:55.426833+00:00",
+  "hitl": {
+    "approvals": 0,
+    "observed_decision_ids": [],
+    "rejections": 0,
+    "tenant_mismatches": 0,
+    "transition_mismatches": [],
+    "unique_decision_ids": true
+  },
+  "learning": {
+    "event_count": 0,
+    "movements": 0,
+    "movements_expected": 0,
+    "route_ok": false
+  },
+  "mode": "short",
+  "probes": [
+    {
+      "elapsed_ms": 12.49,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/health",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 1.95,
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 4.87,
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/auth/session",
+      "status_code": 200
+    },
+    {
+      "elapsed_ms": 3.82,
+      "failure_code": null,
+      "method": "GET",
+      "ok": false,
+      "path": "/readiness",
+      "status_code": 401
+    }
+  ],
+  "readiness": {
+    "amd_demo_ready": false,
+    "auth_mode": null,
+    "event_bus": null,
+    "inference_provider": null,
+    "ready": false,
+    "route_ok": false,
+    "storage_backends": []
+  },
+  "routes": [
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/health",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "GET",
+      "ok": true,
+      "path": "/",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": null,
+      "method": "POST",
+      "ok": true,
+      "path": "/auth/session",
+      "status_code": 200
+    },
+    {
+      "expected_status": [
+        200
+      ],
+      "failure_code": "route_failure:GET /readiness:status=401",
+      "method": "GET",
+      "ok": false,
+      "path": "/readiness",
+      "status_code": 401
+    }
+  ],
+  "schema_version": "deployment-shakedown/v1",
+  "startup": {
+    "elapsed_seconds": 0.013,
+    "health": true
+  },
+  "verdict": "FAIL",
+  "writeback": {
+    "approved_decisions": 0,
+    "pending_external_writes": 0,
+    "route_ok": false,
+    "task_count": 0
+  }
+}

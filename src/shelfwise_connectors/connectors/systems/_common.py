@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from shelfwise_contracts import Money
@@ -13,6 +13,8 @@ from ...provenance import InboundRecord, ValidationResult, raw_payload_hash
 
 FetchJson = Callable[[str, dict[str, str], dict[str, str]], Awaitable[dict[str, Any]]]
 PostJson = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[dict[str, Any]]]
+
+_DEFAULT_HTTP_TIMEOUT_S = 20.0
 
 
 def now_utc() -> datetime:
@@ -27,6 +29,19 @@ def parse_time(value: object) -> datetime:
     else:
         parsed = now_utc()
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def parse_quantity(value: object) -> int | Decimal:
+    """Parse whole or fractional POS quantities without binary-float coercion."""
+    try:
+        quantity = Decimal(str(value or "0"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("quantity is not numeric") from exc
+    if not quantity.is_finite():
+        raise ValueError("quantity must be finite")
+    if quantity == quantity.to_integral_value():
+        return int(quantity)
+    return quantity
 
 
 def wrap(
@@ -89,7 +104,7 @@ async def http_get_json(
 ) -> dict[str, Any]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S) as client:
         response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         body = response.json()
@@ -103,7 +118,7 @@ async def http_post_json(
 ) -> dict[str, Any]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S) as client:
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         body = response.json()

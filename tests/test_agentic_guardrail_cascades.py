@@ -202,6 +202,21 @@ def test_agentic_catalog_price_guardrail_calls_price_tool_and_mints_review() -> 
     assert result["decision"]["action"]["type"] == "review_price_exception"
     assert result["decision"]["role"] == "sales_manager"
 
+    # `Decision` objects built by the agentic cascades never carried `expected_outcome`,
+    # so approving one always computed zero exposure in `record_approved_decision` -
+    # invisible to every past test because nothing had ever approved an agentic decision
+    # and checked the learning store afterward (found 2026-07-15 by distrusting a run
+    # that reported 0 failures).
+    decisions.upsert(result["decision"])
+    decision = decisions.approve(result["decision"]["id"])
+    assert decision is not None
+    learning_event = memory.record_approved_decision(decision)
+    assert learning_event["delta_units"] > 0, (
+        "approving an agentic catalog-price exception must move a real learning "
+        "threshold, not silently record zero exposure"
+    )
+    assert learning_event["outcome"]["measured_minor_units"] > 0
+
 
 def test_agentic_expiry_guardrail_calls_expiry_tool_and_mints_review() -> None:
     tools, decisions, memory, facts = _build_tools()
@@ -260,6 +275,10 @@ def test_agentic_expiry_guardrail_calls_expiry_tool_and_mints_review() -> None:
     assert result["scenario"] == "expiry_risk_markdown_review"
     assert result["decision"]["action"]["type"] == "review_expiry_markdown"
     assert result["decision"]["role"] == "inventory_manager"
+    assert runtime.requests[0]["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "get_expiry_risk"},
+    }
 
 
 def test_agentic_guardrail_hard_fails_when_live_required_sees_offline_provider() -> None:

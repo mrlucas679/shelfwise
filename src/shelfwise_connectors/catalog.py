@@ -57,7 +57,7 @@ _CATALOG = [
     ConnectorCapability(
         SourceSystem.LIGHTSPEED,
         "Lightspeed",
-        "webhook_or_poll",
+        "webhook",
         3,
         True,
         True,

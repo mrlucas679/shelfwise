@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 
 import pytest
 
@@ -68,6 +69,27 @@ def test_amd_smi_json_and_csv_adapters_normalize_gpu_metrics() -> None:
     assert csv_samples[0].device == "gpu_1"
     assert csv_samples[0].gpu_util_pct == 62.0
     assert csv_samples[0].vram_used_mb == 2048.0
+
+
+def test_nested_amd_smi_vram_uses_separate_unit_metadata() -> None:
+    samples = parse_amd_smi_json(
+        '{"gpu_0": {"GPU": 0, "GFX%": 75, "VRAM": {"USED": 148, "UNIT": "GB"}}}'
+    )
+
+    assert samples[0].vram_used_mb == 148 * 1024
+
+
+def test_amd_smi_sampler_decodes_invalid_utf8_with_replacement(monkeypatch) -> None:
+    """AMD-SMI diagnostics remain readable when a subprocess emits invalid UTF-8."""
+    completed = subprocess.CompletedProcess(
+        args=["amd-smi"],
+        returncode=0,
+        stdout=b"gpu\xff\n",
+        stderr=b"",
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: completed)
+
+    assert AmdSmiSampler()._run("--json") == "gpu\ufffd\n"
 
 
 def test_amd_smi_is_disabled_for_control_plane_scope() -> None:

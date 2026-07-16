@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -51,13 +52,17 @@ class OpenAIModelRuntime:
         execution_mode: ExecutionMode = ExecutionMode.LIVE_REQUIRED,
         client: ChatCompletionsClient | None = None,
         recorder: RunRecorder | None = None,
+        config: InferenceConfig | None = None,
     ) -> None:
         if client is not None and recorder is not None:
             raise ValueError("recorder cannot be supplied with an injected model client")
         self.architecture = architecture
         self.execution_mode = ExecutionMode(execution_mode)
+        self._config = config or load_inference_config()
         self._client = (
-            client if client is not None else OpenAICompatibleInferenceClient(recorder=recorder)
+            client
+            if client is not None
+            else OpenAICompatibleInferenceClient(self._config, recorder=recorder)
         )
 
     def complete(
@@ -73,9 +78,24 @@ class OpenAIModelRuntime:
         max_tokens: int,
         tenant_id: str,
         schema_version: str,
+        deadline: float | None = None,
     ) -> ModelCall:
-        """Submit one routed request and normalize its evidence for orchestration."""
+        """Submit one routed request and normalize its evidence for orchestration.
+
+        The outbound HTTP timeout is bounded by `deadline` when given: cascades that stop
+        themselves before the response deadline (`CascadeDeadlineExceeded`) still avoid
+        starting a call this shape, but any call already in flight must also never outlive
+        the caller's own remaining budget by the full configured ceiling - the "zombie
+        inference" defect the 2026-07-14 forensic audit found (sync threadpool handlers whose
+        HTTP call keeps running on the GPU after the client has already been given up on).
+        """
         target = self.architecture.target_for(role)
+        configured_timeout = float(self._config.timeout_seconds)
+        if deadline is not None:
+            remaining = deadline - monotonic()
+            effective_timeout = min(configured_timeout, max(remaining, 1.0))
+        else:
+            effective_timeout = configured_timeout
         try:
             result = self._client.chat_completions(
                 agent=role,
@@ -90,6 +110,7 @@ class OpenAIModelRuntime:
                 schema_version=schema_version,
                 model=target.model,
                 base_url=target.endpoint,
+                timeout_seconds=effective_timeout,
             )
         except InferenceError as exc:
             if self.execution_mode is ExecutionMode.LIVE_REQUIRED:

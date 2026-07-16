@@ -1,5 +1,10 @@
 from .client import InferenceError, InferenceResult, OpenAICompatibleInferenceClient
-from .config import InferenceConfig, ModelTier, ProviderKind, load_inference_config
+from .config import (
+    InferenceConfig,
+    ModelTier,
+    ProviderKind,
+    load_inference_config,
+)
 from .orchestration import (
     AgentArchitecture,
     AgentOrchestrator,

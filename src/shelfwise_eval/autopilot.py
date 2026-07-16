@@ -36,6 +36,7 @@ def review_decision(
     decision: dict[str, Any],
     *,
     exposure_limit_minor_units: int = DEFAULT_EXPOSURE_LIMIT_MINOR_UNITS,
+    force_dissent: bool = False,
 ) -> dict[str, Any]:
     """Return the autopilot verdict for one decision.
 
@@ -54,9 +55,21 @@ def review_decision(
 
     verdict = str(decision.get("critic_verdict") or "")
     if verdict == "approved":
+        if force_dissent:
+            return _verdict(
+                REJECT,
+                "deterministic dissent sample: independently rejected critic-approved action",
+                exposure,
+            )
         return _verdict(APPROVE, "critic approved the evidence chain", exposure)
     if verdict == "review_required":
         if exposure <= exposure_limit_minor_units:
+            if force_dissent:
+                return _verdict(
+                    REJECT,
+                    "deterministic dissent sample: held an otherwise approvable action",
+                    exposure,
+                )
             return _verdict(
                 APPROVE,
                 f"exposure {exposure} minor units within limit {exposure_limit_minor_units}",

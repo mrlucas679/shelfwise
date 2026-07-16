@@ -6,6 +6,7 @@ import pytest
 from _world_test_support import demo_sku
 from fastapi.testclient import TestClient
 
+import shelfwise_backend.app as app_module
 from shelfwise_backend.app import app
 from shelfwise_backend.tenant import (
     default_tenant_context,
@@ -34,6 +35,7 @@ def _scan_event(tenant_id: str = "sa_retail_demo") -> dict[str, object]:
         "actor": "store_12",
         "source": "scanner",
         "tenant_id": tenant_id,
+        "data_domain": "world_simulation",
         "payload": {"sku": demo_sku(), "location": "store_12"},
     }
 
@@ -150,6 +152,35 @@ def test_jwt_auth_mode_scopes_decision_list_to_the_authenticated_tenant(
     assert tenant_b_list.json()["decisions"] == []
 
 
+def test_jwt_auth_mode_scopes_learning_to_the_authenticated_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    tenant_a = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_a')}"}
+    tenant_b = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_b')}"}
+
+    unauthenticated = client.get("/learning")
+    decision_a = client.post("/ingest", json=_scan_event("tenant_a"), headers=tenant_a)
+    decision_b = client.post("/ingest", json=_scan_event("tenant_b"), headers=tenant_b)
+    decision_a_id = decision_a.json()["cascade"]["decision"]["id"]
+    decision_b_id = decision_b.json()["cascade"]["decision"]["id"]
+    client.post(f"/decisions/{decision_a_id}/approve", headers=tenant_a)
+    client.post(f"/decisions/{decision_b_id}/approve", headers=tenant_b)
+
+    tenant_a_learning = client.get("/learning", headers=tenant_a)
+    tenant_b_learning = client.get("/learning", headers=tenant_b)
+
+    assert unauthenticated.status_code == 401
+    assert tenant_a_learning.status_code == 200
+    assert tenant_b_learning.status_code == 200
+    assert all(event["tenant_id"] == "tenant_a" for event in tenant_a_learning.json()["events"])
+    assert all(event["tenant_id"] == "tenant_b" for event in tenant_b_learning.json()["events"])
+    assert {event["decision_id"] for event in tenant_a_learning.json()["events"]} == {decision_a_id}
+    assert {event["decision_id"] for event in tenant_b_learning.json()["events"]} == {decision_b_id}
+
+
 def test_jwt_auth_mode_scopes_traces_to_the_authenticated_tenant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -176,8 +207,8 @@ def test_jwt_auth_mode_assigns_demo_outputs_to_authenticated_tenant(
     monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
     tenant = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_demo')}"}
 
-    golden = client.post("/demo/golden", headers=tenant)
-    rejection = client.post("/demo/critic-rejection", headers=tenant)
+    golden = client.post("/scenarios/golden", headers=tenant)
+    rejection = client.post("/scenarios/critic-rejection", headers=tenant)
 
     assert golden.status_code == 200
     assert golden.json()["decision"]["tenant_id"] == "tenant_demo"
@@ -224,3 +255,36 @@ def test_public_demo_session_is_disabled_by_default_in_jwt_mode(
     monkeypatch.delenv("SHELFWISE_PUBLIC_DEMO_SESSION", raising=False)
 
     assert TestClient(app).post("/auth/session").status_code == 401
+
+
+def test_configured_frontend_origin_can_use_jwt_session_cookie() -> None:
+    response = TestClient(app).options(
+        "/chat",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_bearer_header_is_used_for_storage_tenant_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from starlette.requests import Request
+
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    token = _token("manager", tenant_id="tenant_a")
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+    )
+
+    assert app_module._tenant_id_from_request(request) == "tenant_a"

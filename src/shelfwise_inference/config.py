@@ -115,14 +115,18 @@ def _host_label(base_url: str) -> str:
     return parsed.netloc or parsed.path
 
 
+MAX_OPERATIONAL_TIMEOUT_S = 900
+"""Upper bound that prevents an accidental unbounded network wait during real-app testing."""
+
+
 def _timeout_seconds() -> int:
-    """Clamp the network timeout under the 30s hackathon submission response limit."""
-    raw = os.getenv("LLM_TIMEOUT_SECONDS", "25")
+    """Return the configured inference timeout within the operational safety bound."""
+    raw = os.getenv("LLM_TIMEOUT_SECONDS", "120")
     try:
         value = int(raw)
     except ValueError:
-        value = 25
-    return max(1, min(value, 29))
+        value = 120
+    return max(1, min(value, MAX_OPERATIONAL_TIMEOUT_S))
 
 
 def _default_compute_resource(provider: ProviderKind) -> str:

@@ -107,12 +107,14 @@ class AmdSmiSampler:
                 [self.binary, "monitor", output_flag],
                 capture_output=True,
                 check=False,
-                text=True,
                 timeout=self.timeout_seconds,
             )
         except (FileNotFoundError, subprocess.SubprocessError, OSError):
             return None
-        return completed.stdout if completed.returncode == 0 else None
+        if completed.returncode != 0:
+            return None
+        output = completed.stdout
+        return output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
 
 
 class TelemetryCollector:
@@ -374,7 +376,26 @@ def _metric_from_mapping(
 
     for key, value in values.items():
         if any(key == candidate or key.endswith(f"_{candidate}") for candidate in keys):
-            return _parse_metric_number(value, percent=percent, megabytes=megabytes)
+            return _parse_metric_number(
+                value,
+                percent=percent,
+                megabytes=megabytes,
+                unit=_metric_unit(values, key) if megabytes else None,
+            )
+    return None
+
+
+def _metric_unit(values: Mapping[str, Any], metric_key: str) -> str | None:
+    """Find a sibling unit field for a flattened nested AMD-SMI metric."""
+    stems = [re.sub(r"_(?:used_mb|used)$", "", metric_key)]
+    if stems[0].endswith("_vram"):
+        stems.append(stems[0][:-5])
+    candidates = [f"{stem}_unit" for stem in stems]
+    candidates.append(f"{metric_key}_unit")
+    for candidate in candidates:
+        unit = values.get(candidate)
+        if isinstance(unit, str):
+            return unit
     return None
 
 
@@ -383,6 +404,7 @@ def _parse_metric_number(
     *,
     percent: bool,
     megabytes: bool,
+    unit: str | None = None,
 ) -> float | None:
     """Parse numeric AMD-SMI values while preserving N/A as unavailable."""
 
@@ -395,20 +417,34 @@ def _parse_metric_number(
         if match is None:
             return None
         parsed = float(match.group())
-        unit = value.upper()
-        if megabytes and "GB" in unit:
-            parsed *= 1024
-        elif megabytes and "KB" in unit:
-            parsed /= 1024
-        elif megabytes and "BYTE" in unit and "MB" not in unit:
-            parsed /= 1024 * 1024
     else:
         return None
+    if megabytes:
+        inline_unit = value.upper() if isinstance(value, str) else ""
+        has_inline_unit = any(
+            token in inline_unit.replace(" ", "")
+            for token in ("GIB", "GB", "MIB", "MB", "KIB", "KB", "BYTE")
+        )
+        parsed *= _memory_unit_scale(inline_unit if has_inline_unit else unit)
     if not math.isfinite(parsed):
         return None
     if percent and not 0 <= parsed <= 100:
         return None
     return parsed
+
+
+def _memory_unit_scale(unit: str | None) -> float:
+    """Return the multiplier that converts a memory unit to megabytes."""
+    if not unit:
+        return 1.0
+    normalized = unit.upper().replace(" ", "")
+    if "GIB" in normalized or "GB" in normalized:
+        return 1024.0
+    if "KIB" in normalized or "KB" in normalized:
+        return 1 / 1024
+    if "BYTE" in normalized or normalized in {"B", "BYTES"}:
+        return 1 / (1024 * 1024)
+    return 1.0
 
 
 def _device_name(values: Mapping[str, Any], path: str, index: int) -> str:

@@ -52,6 +52,15 @@ STATE_PATHS = (
 )
 
 
+def _decode_output(value: bytes | str | None) -> str:
+    """Decode command output deterministically without failing on invalid bytes."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _run(command: list[str], *, cwd: Path | None = None) -> tuple[int, str, str]:
     """Run a diagnostic command without raising or exposing secrets in errors."""
     try:
@@ -59,12 +68,11 @@ def _run(command: list[str], *, cwd: Path | None = None) -> tuple[int, str, str]
             command,
             cwd=cwd,
             capture_output=True,
-            text=True,
             check=False,
         )
     except OSError as exc:
         return 127, "", f"{type(exc).__name__}: {exc}"
-    return result.returncode, result.stdout, result.stderr
+    return result.returncode, _decode_output(result.stdout), _decode_output(result.stderr)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -83,16 +91,71 @@ def _redact_env(name: str, value: str) -> str:
     return value
 
 
-def _copy_path(source: Path, destination: Path) -> bool:
-    """Copy a file or directory when it exists, without following missing paths."""
-    if not source.exists():
+def _path_relation(source: Path, protected: Path) -> str | None:
+    """Classify source as equal to, inside, or an ancestor of a protected path."""
+    source_text = os.path.normcase(str(source.resolve(strict=False)))
+    protected_text = os.path.normcase(str(protected.resolve(strict=False)))
+    separator = os.sep
+    if source_text == protected_text:
+        return "equal"
+    if source_text.startswith(protected_text + separator):
+        return "inside"
+    if protected_text.startswith(source_text + separator):
+        return "ancestor"
+    return None
+
+
+def _is_protected(path: Path, protected_paths: tuple[Path, ...]) -> bool:
+    """Return whether a path is equal to or below a protected output tree."""
+    return any(
+        _path_relation(path, protected) in {"equal", "inside"}
+        for protected in protected_paths
+    )
+
+
+def _copy_tree(
+    source: Path,
+    destination: Path,
+    *,
+    protected_paths: tuple[Path, ...],
+    copied_sources: set[str],
+) -> bool:
+    """Copy regular files while pruning protected output trees and duplicate sources."""
+    if _is_protected(source, protected_paths):
         return False
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        shutil.copytree(source, destination, dirs_exist_ok=True)
-    else:
+    if source.is_file():
+        source_key = os.path.normcase(str(source.resolve(strict=False)))
+        if source_key in copied_sources:
+            return False
+        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    return True
+        copied_sources.add(source_key)
+        return True
+    if not source.is_dir():
+        return False
+
+    copied = False
+    for current, directories, files in os.walk(source, topdown=True, followlinks=False):
+        current_path = Path(current)
+        directories[:] = [
+            name
+            for name in directories
+            if not _is_protected(current_path / name, protected_paths)
+        ]
+        for name in files:
+            item = current_path / name
+            if _is_protected(item, protected_paths):
+                continue
+            source_key = os.path.normcase(str(item.resolve(strict=False)))
+            if source_key in copied_sources:
+                continue
+            relative = item.relative_to(source)
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, target)
+            copied_sources.add(source_key)
+            copied = True
+    return copied
 
 
 def _sha256_files(root: Path) -> list[str]:
@@ -107,13 +170,54 @@ def _sha256_files(root: Path) -> list[str]:
 class CapsuleBuilder:
     """Collect application, runtime, database, and environment recovery evidence."""
 
-    def __init__(self, repo: Path, root: Path, capsule: Path, *, strict: bool) -> None:
+    def __init__(
+        self,
+        repo: Path,
+        root: Path,
+        capsule: Path,
+        *,
+        strict: bool,
+        archive: Path | None = None,
+    ) -> None:
         self.repo = repo.resolve()
         self.root = root.resolve()
         self.capsule = capsule.resolve()
+        self.archive = archive.resolve() if archive else None
         self.strict = strict
         self.failures: list[str] = []
         self.skipped: list[str] = []
+        self.exclusions: list[dict[str, str]] = []
+        self._copied_sources: set[str] = set()
+
+    @property
+    def _protected_paths(self) -> tuple[Path, ...]:
+        """Return active capsule and archive paths that must never be copied."""
+        return tuple(path for path in (self.capsule, self.archive) if path is not None)
+
+    def _exclude(self, source: Path, reason: str) -> None:
+        """Record one auditable source exclusion without duplicating manifest entries."""
+        entry = {"path": str(source), "reason": reason}
+        if entry not in self.exclusions:
+            self.exclusions.append(entry)
+
+    def _copy_source(self, source: Path, destination: Path, *, reason: str) -> bool:
+        """Copy a source while excluding active output trees and duplicate files."""
+        if _is_protected(source, self._protected_paths):
+            self._exclude(source, reason)
+            return False
+        return _copy_tree(
+            source,
+            destination,
+            protected_paths=self._protected_paths,
+            copied_sources=self._copied_sources,
+        )
+
+    def _is_repo_state_source(self, source: Path) -> bool:
+        """Return whether a repository source is captured under the durable state section."""
+        return any(
+            _path_relation(source, (self.repo / state_path).resolve()) in {"equal", "inside"}
+            for state_path in STATE_PATHS
+        )
 
     def build(self) -> Path:
         """Build the capsule, write checksums, and return its directory."""
@@ -130,6 +234,7 @@ class CapsuleBuilder:
             "strict": self.strict,
             "failures": self.failures,
             "skipped": self.skipped,
+            "exclusions": self.exclusions,
         }
         _write_text(self.capsule / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         _write_text(self.capsule / "SHA256SUMS", "\n".join(_sha256_files(self.capsule)) + "\n")
@@ -159,8 +264,19 @@ class CapsuleBuilder:
             return
         for relative in stdout.splitlines():
             source = self.repo / relative
-            if source.exists() and not source.is_dir():
-                _copy_path(source, destination / "untracked-files" / relative)
+            if not source.exists() or source.is_dir():
+                continue
+            if _is_protected(source, self._protected_paths):
+                self._exclude(source, "active capsule or archive output")
+                continue
+            if self._is_repo_state_source(source):
+                self._exclude(source, "captured under state")
+                continue
+            self._copy_source(
+                source,
+                destination / "untracked-files" / relative,
+                reason="active capsule or archive output",
+            )
 
     def _capture_environment(self) -> None:
         """Capture reproducibility metadata while redacting credentials."""
@@ -245,11 +361,15 @@ class CapsuleBuilder:
             if raw:
                 sources.append((name, Path(raw)))
         for name, source in sources:
-            if source.resolve() == self.capsule or not source.exists():
+            if not source.exists():
                 self.skipped.append(f"state:{name}")
                 continue
             try:
-                _copy_path(source, destination / name)
+                self._copy_source(
+                    source,
+                    destination / name,
+                    reason="active capsule or archive output",
+                )
             except OSError as exc:
                 self.failures.append(f"state:{name}:{type(exc).__name__}")
 
@@ -259,12 +379,16 @@ class CapsuleBuilder:
             self.skipped.append("state:persist-root-not-found")
             return
         destination.mkdir(parents=True, exist_ok=True)
-        capsule_parent = self.capsule.parent.resolve()
         for child in self.root.iterdir():
-            if child.resolve() == capsule_parent or child.name == "capsules":
+            if child.name.casefold() == "capsules":
+                self._exclude(child, "capsule archive tree")
                 continue
             try:
-                _copy_path(child, destination / child.name)
+                self._copy_source(
+                    child,
+                    destination / child.name,
+                    reason="active capsule or archive output",
+                )
             except OSError as exc:
                 self.failures.append(f"state:persist-root:{child.name}:{type(exc).__name__}")
 
@@ -281,15 +405,19 @@ def _create(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve() if args.root else _default_root(repo).resolve()
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     capsule = root / "capsules" / f"shelfwise-session-{timestamp}"
-    builder = CapsuleBuilder(repo, root, capsule, strict=args.strict)
+    archive = Path(args.archive).resolve() if args.archive else capsule.with_suffix(".tar.gz")
+    builder = CapsuleBuilder(repo, root, capsule, strict=args.strict, archive=archive)
     try:
         path = builder.build()
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    archive = Path(args.archive) if args.archive else path.with_suffix(".tar.gz")
     if not args.no_archive:
-        _write_archive(path, archive)
+        try:
+            _write_archive(path, archive)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"archive creation failed: {exc}", file=sys.stderr)
+            return 2
     print(
         json.dumps(
             {"capsule": str(path), "archive": str(archive), "failures": builder.failures},
@@ -301,6 +429,8 @@ def _create(args: argparse.Namespace) -> int:
 
 def _write_archive(capsule: Path, archive: Path) -> None:
     """Write gzip or zstd tar archives using the strongest available local tool."""
+    if _path_relation(archive, capsule) in {"equal", "inside"}:
+        raise ValueError("archive path must not be inside the capsule directory")
     archive.parent.mkdir(parents=True, exist_ok=True)
     if archive.name.endswith(".tar.zst"):
         code, _stdout, stderr = _run(

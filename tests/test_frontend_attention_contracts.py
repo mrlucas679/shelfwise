@@ -81,10 +81,11 @@ def test_product_workspace_explains_bounded_search_receipt() -> None:
     workspace = _between(source, "function WorkspaceScreen(", "function App()")
 
     assert "catalogSearchReceipt" in workspace
-    assert "generated_world" in workspace
+    assert "data_domain" in workspace
     assert 'WorkspaceSection title="Search receipt"' in workspace
-    assert "Generated-world scan" in workspace
-    assert "Attention products are ranked first" in workspace
+    assert "Live catalogue scan" in workspace
+    assert "Simulation catalogue scan" in workspace
+    assert "measured catalogue, stock, and twin records only" in workspace
 
 
 def test_settings_uses_loaded_tenant_profile_not_placeholder_copy() -> None:
@@ -104,3 +105,11 @@ def test_connection_workspace_shows_methods_for_gated_endpoint_rows() -> None:
 
     assert "Webhook, scan, and intelligence gates" in workspace
     assert "meta={`${item.method} ${item.path}`}" in workspace
+
+
+def test_chat_failure_is_visible_instead_of_replaced_with_demo_answer() -> None:
+    source = _source()
+
+    assert "function replyFor(" not in source
+    assert "Gemma could not answer from" in source
+    assert "No decision or store data changed" in source

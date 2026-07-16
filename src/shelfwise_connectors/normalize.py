@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from shelfwise_contracts import Event, EventSource, EventType
+from shelfwise_contracts import Event, EventSource, EventType, Money
 
 from .canonical import InventoryState, SourceSystem, StockState
 from .provenance import InboundRecord
@@ -49,7 +49,12 @@ def record_to_event(record: InboundRecord) -> Event | None:
     if record.canonical_type == "inventory_state":
         return inventory_to_event(_inventory_from_payload(record), record)
     if record.canonical_type == "sales_line":
-        return _sales_line_to_event(record)
+        try:
+            return _sales_line_to_event(record)
+        except (InvalidOperation, TypeError, ValueError):
+            # A malformed canonical payload must not turn connector intake into a 500.
+            # The inbound record remains traceable, but no unsafe sale event is emitted.
+            return None
     return None
 
 
@@ -70,6 +75,8 @@ def _inventory_from_payload(record: InboundRecord) -> InventoryState:
 def _sales_line_to_event(record: InboundRecord) -> Event:
     payload = record.canonical_payload
     location_id = str(payload.get("location_id") or "online")
+    quantity = _quantity_value(payload.get("quantity"))
+    unit_price = _unit_price_money(payload.get("unit_price"))
     return Event(
         id=_event_id(record),
         type=EventType.SALE,
@@ -82,8 +89,12 @@ def _sales_line_to_event(record: InboundRecord) -> Event:
             "sku": str(payload.get("sku") or ""),
             "location": location_id,
             "location_id": location_id,
-            "quantity": int(payload.get("quantity") or 0),
-            "unit_price": _unit_price_amount(payload.get("unit_price")),
+            "quantity": quantity,
+            # Keep the v1 major-unit field for the existing sales cascade. New
+            # consumers should use the explicit integer minor-unit field below.
+            "unit_price": str(unit_price.amount),
+            "unit_price_minor_units": unit_price.minor_units,
+            "unit_price_currency": unit_price.currency,
             "order_id": str(payload.get("order_id") or record.source_object_id),
             "line_id": str(payload.get("line_id") or record.source_object_id),
             "source_object_id": record.source_object_id,
@@ -102,18 +113,33 @@ def _datetime_value(value: Any, *, fallback: datetime) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def _unit_price_amount(value: Any) -> str:
+def _quantity_value(value: Any) -> int | str:
+    try:
+        quantity = Decimal(str(value or "0"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("sales quantity is not numeric") from exc
+    if not quantity.is_finite():
+        raise ValueError("sales quantity must be finite")
+    if quantity == quantity.to_integral_value():
+        return int(quantity)
+    return format(quantity.normalize(), "f")
+
+
+def _unit_price_money(value: Any) -> Money:
     if isinstance(value, dict):
-        if value.get("amount") is not None:
-            return str(value["amount"])
         if value.get("minor_units") is not None:
-            return str(
-                (Decimal(str(value["minor_units"])) / Decimal("100")).quantize(
-                    Decimal("0.01")
-                )
+            try:
+                minor_units = Decimal(str(value["minor_units"]))
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise ValueError("sales unit price minor_units is not numeric") from exc
+            if not minor_units.is_finite() or minor_units != minor_units.to_integral_value():
+                raise ValueError("sales unit price minor_units must be a finite integer")
+            return Money(
+                minor_units=int(minor_units),
+                currency=str(value.get("currency") or "ZAR"),
             )
-        return str(value.get("amount") or "0")
-    return str(value or "0")
+        value = value.get("amount")
+    return Money.zar(value or "0")
 
 
 def _event_id(record: InboundRecord) -> str:

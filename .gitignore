@@ -20,7 +20,6 @@ data/harness_runs/
 .claude/
 .codex/
 CLAUDE.md
-CODEX.md
 IMPLEMENTATION_STATUS.md
 HANDOFF.md
 IMPLEMENTATION_PLAN.md
@@ -48,3 +47,42 @@ notebooks/.ipynb_checkpoints/
 
 # Local browser-verification debug artifacts (Claude Preview MCP output)
 .playwright-mcp/
+
+# Playwright E2E run output (frontend/e2e/*.spec.ts is the committed source)
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
+# Local IDE and scratch state
+.idea/
+tmp/
+
+# Root-level ad-hoc run logs and audit scratch outputs (never submission evidence)
+/*.log
+/*.err.log
+/fix-results.tsv
+/agent_role_coverage_*.json
+
+# Timestamped local run directories from stress/soak attempts
+/20*Z/
+/stress_run_*/
+
+# Soak/receipt raw artifacts stay untracked by design: the compact receipt in
+# reports/*/summary.json records their sha256 hashes and asserts tracked=false
+# (tests/test_submission_evidence.py), so the repo carries proofs, not payloads.
+reports/soak_*
+
+# Trained adapter weights live on the training pod / release storage, never in git
+shelfwise-gemma-final-adapter/
+
+# Runtime volumes, harness run output, and recovery tarballs - local state, never source
+persist/
+recovery/
+reports/soak/
+reports/.last_offline_run_id
+reports/.last_soak_run_id
+reports/*.stdout.log
+reports/*.stderr.log
+reports/*.out.log
+reports/*.err.log
+reports/inference_architecture_eval_*/

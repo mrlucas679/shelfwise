@@ -18,7 +18,7 @@ def test_default_inference_readiness_is_safe_offline(monkeypatch) -> None:
     assert body["ready_for_live_inference"] is False
     assert body["ready_for_amd_demo"] is False
     assert body["inference"]["provider"] == "offline"
-    assert body["inference"]["timeout_seconds"] < 30
+    assert body["inference"]["timeout_seconds"] > 0
 
 
 def test_vllm_mi300x_readiness_uses_openai_contract(monkeypatch) -> None:
@@ -43,10 +43,10 @@ def test_vllm_mi300x_readiness_uses_openai_contract(monkeypatch) -> None:
     assert "demo-key" not in response.text
 
 
-def test_timeout_is_clamped_under_submission_limit(monkeypatch) -> None:
+def test_timeout_can_exceed_former_submission_target(monkeypatch) -> None:
     monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "60")
 
-    assert load_inference_config().timeout_seconds == 29
+    assert load_inference_config().timeout_seconds == 60
 
 
 def test_submission_readiness_exposes_track_three_prescreen(monkeypatch) -> None:
@@ -64,7 +64,7 @@ def test_submission_readiness_exposes_track_three_prescreen(monkeypatch) -> None
     assert body["ready_for_submission_prescreen"] is True
     assert body["checks"]["docker_image_required"] == "required"
     assert body["checks"]["amd_compute_usage"] == "ok"
-    assert body["checks"]["response_timeout"] == "configured_under_30s"
+    assert body["checks"]["response_timeout"] == "configured"
     assert body["checks"]["english_responses"] == "enforced_in_code"
     assert body["checks"]["unseen_inputs"] == "not_cached_by_question"
     assert body["checks"]["live_cloud_measurements"] == "required_before_submission"

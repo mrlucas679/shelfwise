@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
+from shelfwise_runtime import DataDomain, normalize_domain
 from shelfwise_storage import auto_schema_enabled, connect, jsonb
 from shelfwise_storage.rls import apply_tenant_rls
 
@@ -16,6 +17,7 @@ from shelfwise_storage.rls import apply_tenant_rls
 class JournalRun:
     run_id: str
     tenant_id: str
+    data_domain: str
     status: str
     started_at: str
     finished_at: str | None = None
@@ -24,6 +26,7 @@ class JournalRun:
         return {
             "run_id": self.run_id,
             "tenant_id": self.tenant_id,
+            "data_domain": self.data_domain,
             "status": self.status,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -37,13 +40,24 @@ class InMemoryJournal:
         self._steps: dict[tuple[str, str], dict[str, Any]] = {}
         self._compensations: dict[str, list[dict[str, Any]]] = {}
 
-    def start_run(self, run_id: str, *, tenant_id: str) -> None:
+    def start_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        data_domain: str = DataDomain.OPERATIONAL_TWIN.value,
+    ) -> None:
+        resolved_domain = normalize_domain(
+            data_domain,
+            default=DataDomain.OPERATIONAL_TWIN,
+        )
         with self._lock:
             self._runs.setdefault(
                 run_id,
                 JournalRun(
                     run_id=run_id,
                     tenant_id=tenant_id,
+                    data_domain=resolved_domain,
                     status="running",
                     started_at=_now(),
                 ),
@@ -53,10 +67,16 @@ class InMemoryJournal:
         with self._lock:
             existing = self._runs.get(run_id)
             tenant_id = existing.tenant_id if existing else "default"
+            data_domain = (
+                existing.data_domain
+                if existing
+                else DataDomain.OPERATIONAL_TWIN.value
+            )
             started_at = existing.started_at if existing else _now()
             self._runs[run_id] = JournalRun(
                 run_id=run_id,
                 tenant_id=tenant_id,
+                data_domain=data_domain,
                 status=status,
                 started_at=started_at,
                 finished_at=_now(),
@@ -84,9 +104,23 @@ class InMemoryJournal:
         with self._lock:
             return [deepcopy(item) for item in reversed(self._compensations.get(run_id, []))]
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        data_domain: str | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
-            ordered = sorted(self._runs.values(), key=lambda item: item.started_at)
+            runs = list(self._runs.values())
+            if tenant_id is not None:
+                runs = [run for run in runs if run.tenant_id == tenant_id]
+            if data_domain is not None:
+                resolved_domain = normalize_domain(
+                    data_domain,
+                    default=DataDomain.OPERATIONAL_TWIN,
+                )
+                runs = [run for run in runs if run.data_domain == resolved_domain]
+            ordered = sorted(runs, key=lambda item: item.started_at)
             return [run.to_dict() for run in ordered]
 
     def clear(self) -> None:
@@ -104,15 +138,26 @@ class PostgresJournal:
         if auto_schema_enabled():
             self._ensure_schema()
 
-    def start_run(self, run_id: str, *, tenant_id: str) -> None:
-        with self._connect() as conn:
+    def start_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        data_domain: str = DataDomain.OPERATIONAL_TWIN.value,
+    ) -> None:
+        resolved_domain = normalize_domain(
+            data_domain,
+            default=DataDomain.OPERATIONAL_TWIN,
+        )
+        with self._connect(tenant_id) as conn:
             conn.execute(
                 """
-                insert into cascade_runs (run_id, tenant_id, status, started_at)
-                values (%s, %s, 'running', %s)
+                insert into cascade_runs
+                    (run_id, tenant_id, data_domain, status, started_at)
+                values (%s, %s, %s, 'running', %s)
                 on conflict (run_id) do nothing
                 """,
-                (run_id, tenant_id, _now()),
+                (run_id, tenant_id, resolved_domain, _now()),
             )
             conn.commit()
 
@@ -186,20 +231,39 @@ class PostgresJournal:
             ).fetchall()
         return [deepcopy(row["compensation"]) for row in rows]
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        data_domain: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if tenant_id is not None:
+            clauses.append("tenant_id = %s")
+            params.append(tenant_id)
+        if data_domain is not None:
+            clauses.append("data_domain = %s")
+            params.append(
+                normalize_domain(data_domain, default=DataDomain.OPERATIONAL_TWIN)
+            )
+        where = f"where {' and '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                select run_id, tenant_id, status, started_at, finished_at
+                f"""
+                select run_id, tenant_id, data_domain, status, started_at, finished_at
                 from cascade_runs
+                {where}
                 order by started_at desc, run_id
                 limit 200
-                """
+                """,
+                tuple(params),
             ).fetchall()
         return [
             {
                 "run_id": row["run_id"],
                 "tenant_id": row["tenant_id"],
+                "data_domain": row["data_domain"],
                 "status": row["status"],
                 "started_at": row["started_at"].isoformat(),
                 "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
@@ -220,10 +284,17 @@ class PostgresJournal:
                 create table if not exists cascade_runs (
                     run_id text primary key,
                     tenant_id text not null,
+                    data_domain text not null default 'operational_twin',
                     status text not null default 'running',
                     started_at timestamptz not null,
                     finished_at timestamptz
                 )
+                """
+            )
+            conn.execute(
+                """
+                alter table cascade_runs
+                add column if not exists data_domain text not null default 'operational_twin'
                 """
             )
             conn.execute(
@@ -251,11 +322,17 @@ class PostgresJournal:
                 on cascade_steps (tenant_id, run_id)
                 """
             )
+            conn.execute(
+                """
+                create index if not exists idx_cascade_runs_tenant_domain_started
+                on cascade_runs (tenant_id, data_domain, started_at desc)
+                """
+            )
             apply_tenant_rls(conn, ("cascade_runs", "cascade_steps"))
             conn.commit()
 
-    def _connect(self) -> Any:
-        return connect(self._database_url)
+    def _connect(self, tenant_id: str | None = None) -> Any:
+        return connect(self._database_url, tenant_id=tenant_id)
 
 
 def journaled(

@@ -1,0 +1,69 @@
+{
+  "breaking_point_users": null,
+  "generated_at": "2026-07-14T22:12:08.977216+00:00",
+  "schema_version": "phase-c-ramp/v1",
+  "steps": [
+    {
+      "duration_seconds": 60.42,
+      "max_ms": 1656.37,
+      "p50_ms": 506.78,
+      "p95_ms": 896.49,
+      "p99_ms": 1159.25,
+      "requests": 107,
+      "requests_per_second": 1.77,
+      "server_errors": 0,
+      "status_counts": {
+        "200": 107
+      },
+      "transport_errors": 0,
+      "users": 1
+    },
+    {
+      "duration_seconds": 60.9,
+      "max_ms": 2553.21,
+      "p50_ms": 1116.63,
+      "p95_ms": 2071.35,
+      "p99_ms": 2363.5,
+      "requests": 387,
+      "requests_per_second": 6.35,
+      "server_errors": 0,
+      "status_counts": {
+        "200": 387
+      },
+      "transport_errors": 0,
+      "users": 8
+    },
+    {
+      "duration_seconds": 61.37,
+      "max_ms": 5615.96,
+      "p50_ms": 3539.88,
+      "p95_ms": 4706.88,
+      "p99_ms": 5372.43,
+      "requests": 548,
+      "requests_per_second": 8.93,
+      "server_errors": 0,
+      "status_counts": {
+        "200": 548
+      },
+      "transport_errors": 0,
+      "users": 32
+    },
+    {
+      "duration_seconds": 61.47,
+      "max_ms": 7518.04,
+      "p50_ms": 379.76,
+      "p95_ms": 4460.27,
+      "p99_ms": 6571.16,
+      "requests": 4623,
+      "requests_per_second": 75.21,
+      "server_errors": 0,
+      "status_counts": {
+        "200": 568,
+        "429": 4055
+      },
+      "transport_errors": 0,
+      "users": 64
+    }
+  ],
+  "verdict": "NO_BREAK_UP_TO_MAX_STEP"
+}

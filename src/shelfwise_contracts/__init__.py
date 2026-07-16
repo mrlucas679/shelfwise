@@ -7,6 +7,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from shelfwise_runtime.provenance import DataDomain, normalize_domain
+
 
 def _decimal(value: object) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
@@ -117,6 +119,7 @@ class Event:
     payload: dict[str, Any]
     source: EventSource = EventSource.MANUAL
     tenant_id: str = "default"
+    data_domain: DataDomain = DataDomain.OPERATIONAL_TWIN
     correlation_id: str = ""
     causation_id: str | None = None
     schema_version: str = "v1"
@@ -133,7 +136,26 @@ class Event:
         ts = _datetime(self.ts)
         object.__setattr__(self, "type", EventType(self.type))
         object.__setattr__(self, "source", EventSource(self.source))
+        object.__setattr__(
+            self,
+            "data_domain",
+            DataDomain(
+                normalize_domain(self.data_domain, default=DataDomain.OPERATIONAL_TWIN)
+            ),
+        )
         object.__setattr__(self, "ts", ts)
+        payload_domain = self.payload.get("data_domain")
+        if payload_domain is not None:
+            normalized_payload_domain = DataDomain(
+                normalize_domain(payload_domain, default=self.data_domain)
+            )
+            if normalized_payload_domain is not self.data_domain:
+                raise ValueError("event payload data_domain conflicts with event data_domain")
+        if self.data_domain is DataDomain.OPERATIONAL_TWIN and (
+            self.payload.get("synthetic") is True
+            or self.payload.get("synthetic_probe") is True
+        ):
+            raise ValueError("synthetic event payload requires a non-operational data_domain")
         if not self.correlation_id:
             object.__setattr__(self, "correlation_id", self.id)
 
@@ -149,6 +171,7 @@ class Event:
             "payload",
             "source",
             "tenant_id",
+            "data_domain",
             "correlation_id",
             "causation_id",
             "schema_version",
@@ -160,6 +183,7 @@ class Event:
         clean = {key: value for key, value in data.items() if key in allowed}
         clean.setdefault("source", EventSource.API.value)
         clean.setdefault("tenant_id", "default")
+        clean.setdefault("data_domain", DataDomain.OPERATIONAL_TWIN.value)
         return cls(**clean)
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,6 +195,7 @@ class Event:
             "payload": deepcopy_json(self.payload),
             "source": self.source.value,
             "tenant_id": self.tenant_id,
+            "data_domain": self.data_domain.value,
             "correlation_id": self.correlation_id,
             "causation_id": self.causation_id,
             "schema_version": self.schema_version,
@@ -187,6 +212,7 @@ class Event:
             "datacontenttype": "application/json",
             "data": deepcopy_json(self.payload),
             "tenantid": self.tenant_id,
+            "datadomain": self.data_domain.value,
             "correlationid": self.correlation_id,
             "causationid": self.causation_id,
             "schema": self.schema_version,
