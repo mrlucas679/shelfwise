@@ -216,9 +216,14 @@ def test_compaction_is_idempotent_and_a_longer_prefix_supersedes() -> None:
     assert grown.supersedes_id == first.id
     active = store.active_summary(tenant_id="t1", user_id="u1", conversation_id="c1")
     assert active is not None and active.id == grown.id
-    all_active = store.list_active(tenant_id="t1", user_id="u1", conversation_id="c1")
-    assert [item.id for item in all_active] == [grown.id], (
-        "the superseded summary must no longer be active"
+    active_summaries = [
+        item
+        for item in store.list_active(tenant_id="t1", user_id="u1", conversation_id="c1")
+        if item.kind is MemoryKind.EPISODE_SUMMARY
+    ]
+    assert [item.id for item in active_summaries] == [grown.id], (
+        "the superseded summary must no longer be active (first-class objective/"
+        "correction items remain active alongside the current summary by design)"
     )
 
 
@@ -418,3 +423,141 @@ def test_chat_carries_memory_route_and_context_receipts_end_to_end(monkeypatch) 
         "the objective from message 0 must remain durable after it left the window"
     )
     assert meta["conversation_summary_id"] == summary.id
+
+
+def test_compaction_extracts_objective_and_corrections_as_first_class_items() -> None:
+    """The memory taxonomy is only real if kinds beyond the episode summary exist:
+    the objective and each correction must be individually stored, provenance-tracked,
+    idempotent items - not just prose lines inside the summary."""
+    store = InMemoryConversationMemoryStore()
+    messages = _messages(12)
+    messages[5] = {
+        "id": "m5",
+        "role": "user",
+        "text": "No, actually the supplier is DairyCo, not FreshFarm.",
+    }
+
+    compact_conversation(
+        store, tenant_id="t1", user_id="u1", conversation_id="c1",
+        messages=messages, recent_window=4,
+    )
+    # Idempotency: recompacting the same prefix must not duplicate items.
+    compact_conversation(
+        store, tenant_id="t1", user_id="u1", conversation_id="c1",
+        messages=messages, recent_window=4,
+    )
+
+    active = store.list_active(tenant_id="t1", user_id="u1", conversation_id="c1")
+    by_kind = {}
+    for item in active:
+        by_kind.setdefault(item.kind, []).append(item)
+
+    objectives = by_kind.get(MemoryKind.OBJECTIVE, [])
+    assert len(objectives) == 1
+    assert "yoghurt stock position" in objectives[0].text
+    assert objectives[0].source_message_ids == ("m0",)
+
+    corrections = by_kind.get(MemoryKind.CORRECTION, [])
+    assert len(corrections) == 1
+    assert corrections[0].text.startswith("No, actually the supplier is DairyCo")
+    assert corrections[0].source_message_ids == ("m5",)
+
+
+def test_skill_lifecycle_is_operable_over_http(monkeypatch) -> None:
+    """promote/retire existed only as functions - governance is half-implemented if no
+    operator can actually flip a skill's lifecycle in the running product."""
+    from shelfwise_backend.state import skill_registry as live_registry
+
+    headers = _jwt_headers(monkeypatch)
+    client = TestClient(app)
+
+    live_registry.upsert(
+        _manifest(
+            id="http_lifecycle_skill",
+            status="draft",
+            minimum_pass_rate=0.9,
+            allowed_roles=("manager", "owner", "associate"),
+        ),
+        known_agents={"inventory"},
+        known_tools={"get_stock"},
+    )
+
+    listed = client.get("/mlops/skills", headers=headers)
+    assert listed.status_code == 200
+    assert any(s["id"] == "http_lifecycle_skill" for s in listed.json()["skills"])
+
+    rejected = client.post(
+        "/mlops/skills/http_lifecycle_skill/promote",
+        headers=headers,
+        json={"measured_pass_rate": 0.5},
+    )
+    assert rejected.status_code == 422
+
+    promoted = client.post(
+        "/mlops/skills/http_lifecycle_skill/promote",
+        headers=headers,
+        json={"measured_pass_rate": 0.95},
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["skill"]["status"] == "promoted"
+
+    retired = client.post("/mlops/skills/http_lifecycle_skill/retire", headers=headers)
+    assert retired.status_code == 200
+    assert retired.json()["skill"]["status"] == "retired"
+
+
+def test_mined_skills_pipeline_is_wired_to_real_outcome_history(monkeypatch) -> None:
+    """draft_skills/activate/to_plan were production-orphaned (only a test called them).
+    Prove the full mined-playbook lifecycle now runs over the REAL stores and routes:
+    repeated approved outcomes -> minable draft -> HTTP activation -> validated plan
+    artifact, and a draft that evidence does not support is not activatable."""
+    headers = _jwt_headers(monkeypatch)
+    client = TestClient(app)
+
+    # Earn the pattern for real: one decision through the live golden route, and a
+    # second distinct decision with the same scenario/action approved through the real
+    # decision + learning stores (golden decision ids are scenario-stable, so the route
+    # alone can only ever mint one) - MIN_SKILL_SUPPORT=2 must be genuinely cleared.
+    from shelfwise_backend.state import decision_store, learning_store
+
+    cascade = client.post("/scenarios/golden", headers=headers)
+    assert cascade.status_code == 200
+    first = cascade.json()["decision"]
+    assert client.post(
+        f"/decisions/{first['id']}/approve", headers=headers
+    ).status_code == 200
+
+    sibling = {
+        **{k: v for k, v in first.items() if k not in {"id", "status", "review"}},
+        "id": f"{first['id']}_sibling",
+        "status": "pending",
+    }
+    decision_store.upsert(sibling)
+    approved_sibling = decision_store.approve(sibling["id"])
+    assert approved_sibling is not None
+    learning_store.record_approved_decision(approved_sibling)
+
+    mined = client.get("/mlops/skills/mined", headers=headers)
+    assert mined.status_code == 200
+    drafts = mined.json()["skills"]
+    assert drafts, "two approved same-scenario decisions must clear MIN_SKILL_SUPPORT"
+    draft = drafts[0]
+    assert draft["status"] == "draft"
+    assert draft["support"] >= 2
+    assert draft["derived_from"], "mined skills must carry real decision provenance"
+
+    activated = client.post(
+        f"/mlops/skills/mined/{draft['id']}/activate", headers=headers
+    )
+    assert activated.status_code == 200
+    body = activated.json()
+    assert body["skill"]["status"] == "active"
+    plan = body["plan"]
+    assert plan["tenant_id"] == "assistant_test_tenant"
+    assert plan["steps"], "an activated skill must compile to concrete plan steps"
+    assert all(step.get("compensation") for step in plan["steps"]), (
+        "every mined plan step must carry its compensation - recommend-only governance"
+    )
+
+    missing = client.post("/mlops/skills/mined/skill_never_earned/activate", headers=headers)
+    assert missing.status_code == 404

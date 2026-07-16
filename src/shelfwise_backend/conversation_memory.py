@@ -352,7 +352,87 @@ def compact_conversation(
         summary_version=f"{SUMMARY_METHOD}:{len(source_ids)}",
         created_by_model_run_id=None,
     )
-    return store.upsert(item)
+    persisted = store.upsert(item)
+    _extract_first_class_items(
+        store,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        older=older,
+        first_user=first_user,
+        summary_version=item.summary_version,
+    )
+    return persisted
+
+
+def _extract_first_class_items(
+    store: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    conversation_id: str,
+    older: list[dict[str, Any]],
+    first_user: dict[str, Any] | None,
+    summary_version: str,
+) -> None:
+    """Persist the objective and every correction as first-class memory items.
+
+    The memory taxonomy is only real if items other than the episode summary actually
+    exist: the conversation OBJECTIVE and user CORRECTIONS are deterministically
+    identifiable, carry their own provenance, and must be individually supersedable
+    rather than living solely as lines of summary prose. Ids are content-derived, so
+    re-compaction upserts idempotently.
+    """
+    now = datetime.now(UTC)
+    if first_user is not None:
+        objective_text = str(first_user.get("text") or "").strip()[:_MAX_SUMMARY_CHARS]
+        if objective_text:
+            store.upsert(
+                ConversationMemoryItem(
+                    id="mem_obj_"
+                    + hashlib.sha256(str(first_user.get("id")).encode()).hexdigest()[:16],
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    kind=MemoryKind.OBJECTIVE,
+                    text=objective_text,
+                    source_message_ids=(str(first_user.get("id") or "m0"),),
+                    entity_ids=(),
+                    valid_from=now,
+                    valid_to=None,
+                    supersedes_id=None,
+                    status="active",
+                    confidence=1.0,
+                    summary_version=summary_version,
+                    created_by_model_run_id=None,
+                )
+            )
+    for message in older:
+        text = str(message.get("text") or "").strip()
+        if str(message.get("role")) != "user" or not text.lower().startswith(
+            _CORRECTION_PREFIXES
+        ):
+            continue
+        store.upsert(
+            ConversationMemoryItem(
+                id="mem_corr_"
+                + hashlib.sha256(f"{message.get('id')}|{text}".encode()).hexdigest()[:16],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                kind=MemoryKind.CORRECTION,
+                text=text[:_MAX_SUMMARY_CHARS],
+                source_message_ids=(str(message.get("id") or ""),),
+                entity_ids=(),
+                valid_from=now,
+                valid_to=None,
+                supersedes_id=None,
+                status="active",
+                confidence=1.0,
+                summary_version=summary_version,
+                created_by_model_run_id=None,
+            )
+        )
 
 
 def _with_status(item: ConversationMemoryItem, status: str) -> ConversationMemoryItem:

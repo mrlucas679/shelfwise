@@ -41,10 +41,16 @@ from shelfwise_inference.orchestration import ExecutionMode
 from shelfwise_mlops import (
     ModelRun,
     OutcomeRecord,
+    SkillStats,
     build_accountability_report,
     decision_economics,
+    draft_skills,
 )
+from shelfwise_mlops import activate as activate_skill
+from shelfwise_mlops import to_plan as skill_to_plan
 from shelfwise_mlops.skill_registry import discover as discover_skills
+from shelfwise_mlops.skill_registry import promote as promote_skill_manifest
+from shelfwise_mlops.skill_registry import retire as retire_skill_manifest
 from shelfwise_runtime.provenance import DataDomain, DataDomainBoundaryError
 from shelfwise_storage import (
     TENANT_SCOPED_TABLES,
@@ -1806,6 +1812,182 @@ def consolidate_memory(
         ctx.tenant_id,
         data_domain=data_domain or _chat_data_domain(),
     )
+
+
+# Plan-step templates for playbooks mined from outcome history. Capabilities name the
+# same governed action types the HITL/writeback path already uses; a compiled plan is a
+# governed RECOMMENDATION artifact (like a writeback task), never an autonomous write -
+# execution stays behind the capability registry and human approval.
+_MINED_SKILL_STEP_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+    "apply_markdown": [
+        {
+            "key": "apply_markdown",
+            "capability": "apply_markdown",
+            "params": {},
+            "compensation": {"undo": "restore_catalog_price"},
+        }
+    ],
+    "reorder": [
+        {
+            "key": "reorder",
+            "capability": "reorder",
+            "params": {},
+            "compensation": {"undo": "cancel_pending_purchase_order"},
+        }
+    ],
+    "quarantine_stock": [
+        {
+            "key": "quarantine_stock",
+            "capability": "quarantine_stock",
+            "params": {},
+            "compensation": {"undo": "release_quarantine_hold"},
+        }
+    ],
+    "dispatch_facilities_check": [
+        {
+            "key": "dispatch_facilities_check",
+            "capability": "dispatch_facilities_check",
+            "params": {},
+            "compensation": {"undo": "cancel_facilities_dispatch"},
+        }
+    ],
+}
+
+
+def _mined_skill_drafts(tenant_id: str, data_domain: str) -> list[Any]:
+    """Mine playbook drafts from this tenant's REAL resolved-outcome history.
+
+    Trigger is the decision's scenario id - the same stable workload classification the
+    rest of the platform uses - so a draft reads as "apply_markdown when
+    stage4_loadshedding_x_payday_yoghurt" and its evidence refs point at the actual
+    decisions that earned it.
+    """
+    decisions = {
+        str(decision.get("id")): decision
+        for decision in decision_store.list()
+        if _decision_tenant_id(decision, tenant_id) == tenant_id
+    }
+    stats = SkillStats()
+    for record in _learning_outcome_records(tenant_id, data_domain):
+        decision = decisions.get(record.evidence_refs[0]) if record.evidence_refs else None
+        scenario_id = str((decision or {}).get("scenario_id") or "") or record.action
+        stats.reflect(record, trigger=scenario_id)
+    return draft_skills(stats, tenant_id=tenant_id, step_template=_MINED_SKILL_STEP_TEMPLATES)
+
+
+@app.get("/mlops/skills/mined")
+def list_mined_skills(
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    """Playbooks mined from repeated, measurably successful outcomes - drafts for review."""
+    resolved_domain = data_domain or _chat_data_domain()
+    drafts = _mined_skill_drafts(ctx.tenant_id, resolved_domain)
+    return {
+        "tenant_id": ctx.tenant_id,
+        "data_domain": resolved_domain,
+        "skills": [skill.to_dict() for skill in drafts],
+    }
+
+
+@app.post(
+    "/mlops/skills/mined/{skill_id}/activate",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def activate_mined_skill(
+    skill_id: str,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Activate a reviewed mined draft and compile it to the validated plan shape.
+
+    The compiled plan is returned as a governed artifact for the approving human - it is
+    NOT executed here. Activation re-mines from current outcome history, so a draft that
+    later outcomes no longer support simply no longer exists to activate (the honest
+    tombstone: evidence, not memory of past drafts, decides what is activatable).
+    """
+    resolved_domain = data_domain or _chat_data_domain()
+    draft = next(
+        (
+            skill
+            for skill in _mined_skill_drafts(ctx.tenant_id, resolved_domain)
+            if skill.id == skill_id
+        ),
+        None,
+    )
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No currently-minable draft has that id - either it never existed or "
+                "later outcomes no longer support it"
+            ),
+        )
+    active = activate_skill(draft)
+    plan = skill_to_plan(
+        active, plan_id=f"plan_{skill_id}_{ctx.tenant_id}", actor_role=ctx.role.value
+    )
+    return {"skill": active.to_dict(), "plan": plan}
+
+
+@app.get("/mlops/skills")
+def list_skill_manifests(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    """List the assistant skill catalogue this tenant can discover, with lifecycle status."""
+    manifests = skill_registry.list(tenant_id=ctx.tenant_id)
+    return {
+        "tenant_id": ctx.tenant_id,
+        "skills": [manifest.to_dict() for manifest in manifests],
+    }
+
+
+class SkillPromotionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    measured_pass_rate: float = Field(ge=0.0, le=1.0)
+
+
+@app.post(
+    "/mlops/skills/{skill_id}/promote",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def promote_skill(
+    skill_id: str,
+    body: SkillPromotionBody,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Flip a draft skill to promoted - only past its own evaluation bar.
+
+    The promotion gate is the enforcement point that makes the lifecycle real: discovery
+    only ever surfaces promoted manifests, so this route is how a validated draft skill
+    actually reaches conversations. Requires an approval-capable role, like every other
+    governance write.
+    """
+    try:
+        manifest = promote_skill_manifest(
+            skill_registry,
+            skill_id,
+            measured_pass_rate=body.measured_pass_rate,
+            tenant_id=ctx.tenant_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"skill": manifest.to_dict()}
+
+
+@app.post(
+    "/mlops/skills/{skill_id}/retire",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def retire_skill(
+    skill_id: str,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Retire a skill from discovery permanently (re-register a new version to revive)."""
+    try:
+        manifest = retire_skill_manifest(skill_registry, skill_id, tenant_id=ctx.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"skill": manifest.to_dict()}
 
 
 @app.get("/worker/runs")
