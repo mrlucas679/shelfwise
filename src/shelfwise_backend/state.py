@@ -41,11 +41,13 @@ from .cold_chain_feed import ColdChainFeedService
 from .conversation_memory import create_conversation_memory_store
 from .event_bus import create_event_bus, stale_consumer_idle_ms
 from .event_store import create_event_store
+from .governed_execution import FidelityRevalidationService, build_capability_registry
 from .open_orders import create_open_order_store
 from .operational_facts import OperationalFactsProvider
 from .tools.mcp_surface import AuditLog
 from .trace import TraceRegistry
 from .worker import CascadeWorker, WorkerLoopService, create_journal
+from .worker.plans import PlanRunner as _PlanRunner
 from .world_facts import WorldFactsProvider
 
 chat_store = create_chat_store()
@@ -97,6 +99,26 @@ worker_service = WorkerLoopService(cascade_worker)
 cold_chain_feed = ColdChainFeedService()
 conversation_memory_store = create_conversation_memory_store()
 skill_registry = create_skill_registry()
+
+# Governed plan execution: the registry carries ONLY real capabilities (the HITL
+# write-back sink as the sole write; twin fidelity recompute as the read), and the
+# runner journals every step. The revalidation service turns "multi-week fidelity
+# re-validation" into a running schedule instead of a waiting roadmap line.
+capability_registry = build_capability_registry(
+    writeback_sink=writeback_sink, twin_service=twin_service
+)
+
+
+async def _publish_plan_progress(kind: str, payload: dict) -> None:
+    import logging
+
+    logging.getLogger("shelfwise.plans").info("plan_%s %s", kind, payload)
+
+
+plan_runner = _PlanRunner(capability_registry, journal, _publish_plan_progress)
+fidelity_revalidation_service = FidelityRevalidationService(
+    runner=plan_runner, twin_service=twin_service, writeback_sink=writeback_sink
+)
 
 
 def _seed_platform_skills() -> None:

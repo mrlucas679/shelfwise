@@ -1260,6 +1260,8 @@ const GATED_ENDPOINTS = [
   { label: 'Retire skill', method: 'POST', path: '/mlops/skills/{skill_id}/retire', group: 'operations', detail: 'Retire a skill from discovery permanently.' },
   { label: 'Mined skills', method: 'GET', path: '/mlops/skills/mined', detail: 'Playbooks mined from repeated, measurably successful outcomes.' },
   { label: 'Activate mined skill', method: 'POST', path: '/mlops/skills/mined/{skill_id}/activate', group: 'operations', detail: 'Activate a reviewed mined draft and compile it to a governed plan artifact.' },
+  { label: 'Execute governed plan', method: 'POST', path: '/mlops/plans/execute', group: 'operations', detail: 'Run a validated plan through the journaled runner; the HITL write-back sink is the sole write capability.' },
+  { label: 'Worker schedules', method: 'GET', path: '/worker/schedules', group: 'operations', detail: 'Recurring governed schedules and their receipts (twin fidelity revalidation).' },
   { label: 'Inference smoke', method: 'GET', path: '/inference/smoke', group: 'operations', detail: 'Manual inference smoke test; records a model run.' },
   { label: 'Chat conversations', method: 'GET', path: '/chat/conversations', group: 'operations', detail: 'List the caller tenant/user chat conversations.' },
   { label: 'Chat conversation detail', method: 'GET', path: '/chat/conversations/{conversation_id}', group: 'operations', detail: 'Full transcript for one conversation.' },

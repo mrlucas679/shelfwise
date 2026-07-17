@@ -128,6 +128,7 @@ from .state import (
     decision_store,
     event_bus,
     event_store,
+    fidelity_revalidation_service,
     inbound_record_store,
     inventory_position_store,
     journal,
@@ -135,6 +136,7 @@ from .state import (
     model_run_registry,
     open_order_store,
     operational_facts_for_query,
+    plan_runner,
     product_catalog_store,
     prompt_registry,
     skill_registry,
@@ -295,6 +297,8 @@ app.router.add_event_handler("startup", cold_chain_feed.start)
 app.router.add_event_handler("shutdown", cold_chain_feed.stop)
 app.router.add_event_handler("startup", twin_projection_service.start)
 app.router.add_event_handler("shutdown", twin_projection_service.stop)
+app.router.add_event_handler("startup", fidelity_revalidation_service.start)
+app.router.add_event_handler("shutdown", fidelity_revalidation_service.stop)
 
 
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
@@ -590,6 +594,7 @@ def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
             "inbound_record_store": type(inbound_record_store).__name__,
             "cold_chain_feed": cold_chain_feed.status(),
             "twin_projection_worker": twin_projection_service.status(),
+            "fidelity_revalidation": fidelity_revalidation_service.status(),
             "auth_mode": _auth_mode(),
             "tenant_auth_secret_configured": bool(os.getenv("TENANT_AUTH_SECRET", "")),
             "tenant_scoped_tables": sorted(TENANT_SCOPED_TABLES),
@@ -1988,6 +1993,42 @@ def retire_skill(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"skill": manifest.to_dict()}
+
+
+@app.post(
+    "/mlops/plans/execute",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+async def execute_plan(
+    body: dict[str, Any],
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Execute a validated governed plan through the journaled runner.
+
+    The governed-write phase, live: the only registered write capability is the HITL
+    write-back task sink, every step is journaled with compensation recorded, and the
+    plan's tenant is forced to the caller's - a plan can never execute across tenants.
+    Compile plans via /mlops/skills/mined/{id}/activate; execute them here after review.
+    """
+    from shelfwise_backend.worker.plans import Plan as _Plan
+
+    try:
+        plan = _Plan.model_validate({**body, "tenant_id": ctx.tenant_id})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:400]) from exc
+    result = await plan_runner.run(plan)
+    if result.status != "done":
+        raise HTTPException(
+            status_code=422,
+            detail=f"plan failed at step: {result.failed_step}",
+        )
+    return {"result": result.to_dict()}
+
+
+@app.get("/worker/schedules")
+def list_schedules() -> dict[str, object]:
+    """Recurring governed schedules and their receipts (fidelity revalidation today)."""
+    return {"fidelity_revalidation": fidelity_revalidation_service.status()}
 
 
 @app.get("/worker/runs")
