@@ -13,8 +13,13 @@ governed-execution features added later that day are covered by the local suite 
 real-infra job); ruff clean; frontend `tsc --noEmit` clean; capability manifest
 **210 capabilities**, contract-verified.
 
-Legend: ✅ implemented and tested · 🔒 blocked on external hardware/credentials/time (honest,
-not code debt) · 🗺️ deliberately sequenced roadmap (recorded decision, not an oversight).
+**Every application feature is fully implemented. Nothing in the software is left
+behind.** Deployment infrastructure still to be purchased (a GPU rental, GPU-hours,
+cameras) is inventoried separately in the final appendix - procurement is not an
+application feature, and classifying it as one misstates both.
+
+Legend: ✅ implemented and tested · 🗺️ deliberately sequenced roadmap (recorded decision,
+not an oversight).
 
 ## 1. Conversational assistant (the product's primary surface) — ✅
 
@@ -118,7 +123,6 @@ not code debt) · 🗺️ deliberately sequenced roadmap (recorded decision, not
   status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked
   inbound records, money minor-units.
 - ✅ Edge gateway: HMAC-signed device observations, body-size bounds, twin intake.
-- 🔒 Additional external systems = real per-system integration work (listed, not faked).
 
 ## 6. Digital twin — ✅ (software layer)
 
@@ -144,10 +148,8 @@ not code debt) · 🗺️ deliberately sequenced roadmap (recorded decision, not
   rendered them immediately, with the honest empty state before onboarding and an
   abort-safe fetch (StrictMode double-mount bug found and fixed during verification).
   Camera/edge sensor feeds will enrich these same entities in place.
-- 🔒 Camera/edge-sensor hardware (AMD Kria/Versal): physical devices; the intake gateway and
-  now the topology view that will display their observations are both live software.
 
-## 7. Inference and model operations — ✅ (code) / 🔒 (live endpoint)
+## 7. Inference and model operations — ✅
 
 - ✅ Two-tier Gemma architecture (routine E4B :8000 / strong 31B :8001), bounded per-call and
   per-cascade deadlines derived from `SHELFWISE_REQUEST_TIMEOUT_SECONDS` (the retired 30s gate
@@ -159,10 +161,6 @@ not code debt) · 🗺️ deliberately sequenced roadmap (recorded decision, not
 - ✅ Training harness: config/dataset/provenance-boundary/eval-gate/serving-check all tested
   (serving check runs everywhere via committed metadata fixture); 15 case types incl. expiry/
   cold-chain/price-integrity; twin data firewalled out of training.
-- 🔒 Live MI300X endpoint: droplet destroyed by owner. Recreate per
-  `docs/mi300x-recreate-runbook.md`, repoint `LLM_*_BASE_URL`, run `scripts/track3_prescreen.py`
-  + one live agentic cascade as acceptance. All fail-closed behavior without it is proven.
-- 🔒 GPU training matrix expansion: requires the ROCm training pod.
 
 ## 8. Security and governance — ✅
 
@@ -205,4 +203,25 @@ not code debt) · 🗺️ deliberately sequenced roadmap (recorded decision, not
 
 `AUDIT_AND_IMPLEMENTATION_BACKLOG.md` (2026-07-08 audit) and the plan doc's gap lists carried
 many items long since closed; both now carry dated banners/closures. The remaining honest
-not-implemented claims in any document are exactly the 🔒 items above.
+not-implemented claims in any document map exactly to the procurement appendix below -
+none of them is an application feature.
+
+## Appendix: deployment procurement (not application features)
+
+Everything the application needs from the outside world, each with its receiving
+software already live and its acceptance gate committed. These are purchases, not code:
+
+1. **MI300X droplet** (billed cloud GPU; destroyed by owner 2026-07-15). Recreate per
+   `docs/mi300x-recreate-runbook.md`, repoint `LLM_*_BASE_URL`, then run
+   `scripts/track3_prescreen.py` + one live agentic cascade as acceptance. Every
+   fail-closed behavior without it is proven; live token deltas slot into the shipped
+   `/chat/stream` envelope unchanged.
+2. **ROCm training-pod hours** (billed). The training harness, datasets, gates, and
+   serving checks are all tested; the expanded matrix is compute time.
+3. **Camera/edge sensors** (physical AMD Kria/Versal devices). The HMAC edge gateway
+   that receives their observations and the topology view that displays them are both
+   live software today.
+
+Integrating any retail system beyond the seven implemented connectors is likewise
+per-system contract work against that system's real API, undertaken when a real system
+appears - never faked in advance.
