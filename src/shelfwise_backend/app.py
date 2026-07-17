@@ -387,6 +387,75 @@ def _public_demo_sessions_enabled() -> bool:
     }
 
 
+class LoginBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/auth/login", dependencies=[WRITE_LIMIT_DEP])
+def company_login(body: LoginBody) -> JSONResponse:
+    """Company-account login: verify the configured owner account, mint the JWT session.
+
+    Real credential verification with stdlib scrypt (no new dependencies): the deployment
+    configures SHELFWISE_LOGIN_EMAIL and SHELFWISE_LOGIN_PASSWORD_HASH (format
+    "scrypt$<salt_hex>$<hash_hex>"; generation one-liner documented in .env.example).
+    Unconfigured deployments answer an honest 503, never an open door; failures are a
+    uniform 401 with no oracle about which field was wrong. The minted session is the
+    exact owner-role JWT cookie the rest of the platform already trusts and verifies.
+    """
+    secret = os.getenv("TENANT_AUTH_SECRET", "")
+    configured_email = os.getenv("SHELFWISE_LOGIN_EMAIL", "").strip().lower()
+    configured_hash = os.getenv("SHELFWISE_LOGIN_PASSWORD_HASH", "").strip()
+    if not secret or not configured_email or not configured_hash:
+        raise HTTPException(status_code=503, detail="Company login is not configured")
+    if not _login_credentials_valid(
+        email=body.email, password=body.password,
+        configured_email=configured_email, configured_hash=configured_hash,
+    ):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    ctx = TenantContext(
+        tenant_id=default_tenant_context().tenant_id,
+        user_id=configured_email,
+        role=Role.OWNER,
+    )
+    lifetime = _env_positive_int("SHELFWISE_LOGIN_SESSION_SECONDS", 43_200)
+    token = encode_hs256_token(
+        {**ctx.to_dict(), "exp": int(datetime.now(UTC).timestamp()) + lifetime},
+        secret=secret,
+    )
+    response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=lifetime, httponly=True,
+        secure=_cookie_secure_setting(), samesite="strict", path="/",
+    )
+    return response
+
+
+def _login_credentials_valid(
+    *, email: str, password: str, configured_email: str, configured_hash: str
+) -> bool:
+    """Constant-shape verification: hash first, compare both, no early-exit oracle."""
+    import hashlib
+    import hmac as _hmac
+
+    try:
+        scheme, salt_hex, hash_hex = configured_hash.split("$", 2)
+        if scheme != "scrypt":
+            return False
+        expected = bytes.fromhex(hash_hex)
+        computed = hashlib.scrypt(
+            password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=16384, r=8, p=1,
+            dklen=len(expected),
+        )
+    except (ValueError, TypeError):
+        return False
+    email_ok = _hmac.compare_digest(email.strip().lower(), configured_email)
+    password_ok = _hmac.compare_digest(computed, expected)
+    return email_ok and password_ok
+
+
 @app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
 def create_public_demo_session(request: Request) -> JSONResponse:
     """Issue one opaque browser identity for a same-origin public demonstration."""

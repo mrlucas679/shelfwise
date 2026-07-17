@@ -300,3 +300,48 @@ def test_bearer_header_is_used_for_storage_tenant_binding(
     )
 
     assert app_module._tenant_id_from_request(request) == "tenant_a"
+
+
+def test_company_login_mints_the_trusted_owner_session(monkeypatch) -> None:
+    """Real credential verification (stdlib scrypt), honest 503 unconfigured, uniform
+    401 on bad credentials, and the exact owner JWT cookie the platform already trusts."""
+    import hashlib
+    import os as _os
+
+    client = TestClient(app)
+
+    monkeypatch.delenv("SHELFWISE_LOGIN_EMAIL", raising=False)
+    monkeypatch.delenv("SHELFWISE_LOGIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    unconfigured = client.post(
+        "/auth/login", json={"email": "owner@shop.test", "password": "pw"}
+    )
+    assert unconfigured.status_code == 503, "unconfigured login must never be an open door"
+
+    salt = _os.urandom(16)
+    digest = hashlib.scrypt(b"correct-horse", salt=salt, n=16384, r=8, p=1)
+    monkeypatch.setenv("SHELFWISE_LOGIN_EMAIL", "owner@shop.test")
+    monkeypatch.setenv(
+        "SHELFWISE_LOGIN_PASSWORD_HASH", f"scrypt${salt.hex()}${digest.hex()}"
+    )
+
+    wrong_pw = client.post(
+        "/auth/login", json={"email": "owner@shop.test", "password": "wrong"}
+    )
+    wrong_email = client.post(
+        "/auth/login", json={"email": "intruder@shop.test", "password": "correct-horse"}
+    )
+    assert wrong_pw.status_code == 401
+    assert wrong_email.status_code == 401
+    assert wrong_pw.json() == wrong_email.json(), "no oracle about which field was wrong"
+
+    ok = client.post(
+        "/auth/login", json={"email": "Owner@Shop.Test", "password": "correct-horse"}
+    )
+    assert ok.status_code == 200
+    session = ok.json()["session"]
+    assert session["role"] == "owner"
+    assert session["user_id"] == "owner@shop.test"
+    assert "shelfwise_session" in ok.headers.get("set-cookie", "").lower() or ok.cookies, (
+        "login must set the same session cookie the platform verifies"
+    )
