@@ -532,10 +532,19 @@ def test_mined_skills_pipeline_is_wired_to_real_outcome_history(monkeypatch) -> 
         "id": f"{first['id']}_sibling",
         "status": "pending",
     }
-    decision_store.upsert(sibling)
-    approved_sibling = decision_store.approve(sibling["id"])
-    assert approved_sibling is not None
-    learning_store.record_approved_decision(approved_sibling)
+    # Direct store access from the test thread has no ambient tenant; under the real
+    # Postgres backend RLS correctly blinds an unbound session (approve()'s internal
+    # read would see nothing). Bind the same tenant the HTTP calls above carry.
+    from shelfwise_storage import bind_tenant_context, reset_tenant_context
+
+    token = bind_tenant_context("assistant_test_tenant")
+    try:
+        decision_store.upsert(sibling)
+        approved_sibling = decision_store.approve(sibling["id"])
+        assert approved_sibling is not None
+        learning_store.record_approved_decision(approved_sibling)
+    finally:
+        reset_tenant_context(token)
 
     mined = client.get("/mlops/skills/mined", headers=headers)
     assert mined.status_code == 200

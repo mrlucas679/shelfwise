@@ -336,7 +336,11 @@ function configuredBase(): string {
   return (runtimeConfig()?.apiBase ?? env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
 }
 function apiKey(): string {
-  return (runtimeConfig()?.apiKey ?? (import.meta.env as Record<string, string | undefined>).VITE_API_KEY ?? '').trim()
+  // Deliberately runtime-config only (public/shelfwise-config.js, a deployment-owned
+  // file): a VITE_API_KEY build-time fallback would inline the secret into the shipped
+  // JS bundle for every browser to read (SEC-06). Browser auth is the signed httponly
+  // session cookie via /auth/session; x-api-key exists for server-to-server callers.
+  return (runtimeConfig()?.apiKey ?? '').trim()
 }
 function authHeaders(): Record<string, string> {
   const key = apiKey()

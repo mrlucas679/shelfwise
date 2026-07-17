@@ -136,24 +136,26 @@ a fake "duplicate" (`_record_pipeline_event`, tested in `test_event_ingest.py`).
 
 ## 6. Performance / scalability audit
 
-### 6.1 HIGH (roadmap): connection-per-call to Postgres
-`shelfwise_storage.connect()` opens a fresh TCP connection (+ role check + `set_config`) for
-**every store operation**. At the demo/showcase tier this is fine; at sustained concurrency it
-multiplies latency (~1–3ms overhead per op locally, far worse over a network) and collides with
-Postgres `max_connections` (default 100) well before 1K concurrent users.
-**Concrete fix (not yet applied — architectural change, needs its own tested change):** adopt
-`psycopg_pool.ConnectionPool`, with `set_config('app.tenant_id', …)` moved to a
-per-checkout reset (pool `configure`/`reset` hooks), keeping the RLS contract per-checkout
-instead of per-connect. All 50+ `_connect()` call sites already funnel through one function, so
-the change is centralized.
+### 6.1 CLOSED 2026-07-15: connection-per-call to Postgres → pooled
+`shelfwise_storage.connect()` previously opened a fresh TCP connection (+ role check +
+`set_config`) for every store operation — a latency multiplier and a `max_connections`
+collision well before 1K concurrent users. **Implemented as specified:**
+`psycopg_pool.ConnectionPool` behind the same `connect()` seam (all 50+ call sites funnel
+through it), tenant re-bound session-level per checkout and cleared at check-in so pooling
+never weakens RLS, superuser refusal per physical connection, `SHELFWISE_DB_POOL[_MIN/_MAX]`
+sizing, legacy per-call path behind `SHELFWISE_DB_POOL=false` for debugging. Proven: all
+Postgres contract tests + the full production-topology probe green pooled, and a
+400-request/20-thread burst held server connections at exactly pool max (10) with zero errors
+(see risk-matrix row 5).
 
 ### 6.2 Readiness by tier
 - **100 users:** ready (single backend container, worker enabled, verified topology).
-- **1K users:** needs §6.1 (connection pool) and a second uvicorn worker/replica; Redis and
-  Postgres themselves are nowhere near limits at this tier.
+- **1K users:** ready at the data layer (pooled connections landed); add a second uvicorn
+  worker/replica; Redis and Postgres themselves are nowhere near limits at this tier.
 - **10K users:** needs horizontal backend replicas (stateless — JWT + shared Postgres/Redis
-  make this safe; the worker consumer-group already supports multiple consumers, verified by
-  the reclaim probe), plus Postgres connection budgeting (pgbouncer or pool sizing).
+  make this safe; per-process worker consumer identities + consumer-group reclaim make
+  multi-replica draining safe, verified by the reclaim probe), plus Postgres connection
+  budgeting (pool sizing per replica below max_connections, or pgbouncer).
 - **100K–1M users:** out of scope of any current claim. Requires: partitioned event streams
   (per-tenant streams already exist — sharding is natural), read replicas, moving hot decision
   lists behind a cache with invalidation, and a real load test. No claim of readiness is made.
