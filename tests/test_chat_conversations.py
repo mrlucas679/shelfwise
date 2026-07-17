@@ -32,19 +32,26 @@ def _enable_jwt(monkeypatch) -> None:
 
 def test_chat_returns_stable_conversation_and_message_identity(monkeypatch) -> None:
     _enable_jwt(monkeypatch)
+    # Per-run ids: against a persistent shared Postgres, a fixed conversation/message id
+    # from a prior run is CORRECTLY replayed (Replayed: true is the durable-idempotency
+    # feature working across restarts) - rerun-safety requires fresh identity.
+    from uuid import uuid4
+
+    conversation_id = f"conv_a_{uuid4().hex[:10]}"
+    message_id = f"msg_a_{uuid4().hex[:10]}"
     response = TestClient(app).post(
         "/chat",
         headers=_headers(tenant_id="tenant_a", user_id="user_a"),
         json={
             "question": "What needs attention?",
-            "conversation_id": "conv_a",
-            "message_id": "msg_a",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["X-ShelfWise-Conversation-ID"] == "conv_a"
-    assert response.headers["X-ShelfWise-Message-ID"] == "msg_a"
+    assert response.headers["X-ShelfWise-Conversation-ID"] == conversation_id
+    assert response.headers["X-ShelfWise-Message-ID"] == message_id
     assert response.headers["X-ShelfWise-Replayed"] == "false"
 
 
@@ -52,10 +59,13 @@ def test_duplicate_message_is_idempotent_under_concurrency(monkeypatch) -> None:
     _enable_jwt(monkeypatch)
     client = TestClient(app)
     headers = _headers(tenant_id="tenant_a", user_id="user_a")
+    from uuid import uuid4
+
+    conversation_id = f"conv_duplicate_{uuid4().hex[:10]}"
     payload = {
         "question": "What needs attention?",
-        "conversation_id": "conv_duplicate",
-        "message_id": "msg_duplicate",
+        "conversation_id": conversation_id,
+        "message_id": f"msg_duplicate_{uuid4().hex[:10]}",
     }
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -66,7 +76,7 @@ def test_duplicate_message_is_idempotent_under_concurrency(monkeypatch) -> None:
     assert {response.status_code for response in responses} == {200}
     assert len({response.text for response in responses}) == 1
     assert sum(response.headers["X-ShelfWise-Replayed"] == "false" for response in responses) == 1
-    conversation = client.get("/chat/conversations/conv_duplicate", headers=headers).json()[
+    conversation = client.get(f"/chat/conversations/{conversation_id}", headers=headers).json()[
         "conversation"
     ]
     assert len(conversation["messages"]) == 2
