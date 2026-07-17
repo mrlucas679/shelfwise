@@ -1078,7 +1078,7 @@
       ],
       "sources": [
         {
-          "line": 3041,
+          "line": 3120,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -5133,7 +5133,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:0aad9d04c622d9d8287bdf6c2188d0473627a4ba93ae3bc660c98125104fb271",
+  "fingerprint": "sha256:206385dc1456d8eb8a1177749fb4eca1bd93bdf0d826f3657b2d566e505f2601",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }
