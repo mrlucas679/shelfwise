@@ -1229,6 +1229,7 @@ const OPERATION_READ_ENDPOINTS = [
 
 const GATED_ENDPOINTS = [
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
+  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/answer/done; deltas only from a live provider).' },
   { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
   { label: 'Chat stream', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },

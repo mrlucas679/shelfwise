@@ -185,3 +185,93 @@ def test_chat_store_bounds_persisted_history() -> None:
     assert conversation is not None
     assert len(conversation["messages"]) == 6
     assert conversation["messages"][0]["id"] == "msg_7"
+
+
+def test_chat_stream_emits_a_truthful_lifecycle_envelope(monkeypatch) -> None:
+    """SSE streaming, honestly: accepted -> answer (the validated reply, once it truly
+    exists) -> done (the same receipts POST /chat returns). No fake token dribble."""
+    from uuid import uuid4
+
+    _enable_jwt(monkeypatch)
+    client = TestClient(app)
+    conversation_id = f"conv_stream_{uuid4().hex[:10]}"
+
+    response = client.post(
+        "/chat/stream",
+        headers=_headers(tenant_id="tenant_a", user_id="user_a"),
+        json={
+            "question": "What needs attention?",
+            "conversation_id": conversation_id,
+            "message_id": f"msg_stream_{uuid4().hex[:10]}",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    text = response.text
+    assert "event: accepted" in text
+    assert "event: answer" in text
+    assert "event: done" in text
+    assert '"correlation_id"' in text
+    assert "event: delta" not in text, (
+        "no live endpoint is configured, so no token delta may be fabricated"
+    )
+
+    # Idempotent duplicate must be announced as a replay, not a fresh answer.
+    replay = client.post(
+        "/chat/stream",
+        headers=_headers(tenant_id="tenant_a", user_id="user_a"),
+        json={
+            "question": "What needs attention?",
+            "conversation_id": conversation_id,
+            "message_id": text.split('"message_id": "')[1].split('"')[0],
+        },
+    )
+    assert "event: replayed" in replay.text
+
+
+def test_stream_chat_deltas_parses_real_wire_chunks_and_fails_closed_offline(
+    monkeypatch,
+) -> None:
+    """The token-delta parser consumes genuine OpenAI-compatible SSE chunks and refuses
+    to run against an offline provider - streaming never fabricates generation."""
+    import io
+
+    import pytest as _pytest
+
+    from shelfwise_inference.client import (
+        InferenceError,
+        OpenAICompatibleInferenceClient,
+        stream_chat_deltas,
+    )
+
+    offline = OpenAICompatibleInferenceClient()
+    with _pytest.raises(InferenceError, match="live endpoint"):
+        list(stream_chat_deltas(offline, agent="chat", system="s", user="u"))
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://vllm.example/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "gemma-test")
+    wire = io.BytesIO(
+        b'data: {"choices":[{"delta":{"content":"Stock"}}]}\n\n'
+        b": keep-alive comment\n\n"
+        b'data: {"choices":[{"delta":{"content":" is 12 units"}}]}\n\n'
+        b"data: [DONE]\n\n"
+        b'data: {"choices":[{"delta":{"content":"NEVER-EMITTED"}}]}\n\n'
+    )
+
+    class _Resp:
+        def __enter__(self):
+            return wire
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda request, timeout=None: _Resp()
+    )
+    live = OpenAICompatibleInferenceClient()
+    deltas = list(stream_chat_deltas(live, agent="chat", system="s", user="u"))
+    assert deltas == ["Stock", " is 12 units"], (
+        "every yielded delta must be a real wire chunk, ended by [DONE]"
+    )

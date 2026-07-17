@@ -491,3 +491,86 @@ def _truncate(text: str) -> str:
     if len(text) <= _MAX_RECORDED_CHARS:
         return text
     return f"...[truncated {len(text) - _MAX_RECORDED_CHARS} chars]...{text[-_MAX_RECORDED_CHARS:]}"
+
+
+def iter_sse_data_lines(raw_lines: Any) -> Any:
+    """Parse OpenAI-compatible SSE: yield each `data:` payload string until [DONE].
+
+    Transport-shape only - no fabrication: every yielded string came off the wire.
+    Blank lines and comments are skipped per the SSE spec; a `[DONE]` sentinel ends
+    the stream.
+    """
+    for raw in raw_lines:
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        line = line.strip()
+        if not line or line.startswith(":"):
+            continue
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if payload == "[DONE]":
+            return
+        yield payload
+
+
+def stream_chat_deltas(
+    client: OpenAICompatibleInferenceClient,
+    *,
+    agent: str,
+    system: str,
+    user: str,
+    temperature: float = 0.1,
+    max_tokens: int = 400,
+    timeout_seconds: float | None = None,
+) -> Any:
+    """Yield real token deltas from a live OpenAI-compatible endpoint (stream=true).
+
+    Honest streaming, not the removed chunk-the-answer fake: every delta yielded here
+    arrived as a wire chunk from the provider. Offline providers raise InferenceError -
+    callers fall back to the non-streaming path and say so, never dribble a finished
+    answer pretending it is being generated. The assembled text is returned to the
+    caller via StopIteration value for post-stream validation.
+    """
+    config = client.config
+    if config.provider.value == "offline" or not config.api_key_present:
+        raise InferenceError("token streaming requires a configured live endpoint")
+    payload = {
+        "model": config.model_for_agent(agent),
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    request = urllib.request.Request(
+        _chat_completions_url(config.base_url_for_agent(agent)),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {config.api_key_for_agent(agent)}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    effective_timeout = (
+        timeout_seconds if timeout_seconds is not None else config.timeout_seconds
+    )
+    assembled: list[str] = []
+    try:
+        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+            for data in iter_sse_data_lines(response):
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError as exc:
+                    raise InferenceError("provider sent a malformed stream chunk") from exc
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = (choices[0].get("delta") or {}).get("content")
+                if isinstance(delta, str) and delta:
+                    assembled.append(delta)
+                    yield delta
+    except urllib.error.URLError as exc:
+        raise InferenceError("Inference provider request failed") from exc
+    return "".join(assembled)

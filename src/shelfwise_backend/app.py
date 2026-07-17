@@ -1147,6 +1147,57 @@ def get_chat_conversation(
     return {"conversation": conversation}
 
 
+@app.post("/chat/stream", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
+def chat_stream(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> Any:
+    """SSE chat with a truthful lifecycle envelope - never the chunk-the-answer fake.
+
+    Events say exactly what happened: `accepted` (request queued into the real
+    pipeline), `answer` (the complete, grounding-validated reply - one event, because
+    that is when a validated answer actually exists), `done` (the same metadata
+    receipts POST /chat returns), or `replayed` for an idempotent duplicate. Token
+    deltas from a live endpoint slot into this same envelope as `delta` events via
+    `shelfwise_inference.stream_chat_deltas` once the answer turn streams from a live
+    provider; no event is ever emitted for generation that did not occur.
+    """
+    from fastapi.responses import StreamingResponse
+
+    def sse(event: str, payload: dict[str, Any]) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+    def events() -> Any:
+        conversation_id = body.conversation_id or f"conv_{uuid4().hex}"
+        message_id = body.message_id or f"msg_{uuid4().hex}"
+        yield sse(
+            "accepted",
+            {"conversation_id": conversation_id, "message_id": message_id},
+        )
+        inner = chat(
+            ChatBody(
+                question=body.question,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                data_domain=body.data_domain,
+                live_required=body.live_required,
+            ),
+            ctx,
+        )
+        answer_text = bytes(inner.body).decode("utf-8")
+        replayed = inner.headers.get("X-ShelfWise-Replayed", "false") == "true"
+        yield sse("replayed" if replayed else "answer", {"text": answer_text})
+        yield sse(
+            "done",
+            {
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "correlation_id": inner.headers.get("X-ShelfWise-Correlation-ID", ""),
+                "answer_source": inner.headers.get("X-ShelfWise-Answer-Source", ""),
+                "model": inner.headers.get("X-ShelfWise-Model", ""),
+            },
+        )
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 @app.post("/chat", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
 def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> PlainTextResponse:
     conversation_id = body.conversation_id or f"conv_{uuid4().hex}"
