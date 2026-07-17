@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-17 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **734 passed / 14 env-gated skips** locally;
+Branch: `developers` · Gates at time of writing: **736 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -113,6 +113,11 @@ not an oversight).
   (decision-store gap found and fixed 2026-07-15); live-verified isolation.
 - ✅ Connection pooling (production default, per-checkout RLS rebind, `SHELFWISE_DB_POOL*`).
 - ✅ Idempotent additive migrations; compose migrate job; double-apply verified.
+- ✅ Retention + BRIN time-series indexes (landed 2026-07-17): opt-in age-floored
+  simulation-history retention (`RETENTION_ENABLED`, 7-day floor, world_simulation domain
+  ONLY - operational rows and pending decisions survive any age, scope proven on real
+  Postgres), refusing the in-memory backend honestly; BRIN indexes on the three
+  append-only time-series tables, provisioned from the real schema.
 - 🗺️ Table partitioning / read replicas: scale work beyond the 10K-user target on record.
 
 ## 5. Connectors and integrations — ✅

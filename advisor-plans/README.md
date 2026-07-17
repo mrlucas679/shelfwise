@@ -16,13 +16,23 @@ whole application.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |---|---|---|---|---|---|
-| 001 | Make data domain a first-class event and twin boundary | P0 | L | - | TODO |
-| 002 | Route operational workloads to operational facts | P0 | L | 001 | TODO |
-| 003 | Isolate decisions, HITL, learning, and operational ledgers | P0 | L | 001, 002 | TODO |
-| 004 | Make live-twin observations exact and queryable | P1 | L | 001 | TODO |
-| 005 | Prove domain integrity in the UI, telemetry, and deployment | P1 | L | 001-004 | TODO |
+| 001 | Make data domain a first-class event and twin boundary | P0 | L | - | DONE |
+| 002 | Route operational workloads to operational facts | P0 | L | 001 | DONE |
+| 003 | Isolate decisions, HITL, learning, and operational ledgers | P0 | L | 001, 002 | DONE |
+| 004 | Make live-twin observations exact and queryable | P1 | L | 001 | DONE |
+| 005 | Prove domain integrity in the UI, telemetry, and deployment | P1 | L | 001-004 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
+
+> **2026-07-17 verification:** all five plans are implemented and tested in the running
+> app — `data_domain` is a first-class column/boundary on every event, store, and RLS
+> policy; operational workloads route through `OperationalFactsProvider` with
+> fail-closed `MissingOperationalFacts`; decisions/HITL/learning/ledgers are
+> domain-scoped end to end; twin observations are exact, idempotent, and queryable via
+> the `/twin/*` read model (now rendered in the operations workspace); and domain
+> integrity is enforced in the UI data-source toggle, chat domain pinning, telemetry
+> receipts, and the production compose defaults. Evidence: `IMPLEMENTATION_STATUS.md`
+> and the domain-isolation/tenancy/twin test suites.
 
 ## Dependency Notes
 

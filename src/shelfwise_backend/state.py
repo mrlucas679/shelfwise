@@ -44,6 +44,7 @@ from .event_store import create_event_store
 from .governed_execution import FidelityRevalidationService, build_capability_registry
 from .open_orders import create_open_order_store
 from .operational_facts import OperationalFactsProvider
+from .retention import RetentionService
 from .tools.mcp_surface import AuditLog
 from .trace import TraceRegistry
 from .worker import CascadeWorker, WorkerLoopService, create_journal
@@ -119,6 +120,7 @@ plan_runner = _PlanRunner(capability_registry, journal, _publish_plan_progress)
 fidelity_revalidation_service = FidelityRevalidationService(
     runner=plan_runner, twin_service=twin_service, writeback_sink=writeback_sink
 )
+retention_service = RetentionService()
 
 
 def _seed_platform_skills() -> None:

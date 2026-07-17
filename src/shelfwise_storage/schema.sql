@@ -116,6 +116,7 @@ create table if not exists shelfwise_events (
 -- only for this one-time backfill; request-time policy uses Event.data_domain.
 alter table shelfwise_events add column if not exists data_domain text;
 alter table shelfwise_events add column if not exists published boolean not null default false;
+
 update shelfwise_events
 set data_domain = case
     when payload->>'data_domain' in
@@ -855,3 +856,15 @@ create policy shelfwise_twin_scenario_branches_tenant_isolation
 on shelfwise_twin_scenario_branches
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
+
+-- BRIN indexes for append-only time-series ("Things that needs to be implemented" item 7):
+-- physically-correlated timestamps make BRIN the right shape - block-range summaries stay
+-- tiny at millions of rows where a btree would not, and time-window scans (retention,
+-- soak-report queries, replay bounds) prune whole ranges. Placed at end of file so every
+-- indexed table already exists.
+create index if not exists brin_shelfwise_events_received_at
+on shelfwise_events using brin (received_at);
+create index if not exists brin_shelfwise_inbound_records_ingested_at
+on shelfwise_inbound_records using brin (ingested_at);
+create index if not exists brin_cascade_runs_started_at
+on cascade_runs using brin (started_at);

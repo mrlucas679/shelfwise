@@ -139,6 +139,7 @@ from .state import (
     plan_runner,
     product_catalog_store,
     prompt_registry,
+    retention_service,
     skill_registry,
     tenant_fact_store,
     tenant_profile_store,
@@ -299,6 +300,8 @@ app.router.add_event_handler("startup", twin_projection_service.start)
 app.router.add_event_handler("shutdown", twin_projection_service.stop)
 app.router.add_event_handler("startup", fidelity_revalidation_service.start)
 app.router.add_event_handler("shutdown", fidelity_revalidation_service.stop)
+app.router.add_event_handler("startup", retention_service.start)
+app.router.add_event_handler("shutdown", retention_service.stop)
 
 
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
@@ -664,6 +667,7 @@ def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
             "cold_chain_feed": cold_chain_feed.status(),
             "twin_projection_worker": twin_projection_service.status(),
             "fidelity_revalidation": fidelity_revalidation_service.status(),
+            "retention": retention_service.status(),
             "auth_mode": _auth_mode(),
             "tenant_auth_secret_configured": bool(os.getenv("TENANT_AUTH_SECRET", "")),
             "tenant_scoped_tables": sorted(TENANT_SCOPED_TABLES),
@@ -2147,8 +2151,11 @@ async def execute_plan(
 
 @app.get("/worker/schedules")
 def list_schedules() -> dict[str, object]:
-    """Recurring governed schedules and their receipts (fidelity revalidation today)."""
-    return {"fidelity_revalidation": fidelity_revalidation_service.status()}
+    """Recurring governed schedules and their receipts."""
+    return {
+        "fidelity_revalidation": fidelity_revalidation_service.status(),
+        "retention": retention_service.status(),
+    }
 
 
 @app.get("/worker/runs")
