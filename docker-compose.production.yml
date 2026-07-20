@@ -75,6 +75,8 @@ services:
     environment:
       APP_ENV: production
       SHELFWISE_AUTH_MODE: jwt
+      # Upload/model-invocation routes remain off unless explicitly enabled behind JWT.
+      MULTIMODAL_ENABLED: ${MULTIMODAL_ENABLED:-false}
       SHELFWISE_PUBLIC_DEMO_SESSION: "true"
       SHELFWISE_CHAT_DATA_DOMAIN: ${SHELFWISE_CHAT_DATA_DOMAIN:-world_simulation}
       SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app as backend_app
-from shelfwise_backend.deps import SESSION_COOKIE
+from shelfwise_backend.deps import SESSION_COOKIE, write_limiter
 from shelfwise_backend.tenant import encode_hs256_token
 from shelfwise_contracts import SourceRef
 from shelfwise_multimodal import (
@@ -395,11 +395,76 @@ def test_scan_confirmation_rejects_non_scanner_and_simulated_events(monkeypatch)
 def test_scan_image_route_is_keyed_when_configured(monkeypatch):
     client = TestClient(_scan_app(monkeypatch, enabled=False, api_key="k"))
 
-    assert client.post(
-        "/scan/image",
-        files={"file": ("shelf.jpg", b"\xff\xd8\xfffake", "image/jpeg")},
-    ).status_code == 401
+    assert (
+        client.post(
+            "/scan/image",
+            files={"file": ("shelf.jpg", b"\xff\xd8\xfffake", "image/jpeg")},
+        ).status_code
+        == 401
+    )
     assert client.post("/scan/barcode", json={"code": "4011"}).status_code == 401
+
+
+def test_enabled_backend_multimodal_routes_require_jwt_and_share_write_limit(monkeypatch):
+    """Mounted upload routes must not bypass the backend auth/rate-limit perimeter."""
+    secret = "multimodal-route-test-secret"
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", secret)
+    monkeypatch.setenv("MULTIMODAL_ENABLED", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+
+    async def fake_transcribe(audio, **kwargs):
+        _ = audio, kwargs
+        return _transcript("check the yoghurt")
+
+    async def fake_scan_image(image, **kwargs):
+        _ = image, kwargs
+        return contracts.VisualEvidence(
+            image_ref=SourceRef.dataset("image", "shelf.jpg"),
+            confidence=0.5,
+        )
+
+    monkeypatch.setattr(router, "transcribe", fake_transcribe)
+    monkeypatch.setattr(router, "scan_image", fake_scan_image)
+    manager = {
+        "Authorization": "Bearer "
+        + encode_hs256_token(
+            {"tenant_id": "tenant_mm", "user_id": "manager_mm", "role": "manager"},
+            secret=secret,
+        )
+    }
+    analyst = {
+        "Authorization": "Bearer "
+        + encode_hs256_token(
+            {"tenant_id": "tenant_mm", "user_id": "analyst_mm", "role": "analyst"},
+            secret=secret,
+        )
+    }
+    client = TestClient(backend_app)
+    audio = {"file": ("voice.webm", b"\x1a\x45\xdf\xa3frames", "audio/webm")}
+    try:
+        write_limiter.configure(capacity=2, refill_per_s=0, max_keys=1024)
+        assert client.post("/voice/in", files=audio).status_code == 401
+        # The anonymous rejection reaches the shared limiter before JWT validation, so
+        # reset the test bucket before asserting the authenticated caller's budget.
+        write_limiter.clear()
+        assert client.post("/voice/in", files=audio, headers=manager).status_code == 200
+        assert client.post("/voice/in", files=audio, headers=manager).status_code == 200
+        assert client.post("/voice/in", files=audio, headers=manager).status_code == 429
+
+        write_limiter.configure(capacity=8, refill_per_s=0, max_keys=1024)
+        image = {"file": ("shelf.jpg", b"\xff\xd8\xffimage", "image/jpeg")}
+        assert client.post("/scan/image", files=image, headers=manager).status_code == 200
+        assert (
+            client.post(
+                "/scan/barcode",
+                json={"code": "SKU-4011", "location": "store_12"},
+                headers=analyst,
+            ).status_code
+            == 403
+        )
+    finally:
+        write_limiter.configure(capacity=240, refill_per_s=8.0, max_keys=1024)
 
 
 def test_money_is_spoken_like_a_person():

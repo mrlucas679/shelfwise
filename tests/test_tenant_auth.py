@@ -232,6 +232,31 @@ def test_jwt_auth_mode_assigns_demo_outputs_to_authenticated_tenant(
     assert rejection.json()["decision"]["id"] in decision_ids
 
 
+def test_jwt_auth_mode_blocks_analysts_from_scenario_mutations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario drills create events and decisions, so they require an ingest-capable role."""
+    client = TestClient(app)
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    analyst = {"Authorization": f"Bearer {_token('analyst')}"}
+    manager = {"Authorization": f"Bearer {_token('manager')}"}
+
+    unauthenticated = client.post("/scenarios/golden")
+    blocked = client.post("/scenarios/golden", headers=analyst)
+    allowed = client.post("/scenarios/golden", headers=manager)
+    decisions_before_preview = len(app_module.decision_store.list())
+    preview = client.get("/scenarios/golden")
+
+    assert unauthenticated.status_code == 401
+    assert blocked.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json()["decision"]["tenant_id"] == "sa_retail_demo"
+    assert preview.status_code == 200
+    assert "decision" in preview.json()
+    assert len(app_module.decision_store.list()) == decisions_before_preview
+
+
 def test_public_demo_sessions_create_stable_isolated_browser_users(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
