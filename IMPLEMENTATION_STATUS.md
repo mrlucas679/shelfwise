@@ -4,8 +4,8 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-17 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **736 passed / 15 env-gated skips** locally;
+Date: 2026-07-20 (supersedes the 2026-07-14 continuation log; that history lives in git)
+Branch: `developers` · Gates at time of writing: **738 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -17,6 +17,21 @@ real-infra job); ruff clean; frontend `tsc --noEmit` clean; capability manifest
 behind.** Deployment infrastructure still to be purchased (a GPU rental, GPU-hours,
 cameras) is inventoried separately in the final appendix - procurement is not an
 application feature, and classifying it as one misstates both.
+
+## 2026-07-20 readiness verification update
+
+- The full local backend regression suite passed: **738 passed, 15 environment-gated skips**;
+  Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
+- GitHub Actions CI for `35a6329` passed its real Postgres/Redis, browser E2E, production-topology,
+  deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
+- A fresh deterministic fleet-scale run processed **500,000 of 500,000 requested rows** in
+  **22,928 ms** (**21,807.4 rows/s**), produced 41,442 threshold candidates and a bounded top-200
+  queue with zero LLM calls. The reproducibility receipt is
+  [`reports/fleet-scale-shakedown-20260720.json`](reports/fleet-scale-shakedown-20260720.json).
+- The external acceptance still required tomorrow is deliberately not relabeled as local proof:
+  the MI300X bootstrap and public-HTTPS live-model run require the rented droplet, its narrow
+  application-host CIDR, and real credentials. `DROPLET_BOOTSTRAP.md` and
+  `docs/mi300x-recreate-runbook.md` are the authoritative operator sequence.
 
 Legend: ✅ implemented and tested · 🗺️ deliberately sequenced roadmap (recorded decision,
 not an oversight).

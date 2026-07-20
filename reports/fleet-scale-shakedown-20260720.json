@@ -1,0 +1,2427 @@
+{
+  "chunk_size": 1000,
+  "elapsed_ms": 22928,
+  "llm_calls": 0,
+  "locations": 40,
+  "queue_reduction_ratio": 0.0004,
+  "requested_rows": 500000,
+  "requested_rows_fully_processed": true,
+  "rows_per_second": 21807.4,
+  "rows_shortfall": 0,
+  "schema_version": "fleet-scale-v1",
+  "score": {
+    "candidates_crossing_threshold": 41442,
+    "chunks_processed": 500,
+    "rows_processed": 500000,
+    "top_candidates": [
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_001",
+        "lot_id": "LOT-P00448921-01",
+        "risk": "1.00",
+        "sku": "P00448921",
+        "zar_at_risk": {
+          "amount": "58717.44",
+          "currency": "ZAR",
+          "minor_units": 5871744
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00087745-01",
+        "risk": "1.00",
+        "sku": "P00087745",
+        "zar_at_risk": {
+          "amount": "50834.26",
+          "currency": "ZAR",
+          "minor_units": 5083426
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00270178-01",
+        "risk": "1.00",
+        "sku": "P00270178",
+        "zar_at_risk": {
+          "amount": "50754.28",
+          "currency": "ZAR",
+          "minor_units": 5075428
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00103261-01",
+        "risk": "1.00",
+        "sku": "P00103261",
+        "zar_at_risk": {
+          "amount": "46940.99",
+          "currency": "ZAR",
+          "minor_units": 4694099
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00375562-01",
+        "risk": "1.00",
+        "sku": "P00375562",
+        "zar_at_risk": {
+          "amount": "43203.33",
+          "currency": "ZAR",
+          "minor_units": 4320333
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00147304-01",
+        "risk": "1.00",
+        "sku": "P00147304",
+        "zar_at_risk": {
+          "amount": "41869.52",
+          "currency": "ZAR",
+          "minor_units": 4186952
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00043450-01",
+        "risk": "1.00",
+        "sku": "P00043450",
+        "zar_at_risk": {
+          "amount": "38768.04",
+          "currency": "ZAR",
+          "minor_units": 3876804
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_037",
+        "lot_id": "LOT-P00043717-01",
+        "risk": "1.00",
+        "sku": "P00043717",
+        "zar_at_risk": {
+          "amount": "38364.92",
+          "currency": "ZAR",
+          "minor_units": 3836492
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00059704-01",
+        "risk": "1.00",
+        "sku": "P00059704",
+        "zar_at_risk": {
+          "amount": "34274.22",
+          "currency": "ZAR",
+          "minor_units": 3427422
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00311967-01",
+        "risk": "1.00",
+        "sku": "P00311967",
+        "zar_at_risk": {
+          "amount": "33604.68",
+          "currency": "ZAR",
+          "minor_units": 3360468
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_014",
+        "lot_id": "LOT-P00403414-01",
+        "risk": "1.00",
+        "sku": "P00403414",
+        "zar_at_risk": {
+          "amount": "32931.96",
+          "currency": "ZAR",
+          "minor_units": 3293196
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_003",
+        "lot_id": "LOT-P00117883-01",
+        "risk": "1.00",
+        "sku": "P00117883",
+        "zar_at_risk": {
+          "amount": "32803.46",
+          "currency": "ZAR",
+          "minor_units": 3280346
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00135141-01",
+        "risk": "1.00",
+        "sku": "P00135141",
+        "zar_at_risk": {
+          "amount": "32326.29",
+          "currency": "ZAR",
+          "minor_units": 3232629
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_020",
+        "lot_id": "LOT-P00399100-01",
+        "risk": "1.00",
+        "sku": "P00399100",
+        "zar_at_risk": {
+          "amount": "31759.04",
+          "currency": "ZAR",
+          "minor_units": 3175904
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00180459-01",
+        "risk": "1.00",
+        "sku": "P00180459",
+        "zar_at_risk": {
+          "amount": "31528.11",
+          "currency": "ZAR",
+          "minor_units": 3152811
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_038",
+        "lot_id": "LOT-P00071158-01",
+        "risk": "1.00",
+        "sku": "P00071158",
+        "zar_at_risk": {
+          "amount": "31488.56",
+          "currency": "ZAR",
+          "minor_units": 3148856
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_031",
+        "lot_id": "LOT-P00144511-01",
+        "risk": "1.00",
+        "sku": "P00144511",
+        "zar_at_risk": {
+          "amount": "30007.08",
+          "currency": "ZAR",
+          "minor_units": 3000708
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00029065-01",
+        "risk": "1.00",
+        "sku": "P00029065",
+        "zar_at_risk": {
+          "amount": "29592.36",
+          "currency": "ZAR",
+          "minor_units": 2959236
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00193938-01",
+        "risk": "1.00",
+        "sku": "P00193938",
+        "zar_at_risk": {
+          "amount": "29240.07",
+          "currency": "ZAR",
+          "minor_units": 2924007
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_016",
+        "lot_id": "LOT-P00267496-01",
+        "risk": "1.00",
+        "sku": "P00267496",
+        "zar_at_risk": {
+          "amount": "29078.22",
+          "currency": "ZAR",
+          "minor_units": 2907822
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00028515-01",
+        "risk": "1.00",
+        "sku": "P00028515",
+        "zar_at_risk": {
+          "amount": "28231.88",
+          "currency": "ZAR",
+          "minor_units": 2823188
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00177250-01",
+        "risk": "1.00",
+        "sku": "P00177250",
+        "zar_at_risk": {
+          "amount": "28031.94",
+          "currency": "ZAR",
+          "minor_units": 2803194
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_014",
+        "lot_id": "LOT-P00225214-01",
+        "risk": "1.00",
+        "sku": "P00225214",
+        "zar_at_risk": {
+          "amount": "26131.84",
+          "currency": "ZAR",
+          "minor_units": 2613184
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00391770-01",
+        "risk": "1.00",
+        "sku": "P00391770",
+        "zar_at_risk": {
+          "amount": "25856.15",
+          "currency": "ZAR",
+          "minor_units": 2585615
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00284626-01",
+        "risk": "1.00",
+        "sku": "P00284626",
+        "zar_at_risk": {
+          "amount": "25388.16",
+          "currency": "ZAR",
+          "minor_units": 2538816
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00155280-01",
+        "risk": "1.00",
+        "sku": "P00155280",
+        "zar_at_risk": {
+          "amount": "24805.66",
+          "currency": "ZAR",
+          "minor_units": 2480566
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_012",
+        "lot_id": "LOT-P00087412-01",
+        "risk": "1.00",
+        "sku": "P00087412",
+        "zar_at_risk": {
+          "amount": "24487.19",
+          "currency": "ZAR",
+          "minor_units": 2448719
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_009",
+        "lot_id": "LOT-P00286209-01",
+        "risk": "1.00",
+        "sku": "P00286209",
+        "zar_at_risk": {
+          "amount": "24344.49",
+          "currency": "ZAR",
+          "minor_units": 2434449
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_020",
+        "lot_id": "LOT-P00192420-01",
+        "risk": "1.00",
+        "sku": "P00192420",
+        "zar_at_risk": {
+          "amount": "23978.88",
+          "currency": "ZAR",
+          "minor_units": 2397888
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00419832-01",
+        "risk": "1.00",
+        "sku": "P00419832",
+        "zar_at_risk": {
+          "amount": "23566.23",
+          "currency": "ZAR",
+          "minor_units": 2356623
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_022",
+        "lot_id": "LOT-P00224062-01",
+        "risk": "1.00",
+        "sku": "P00224062",
+        "zar_at_risk": {
+          "amount": "23497.00",
+          "currency": "ZAR",
+          "minor_units": 2349700
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00085819-01",
+        "risk": "1.00",
+        "sku": "P00085819",
+        "zar_at_risk": {
+          "amount": "23305.68",
+          "currency": "ZAR",
+          "minor_units": 2330568
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_036",
+        "lot_id": "LOT-P00239476-01",
+        "risk": "1.00",
+        "sku": "P00239476",
+        "zar_at_risk": {
+          "amount": "23301.75",
+          "currency": "ZAR",
+          "minor_units": 2330175
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00053680-01",
+        "risk": "1.00",
+        "sku": "P00053680",
+        "zar_at_risk": {
+          "amount": "22993.73",
+          "currency": "ZAR",
+          "minor_units": 2299373
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_009",
+        "lot_id": "LOT-P00225849-01",
+        "risk": "1.00",
+        "sku": "P00225849",
+        "zar_at_risk": {
+          "amount": "22693.29",
+          "currency": "ZAR",
+          "minor_units": 2269329
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00019085-01",
+        "risk": "1.00",
+        "sku": "P00019085",
+        "zar_at_risk": {
+          "amount": "22644.56",
+          "currency": "ZAR",
+          "minor_units": 2264456
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00134352-01",
+        "risk": "1.00",
+        "sku": "P00134352",
+        "zar_at_risk": {
+          "amount": "22387.81",
+          "currency": "ZAR",
+          "minor_units": 2238781
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00373045-01",
+        "risk": "1.00",
+        "sku": "P00373045",
+        "zar_at_risk": {
+          "amount": "22221.54",
+          "currency": "ZAR",
+          "minor_units": 2222154
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00222259-01",
+        "risk": "1.00",
+        "sku": "P00222259",
+        "zar_at_risk": {
+          "amount": "21839.04",
+          "currency": "ZAR",
+          "minor_units": 2183904
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00330744-01",
+        "risk": "1.00",
+        "sku": "P00330744",
+        "zar_at_risk": {
+          "amount": "21811.76",
+          "currency": "ZAR",
+          "minor_units": 2181176
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00240384-01",
+        "risk": "1.00",
+        "sku": "P00240384",
+        "zar_at_risk": {
+          "amount": "21647.99",
+          "currency": "ZAR",
+          "minor_units": 2164799
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00479392-01",
+        "risk": "1.00",
+        "sku": "P00479392",
+        "zar_at_risk": {
+          "amount": "21569.26",
+          "currency": "ZAR",
+          "minor_units": 2156926
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00102024-01",
+        "risk": "1.00",
+        "sku": "P00102024",
+        "zar_at_risk": {
+          "amount": "21360.81",
+          "currency": "ZAR",
+          "minor_units": 2136081
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00083887-01",
+        "risk": "1.00",
+        "sku": "P00083887",
+        "zar_at_risk": {
+          "amount": "21277.78",
+          "currency": "ZAR",
+          "minor_units": 2127778
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00101464-01",
+        "risk": "1.00",
+        "sku": "P00101464",
+        "zar_at_risk": {
+          "amount": "21156.57",
+          "currency": "ZAR",
+          "minor_units": 2115657
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_037",
+        "lot_id": "LOT-P00495877-01",
+        "risk": "1.00",
+        "sku": "P00495877",
+        "zar_at_risk": {
+          "amount": "20772.12",
+          "currency": "ZAR",
+          "minor_units": 2077212
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00026026-01",
+        "risk": "1.00",
+        "sku": "P00026026",
+        "zar_at_risk": {
+          "amount": "20710.38",
+          "currency": "ZAR",
+          "minor_units": 2071038
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00359485-01",
+        "risk": "1.00",
+        "sku": "P00359485",
+        "zar_at_risk": {
+          "amount": "20489.86",
+          "currency": "ZAR",
+          "minor_units": 2048986
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00236442-01",
+        "risk": "1.00",
+        "sku": "P00236442",
+        "zar_at_risk": {
+          "amount": "20058.88",
+          "currency": "ZAR",
+          "minor_units": 2005888
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00435402-01",
+        "risk": "1.00",
+        "sku": "P00435402",
+        "zar_at_risk": {
+          "amount": "19937.12",
+          "currency": "ZAR",
+          "minor_units": 1993712
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00200085-01",
+        "risk": "1.00",
+        "sku": "P00200085",
+        "zar_at_risk": {
+          "amount": "19743.00",
+          "currency": "ZAR",
+          "minor_units": 1974300
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_003",
+        "lot_id": "LOT-P00417403-01",
+        "risk": "1.00",
+        "sku": "P00417403",
+        "zar_at_risk": {
+          "amount": "19687.38",
+          "currency": "ZAR",
+          "minor_units": 1968738
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_030",
+        "lot_id": "LOT-P00317150-01",
+        "risk": "1.00",
+        "sku": "P00317150",
+        "zar_at_risk": {
+          "amount": "19643.84",
+          "currency": "ZAR",
+          "minor_units": 1964384
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00496506-01",
+        "risk": "1.00",
+        "sku": "P00496506",
+        "zar_at_risk": {
+          "amount": "19389.92",
+          "currency": "ZAR",
+          "minor_units": 1938992
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_023",
+        "lot_id": "LOT-P00281583-01",
+        "risk": "1.00",
+        "sku": "P00281583",
+        "zar_at_risk": {
+          "amount": "19236.42",
+          "currency": "ZAR",
+          "minor_units": 1923642
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00074712-01",
+        "risk": "1.00",
+        "sku": "P00074712",
+        "zar_at_risk": {
+          "amount": "19156.32",
+          "currency": "ZAR",
+          "minor_units": 1915632
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00495258-01",
+        "risk": "1.00",
+        "sku": "P00495258",
+        "zar_at_risk": {
+          "amount": "19110.69",
+          "currency": "ZAR",
+          "minor_units": 1911069
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00119085-01",
+        "risk": "1.00",
+        "sku": "P00119085",
+        "zar_at_risk": {
+          "amount": "19044.50",
+          "currency": "ZAR",
+          "minor_units": 1904450
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00024967-01",
+        "risk": "1.00",
+        "sku": "P00024967",
+        "zar_at_risk": {
+          "amount": "18713.52",
+          "currency": "ZAR",
+          "minor_units": 1871352
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_003",
+        "lot_id": "LOT-P00268083-01",
+        "risk": "1.00",
+        "sku": "P00268083",
+        "zar_at_risk": {
+          "amount": "18386.52",
+          "currency": "ZAR",
+          "minor_units": 1838652
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_014",
+        "lot_id": "LOT-P00209254-01",
+        "risk": "1.00",
+        "sku": "P00209254",
+        "zar_at_risk": {
+          "amount": "18330.71",
+          "currency": "ZAR",
+          "minor_units": 1833071
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_039",
+        "lot_id": "LOT-P00482599-01",
+        "risk": "1.00",
+        "sku": "P00482599",
+        "zar_at_risk": {
+          "amount": "17991.60",
+          "currency": "ZAR",
+          "minor_units": 1799160
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00044865-01",
+        "risk": "1.00",
+        "sku": "P00044865",
+        "zar_at_risk": {
+          "amount": "17948.33",
+          "currency": "ZAR",
+          "minor_units": 1794833
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00178675-01",
+        "risk": "1.00",
+        "sku": "P00178675",
+        "zar_at_risk": {
+          "amount": "17548.86",
+          "currency": "ZAR",
+          "minor_units": 1754886
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_034",
+        "lot_id": "LOT-P00204754-01",
+        "risk": "1.00",
+        "sku": "P00204754",
+        "zar_at_risk": {
+          "amount": "17327.24",
+          "currency": "ZAR",
+          "minor_units": 1732724
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_008",
+        "lot_id": "LOT-P00224608-01",
+        "risk": "1.00",
+        "sku": "P00224608",
+        "zar_at_risk": {
+          "amount": "17198.46",
+          "currency": "ZAR",
+          "minor_units": 1719846
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00340735-01",
+        "risk": "1.00",
+        "sku": "P00340735",
+        "zar_at_risk": {
+          "amount": "16927.92",
+          "currency": "ZAR",
+          "minor_units": 1692792
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00169075-01",
+        "risk": "1.00",
+        "sku": "P00169075",
+        "zar_at_risk": {
+          "amount": "16601.31",
+          "currency": "ZAR",
+          "minor_units": 1660131
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00045146-01",
+        "risk": "1.00",
+        "sku": "P00045146",
+        "zar_at_risk": {
+          "amount": "15989.40",
+          "currency": "ZAR",
+          "minor_units": 1598940
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00455861-01",
+        "risk": "1.00",
+        "sku": "P00455861",
+        "zar_at_risk": {
+          "amount": "15437.28",
+          "currency": "ZAR",
+          "minor_units": 1543728
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_037",
+        "lot_id": "LOT-P00462957-01",
+        "risk": "1.00",
+        "sku": "P00462957",
+        "zar_at_risk": {
+          "amount": "15367.24",
+          "currency": "ZAR",
+          "minor_units": 1536724
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00270738-01",
+        "risk": "1.00",
+        "sku": "P00270738",
+        "zar_at_risk": {
+          "amount": "15111.88",
+          "currency": "ZAR",
+          "minor_units": 1511188
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00114775-01",
+        "risk": "1.00",
+        "sku": "P00114775",
+        "zar_at_risk": {
+          "amount": "15111.88",
+          "currency": "ZAR",
+          "minor_units": 1511188
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_038",
+        "lot_id": "LOT-P00089878-01",
+        "risk": "1.00",
+        "sku": "P00089878",
+        "zar_at_risk": {
+          "amount": "15110.14",
+          "currency": "ZAR",
+          "minor_units": 1511014
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_012",
+        "lot_id": "LOT-P00297012-01",
+        "risk": "1.00",
+        "sku": "P00297012",
+        "zar_at_risk": {
+          "amount": "15068.68",
+          "currency": "ZAR",
+          "minor_units": 1506868
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00296167-01",
+        "risk": "1.00",
+        "sku": "P00296167",
+        "zar_at_risk": {
+          "amount": "14769.68",
+          "currency": "ZAR",
+          "minor_units": 1476968
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00195691-01",
+        "risk": "1.00",
+        "sku": "P00195691",
+        "zar_at_risk": {
+          "amount": "14741.60",
+          "currency": "ZAR",
+          "minor_units": 1474160
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_023",
+        "lot_id": "LOT-P00192303-01",
+        "risk": "1.00",
+        "sku": "P00192303",
+        "zar_at_risk": {
+          "amount": "14356.32",
+          "currency": "ZAR",
+          "minor_units": 1435632
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00251101-01",
+        "risk": "1.00",
+        "sku": "P00251101",
+        "zar_at_risk": {
+          "amount": "14330.67",
+          "currency": "ZAR",
+          "minor_units": 1433067
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_034",
+        "lot_id": "LOT-P00422394-01",
+        "risk": "1.00",
+        "sku": "P00422394",
+        "zar_at_risk": {
+          "amount": "14060.16",
+          "currency": "ZAR",
+          "minor_units": 1406016
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_013",
+        "lot_id": "LOT-P00120773-01",
+        "risk": "1.00",
+        "sku": "P00120773",
+        "zar_at_risk": {
+          "amount": "13646.56",
+          "currency": "ZAR",
+          "minor_units": 1364656
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00214855-01",
+        "risk": "1.00",
+        "sku": "P00214855",
+        "zar_at_risk": {
+          "amount": "13448.82",
+          "currency": "ZAR",
+          "minor_units": 1344882
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00311632-01",
+        "risk": "1.00",
+        "sku": "P00311632",
+        "zar_at_risk": {
+          "amount": "13425.30",
+          "currency": "ZAR",
+          "minor_units": 1342530
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00281395-01",
+        "risk": "1.00",
+        "sku": "P00281395",
+        "zar_at_risk": {
+          "amount": "13207.60",
+          "currency": "ZAR",
+          "minor_units": 1320760
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00493746-01",
+        "risk": "1.00",
+        "sku": "P00493746",
+        "zar_at_risk": {
+          "amount": "12811.92",
+          "currency": "ZAR",
+          "minor_units": 1281192
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00340722-01",
+        "risk": "1.00",
+        "sku": "P00340722",
+        "zar_at_risk": {
+          "amount": "12707.87",
+          "currency": "ZAR",
+          "minor_units": 1270787
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00034459-01",
+        "risk": "1.00",
+        "sku": "P00034459",
+        "zar_at_risk": {
+          "amount": "12409.06",
+          "currency": "ZAR",
+          "minor_units": 1240906
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00025585-01",
+        "risk": "1.00",
+        "sku": "P00025585",
+        "zar_at_risk": {
+          "amount": "12120.84",
+          "currency": "ZAR",
+          "minor_units": 1212084
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_033",
+        "lot_id": "LOT-P00419353-01",
+        "risk": "1.00",
+        "sku": "P00419353",
+        "zar_at_risk": {
+          "amount": "12109.20",
+          "currency": "ZAR",
+          "minor_units": 1210920
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00340944-01",
+        "risk": "1.00",
+        "sku": "P00340944",
+        "zar_at_risk": {
+          "amount": "12011.20",
+          "currency": "ZAR",
+          "minor_units": 1201120
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00327381-01",
+        "risk": "1.00",
+        "sku": "P00327381",
+        "zar_at_risk": {
+          "amount": "11877.90",
+          "currency": "ZAR",
+          "minor_units": 1187790
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_020",
+        "lot_id": "LOT-P00007900-01",
+        "risk": "1.00",
+        "sku": "P00007900",
+        "zar_at_risk": {
+          "amount": "11626.34",
+          "currency": "ZAR",
+          "minor_units": 1162634
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_031",
+        "lot_id": "LOT-P00480471-01",
+        "risk": "1.00",
+        "sku": "P00480471",
+        "zar_at_risk": {
+          "amount": "11606.09",
+          "currency": "ZAR",
+          "minor_units": 1160609
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_013",
+        "lot_id": "LOT-P00283293-01",
+        "risk": "1.00",
+        "sku": "P00283293",
+        "zar_at_risk": {
+          "amount": "11539.44",
+          "currency": "ZAR",
+          "minor_units": 1153944
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00161019-01",
+        "risk": "1.00",
+        "sku": "P00161019",
+        "zar_at_risk": {
+          "amount": "11535.69",
+          "currency": "ZAR",
+          "minor_units": 1153569
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_023",
+        "lot_id": "LOT-P00328903-01",
+        "risk": "1.00",
+        "sku": "P00328903",
+        "zar_at_risk": {
+          "amount": "11468.16",
+          "currency": "ZAR",
+          "minor_units": 1146816
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_003",
+        "lot_id": "LOT-P00308403-01",
+        "risk": "1.00",
+        "sku": "P00308403",
+        "zar_at_risk": {
+          "amount": "11146.52",
+          "currency": "ZAR",
+          "minor_units": 1114652
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00026964-01",
+        "risk": "1.00",
+        "sku": "P00026964",
+        "zar_at_risk": {
+          "amount": "11116.22",
+          "currency": "ZAR",
+          "minor_units": 1111622
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_036",
+        "lot_id": "LOT-P00205516-01",
+        "risk": "1.00",
+        "sku": "P00205516",
+        "zar_at_risk": {
+          "amount": "11077.26",
+          "currency": "ZAR",
+          "minor_units": 1107726
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00344847-01",
+        "risk": "1.00",
+        "sku": "P00344847",
+        "zar_at_risk": {
+          "amount": "10782.32",
+          "currency": "ZAR",
+          "minor_units": 1078232
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_008",
+        "lot_id": "LOT-P00194688-01",
+        "risk": "1.00",
+        "sku": "P00194688",
+        "zar_at_risk": {
+          "amount": "10499.16",
+          "currency": "ZAR",
+          "minor_units": 1049916
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_030",
+        "lot_id": "LOT-P00482550-01",
+        "risk": "1.00",
+        "sku": "P00482550",
+        "zar_at_risk": {
+          "amount": "10376.34",
+          "currency": "ZAR",
+          "minor_units": 1037634
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_033",
+        "lot_id": "LOT-P00461793-01",
+        "risk": "1.00",
+        "sku": "P00461793",
+        "zar_at_risk": {
+          "amount": "10359.66",
+          "currency": "ZAR",
+          "minor_units": 1035966
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_030",
+        "lot_id": "LOT-P00139910-01",
+        "risk": "1.00",
+        "sku": "P00139910",
+        "zar_at_risk": {
+          "amount": "10352.76",
+          "currency": "ZAR",
+          "minor_units": 1035276
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00039004-01",
+        "risk": "1.00",
+        "sku": "P00039004",
+        "zar_at_risk": {
+          "amount": "10152.56",
+          "currency": "ZAR",
+          "minor_units": 1015256
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00477192-01",
+        "risk": "1.00",
+        "sku": "P00477192",
+        "zar_at_risk": {
+          "amount": "10107.84",
+          "currency": "ZAR",
+          "minor_units": 1010784
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00169080-01",
+        "risk": "1.00",
+        "sku": "P00169080",
+        "zar_at_risk": {
+          "amount": "9827.52",
+          "currency": "ZAR",
+          "minor_units": 982752
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00158735-01",
+        "risk": "1.00",
+        "sku": "P00158735",
+        "zar_at_risk": {
+          "amount": "9651.60",
+          "currency": "ZAR",
+          "minor_units": 965160
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00437865-01",
+        "risk": "1.00",
+        "sku": "P00437865",
+        "zar_at_risk": {
+          "amount": "9636.00",
+          "currency": "ZAR",
+          "minor_units": 963600
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00494931-01",
+        "risk": "1.00",
+        "sku": "P00494931",
+        "zar_at_risk": {
+          "amount": "9536.52",
+          "currency": "ZAR",
+          "minor_units": 953652
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00026392-01",
+        "risk": "1.00",
+        "sku": "P00026392",
+        "zar_at_risk": {
+          "amount": "9505.86",
+          "currency": "ZAR",
+          "minor_units": 950586
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_008",
+        "lot_id": "LOT-P00342088-01",
+        "risk": "1.00",
+        "sku": "P00342088",
+        "zar_at_risk": {
+          "amount": "9480.39",
+          "currency": "ZAR",
+          "minor_units": 948039
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00403264-01",
+        "risk": "1.00",
+        "sku": "P00403264",
+        "zar_at_risk": {
+          "amount": "9427.32",
+          "currency": "ZAR",
+          "minor_units": 942732
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_013",
+        "lot_id": "LOT-P00368933-01",
+        "risk": "1.00",
+        "sku": "P00368933",
+        "zar_at_risk": {
+          "amount": "9319.03",
+          "currency": "ZAR",
+          "minor_units": 931903
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00054588-01",
+        "risk": "1.00",
+        "sku": "P00054588",
+        "zar_at_risk": {
+          "amount": "9260.68",
+          "currency": "ZAR",
+          "minor_units": 926068
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00094884-01",
+        "risk": "1.00",
+        "sku": "P00094884",
+        "zar_at_risk": {
+          "amount": "9222.95",
+          "currency": "ZAR",
+          "minor_units": 922295
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00176295-01",
+        "risk": "1.00",
+        "sku": "P00176295",
+        "zar_at_risk": {
+          "amount": "9214.46",
+          "currency": "ZAR",
+          "minor_units": 921446
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00278148-01",
+        "risk": "1.00",
+        "sku": "P00278148",
+        "zar_at_risk": {
+          "amount": "8985.46",
+          "currency": "ZAR",
+          "minor_units": 898546
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_009",
+        "lot_id": "LOT-P00293249-01",
+        "risk": "1.00",
+        "sku": "P00293249",
+        "zar_at_risk": {
+          "amount": "8917.60",
+          "currency": "ZAR",
+          "minor_units": 891760
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_020",
+        "lot_id": "LOT-P00235020-01",
+        "risk": "1.00",
+        "sku": "P00235020",
+        "zar_at_risk": {
+          "amount": "8885.52",
+          "currency": "ZAR",
+          "minor_units": 888552
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_030",
+        "lot_id": "LOT-P00316230-01",
+        "risk": "1.00",
+        "sku": "P00316230",
+        "zar_at_risk": {
+          "amount": "8735.65",
+          "currency": "ZAR",
+          "minor_units": 873565
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00313021-01",
+        "risk": "1.00",
+        "sku": "P00313021",
+        "zar_at_risk": {
+          "amount": "8720.16",
+          "currency": "ZAR",
+          "minor_units": 872016
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00256325-01",
+        "risk": "1.00",
+        "sku": "P00256325",
+        "zar_at_risk": {
+          "amount": "8621.90",
+          "currency": "ZAR",
+          "minor_units": 862190
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_034",
+        "lot_id": "LOT-P00492754-01",
+        "risk": "1.00",
+        "sku": "P00492754",
+        "zar_at_risk": {
+          "amount": "8618.49",
+          "currency": "ZAR",
+          "minor_units": 861849
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00295362-01",
+        "risk": "1.00",
+        "sku": "P00295362",
+        "zar_at_risk": {
+          "amount": "8603.44",
+          "currency": "ZAR",
+          "minor_units": 860344
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00086805-01",
+        "risk": "1.00",
+        "sku": "P00086805",
+        "zar_at_risk": {
+          "amount": "8449.50",
+          "currency": "ZAR",
+          "minor_units": 844950
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_017",
+        "lot_id": "LOT-P00207657-01",
+        "risk": "1.00",
+        "sku": "P00207657",
+        "zar_at_risk": {
+          "amount": "8382.09",
+          "currency": "ZAR",
+          "minor_units": 838209
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_006",
+        "lot_id": "LOT-P00466766-01",
+        "risk": "1.00",
+        "sku": "P00466766",
+        "zar_at_risk": {
+          "amount": "8321.94",
+          "currency": "ZAR",
+          "minor_units": 832194
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00466130-01",
+        "risk": "1.00",
+        "sku": "P00466130",
+        "zar_at_risk": {
+          "amount": "8216.44",
+          "currency": "ZAR",
+          "minor_units": 821644
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00480331-01",
+        "risk": "1.00",
+        "sku": "P00480331",
+        "zar_at_risk": {
+          "amount": "8029.81",
+          "currency": "ZAR",
+          "minor_units": 802981
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00315341-01",
+        "risk": "1.00",
+        "sku": "P00315341",
+        "zar_at_risk": {
+          "amount": "8012.53",
+          "currency": "ZAR",
+          "minor_units": 801253
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_039",
+        "lot_id": "LOT-P00299919-01",
+        "risk": "1.00",
+        "sku": "P00299919",
+        "zar_at_risk": {
+          "amount": "7960.18",
+          "currency": "ZAR",
+          "minor_units": 796018
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00196224-01",
+        "risk": "1.00",
+        "sku": "P00196224",
+        "zar_at_risk": {
+          "amount": "7708.80",
+          "currency": "ZAR",
+          "minor_units": 770880
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_034",
+        "lot_id": "LOT-P00014994-01",
+        "risk": "1.00",
+        "sku": "P00014994",
+        "zar_at_risk": {
+          "amount": "7708.80",
+          "currency": "ZAR",
+          "minor_units": 770880
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00233330-01",
+        "risk": "1.00",
+        "sku": "P00233330",
+        "zar_at_risk": {
+          "amount": "7643.44",
+          "currency": "ZAR",
+          "minor_units": 764344
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00033548-01",
+        "risk": "1.00",
+        "sku": "P00033548",
+        "zar_at_risk": {
+          "amount": "7597.80",
+          "currency": "ZAR",
+          "minor_units": 759780
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_001",
+        "lot_id": "LOT-P00357281-01",
+        "risk": "1.00",
+        "sku": "P00357281",
+        "zar_at_risk": {
+          "amount": "7502.82",
+          "currency": "ZAR",
+          "minor_units": 750282
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_029",
+        "lot_id": "LOT-P00325189-01",
+        "risk": "1.00",
+        "sku": "P00325189",
+        "zar_at_risk": {
+          "amount": "7452.48",
+          "currency": "ZAR",
+          "minor_units": 745248
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00499610-01",
+        "risk": "1.00",
+        "sku": "P00499610",
+        "zar_at_risk": {
+          "amount": "7294.68",
+          "currency": "ZAR",
+          "minor_units": 729468
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00039261-01",
+        "risk": "1.00",
+        "sku": "P00039261",
+        "zar_at_risk": {
+          "amount": "7266.57",
+          "currency": "ZAR",
+          "minor_units": 726657
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_013",
+        "lot_id": "LOT-P00273213-01",
+        "risk": "1.00",
+        "sku": "P00273213",
+        "zar_at_risk": {
+          "amount": "7025.56",
+          "currency": "ZAR",
+          "minor_units": 702556
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_012",
+        "lot_id": "LOT-P00358452-01",
+        "risk": "1.00",
+        "sku": "P00358452",
+        "zar_at_risk": {
+          "amount": "7015.02",
+          "currency": "ZAR",
+          "minor_units": 701502
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_022",
+        "lot_id": "LOT-P00073782-01",
+        "risk": "1.00",
+        "sku": "P00073782",
+        "zar_at_risk": {
+          "amount": "7011.89",
+          "currency": "ZAR",
+          "minor_units": 701189
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_023",
+        "lot_id": "LOT-P00481743-01",
+        "risk": "1.00",
+        "sku": "P00481743",
+        "zar_at_risk": {
+          "amount": "6878.76",
+          "currency": "ZAR",
+          "minor_units": 687876
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00452451-01",
+        "risk": "1.00",
+        "sku": "P00452451",
+        "zar_at_risk": {
+          "amount": "6874.24",
+          "currency": "ZAR",
+          "minor_units": 687424
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_006",
+        "lot_id": "LOT-P00024646-01",
+        "risk": "1.00",
+        "sku": "P00024646",
+        "zar_at_risk": {
+          "amount": "6742.72",
+          "currency": "ZAR",
+          "minor_units": 674272
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_007",
+        "lot_id": "LOT-P00482447-01",
+        "risk": "1.00",
+        "sku": "P00482447",
+        "zar_at_risk": {
+          "amount": "6675.84",
+          "currency": "ZAR",
+          "minor_units": 667584
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00344491-01",
+        "risk": "1.00",
+        "sku": "P00344491",
+        "zar_at_risk": {
+          "amount": "6649.35",
+          "currency": "ZAR",
+          "minor_units": 664935
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_008",
+        "lot_id": "LOT-P00146648-01",
+        "risk": "1.00",
+        "sku": "P00146648",
+        "zar_at_risk": {
+          "amount": "6556.23",
+          "currency": "ZAR",
+          "minor_units": 655623
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00131546-01",
+        "risk": "1.00",
+        "sku": "P00131546",
+        "zar_at_risk": {
+          "amount": "6537.30",
+          "currency": "ZAR",
+          "minor_units": 653730
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00281724-01",
+        "risk": "1.00",
+        "sku": "P00281724",
+        "zar_at_risk": {
+          "amount": "6523.14",
+          "currency": "ZAR",
+          "minor_units": 652314
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_033",
+        "lot_id": "LOT-P00048993-01",
+        "risk": "1.00",
+        "sku": "P00048993",
+        "zar_at_risk": {
+          "amount": "6457.48",
+          "currency": "ZAR",
+          "minor_units": 645748
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00268352-01",
+        "risk": "1.00",
+        "sku": "P00268352",
+        "zar_at_risk": {
+          "amount": "6452.52",
+          "currency": "ZAR",
+          "minor_units": 645252
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00240395-01",
+        "risk": "1.00",
+        "sku": "P00240395",
+        "zar_at_risk": {
+          "amount": "6287.79",
+          "currency": "ZAR",
+          "minor_units": 628779
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_037",
+        "lot_id": "LOT-P00482477-01",
+        "risk": "1.00",
+        "sku": "P00482477",
+        "zar_at_risk": {
+          "amount": "6258.60",
+          "currency": "ZAR",
+          "minor_units": 625860
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_017",
+        "lot_id": "LOT-P00463697-01",
+        "risk": "1.00",
+        "sku": "P00463697",
+        "zar_at_risk": {
+          "amount": "6174.05",
+          "currency": "ZAR",
+          "minor_units": 617405
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_036",
+        "lot_id": "LOT-P00350036-01",
+        "risk": "1.00",
+        "sku": "P00350036",
+        "zar_at_risk": {
+          "amount": "6106.82",
+          "currency": "ZAR",
+          "minor_units": 610682
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_027",
+        "lot_id": "LOT-P00268027-01",
+        "risk": "1.00",
+        "sku": "P00268027",
+        "zar_at_risk": {
+          "amount": "6093.50",
+          "currency": "ZAR",
+          "minor_units": 609350
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00014164-01",
+        "risk": "1.00",
+        "sku": "P00014164",
+        "zar_at_risk": {
+          "amount": "6064.40",
+          "currency": "ZAR",
+          "minor_units": 606440
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_004",
+        "lot_id": "LOT-P00360404-01",
+        "risk": "1.00",
+        "sku": "P00360404",
+        "zar_at_risk": {
+          "amount": "6019.02",
+          "currency": "ZAR",
+          "minor_units": 601902
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00366338-01",
+        "risk": "1.00",
+        "sku": "P00366338",
+        "zar_at_risk": {
+          "amount": "5825.77",
+          "currency": "ZAR",
+          "minor_units": 582577
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_035",
+        "lot_id": "LOT-P00419355-01",
+        "risk": "1.00",
+        "sku": "P00419355",
+        "zar_at_risk": {
+          "amount": "5589.80",
+          "currency": "ZAR",
+          "minor_units": 558980
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00222925-01",
+        "risk": "1.00",
+        "sku": "P00222925",
+        "zar_at_risk": {
+          "amount": "5548.18",
+          "currency": "ZAR",
+          "minor_units": 554818
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_030",
+        "lot_id": "LOT-P00040070-01",
+        "risk": "1.00",
+        "sku": "P00040070",
+        "zar_at_risk": {
+          "amount": "5547.43",
+          "currency": "ZAR",
+          "minor_units": 554743
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_039",
+        "lot_id": "LOT-P00267759-01",
+        "risk": "1.00",
+        "sku": "P00267759",
+        "zar_at_risk": {
+          "amount": "5533.88",
+          "currency": "ZAR",
+          "minor_units": 553388
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_027",
+        "lot_id": "LOT-P00316707-01",
+        "risk": "1.00",
+        "sku": "P00316707",
+        "zar_at_risk": {
+          "amount": "5480.18",
+          "currency": "ZAR",
+          "minor_units": 548018
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00359080-01",
+        "risk": "1.00",
+        "sku": "P00359080",
+        "zar_at_risk": {
+          "amount": "5473.44",
+          "currency": "ZAR",
+          "minor_units": 547344
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_016",
+        "lot_id": "LOT-P00332056-01",
+        "risk": "1.00",
+        "sku": "P00332056",
+        "zar_at_risk": {
+          "amount": "5436.96",
+          "currency": "ZAR",
+          "minor_units": 543696
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00298188-01",
+        "risk": "1.00",
+        "sku": "P00298188",
+        "zar_at_risk": {
+          "amount": "5407.68",
+          "currency": "ZAR",
+          "minor_units": 540768
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_029",
+        "lot_id": "LOT-P00256669-01",
+        "risk": "1.00",
+        "sku": "P00256669",
+        "zar_at_risk": {
+          "amount": "5186.30",
+          "currency": "ZAR",
+          "minor_units": 518630
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_020",
+        "lot_id": "LOT-P00459860-01",
+        "risk": "1.00",
+        "sku": "P00459860",
+        "zar_at_risk": {
+          "amount": "5137.08",
+          "currency": "ZAR",
+          "minor_units": 513708
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_032",
+        "lot_id": "LOT-P00012112-01",
+        "risk": "1.00",
+        "sku": "P00012112",
+        "zar_at_risk": {
+          "amount": "5133.59",
+          "currency": "ZAR",
+          "minor_units": 513359
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00483090-01",
+        "risk": "1.00",
+        "sku": "P00483090",
+        "zar_at_risk": {
+          "amount": "5129.02",
+          "currency": "ZAR",
+          "minor_units": 512902
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_003",
+        "lot_id": "LOT-P00497483-01",
+        "risk": "1.00",
+        "sku": "P00497483",
+        "zar_at_risk": {
+          "amount": "5101.38",
+          "currency": "ZAR",
+          "minor_units": 510138
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00132840-01",
+        "risk": "1.00",
+        "sku": "P00132840",
+        "zar_at_risk": {
+          "amount": "5086.76",
+          "currency": "ZAR",
+          "minor_units": 508676
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_025",
+        "lot_id": "LOT-P00032945-01",
+        "risk": "1.00",
+        "sku": "P00032945",
+        "zar_at_risk": {
+          "amount": "5030.14",
+          "currency": "ZAR",
+          "minor_units": 503014
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_010",
+        "lot_id": "LOT-P00219610-01",
+        "risk": "1.00",
+        "sku": "P00219610",
+        "zar_at_risk": {
+          "amount": "5004.93",
+          "currency": "ZAR",
+          "minor_units": 500493
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_011",
+        "lot_id": "LOT-P00465691-01",
+        "risk": "1.00",
+        "sku": "P00465691",
+        "zar_at_risk": {
+          "amount": "4994.43",
+          "currency": "ZAR",
+          "minor_units": 499443
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00450680-01",
+        "risk": "1.00",
+        "sku": "P00450680",
+        "zar_at_risk": {
+          "amount": "4861.56",
+          "currency": "ZAR",
+          "minor_units": 486156
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_033",
+        "lot_id": "LOT-P00343153-01",
+        "risk": "1.00",
+        "sku": "P00343153",
+        "zar_at_risk": {
+          "amount": "4777.29",
+          "currency": "ZAR",
+          "minor_units": 477729
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_018",
+        "lot_id": "LOT-P00293338-01",
+        "risk": "1.00",
+        "sku": "P00293338",
+        "zar_at_risk": {
+          "amount": "4729.06",
+          "currency": "ZAR",
+          "minor_units": 472906
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00152508-01",
+        "risk": "1.00",
+        "sku": "P00152508",
+        "zar_at_risk": {
+          "amount": "4692.62",
+          "currency": "ZAR",
+          "minor_units": 469262
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00136895-01",
+        "risk": "1.00",
+        "sku": "P00136895",
+        "zar_at_risk": {
+          "amount": "4684.96",
+          "currency": "ZAR",
+          "minor_units": 468496
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_040",
+        "lot_id": "LOT-P00146240-01",
+        "risk": "1.00",
+        "sku": "P00146240",
+        "zar_at_risk": {
+          "amount": "4679.25",
+          "currency": "ZAR",
+          "minor_units": 467925
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_009",
+        "lot_id": "LOT-P00149369-01",
+        "risk": "1.00",
+        "sku": "P00149369",
+        "zar_at_risk": {
+          "amount": "4634.04",
+          "currency": "ZAR",
+          "minor_units": 463404
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_019",
+        "lot_id": "LOT-P00446619-01",
+        "risk": "1.00",
+        "sku": "P00446619",
+        "zar_at_risk": {
+          "amount": "4551.12",
+          "currency": "ZAR",
+          "minor_units": 455112
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_023",
+        "lot_id": "LOT-P00199543-01",
+        "risk": "1.00",
+        "sku": "P00199543",
+        "zar_at_risk": {
+          "amount": "4508.06",
+          "currency": "ZAR",
+          "minor_units": 450806
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_017",
+        "lot_id": "LOT-P00256777-01",
+        "risk": "1.00",
+        "sku": "P00256777",
+        "zar_at_risk": {
+          "amount": "4495.02",
+          "currency": "ZAR",
+          "minor_units": 449502
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_027",
+        "lot_id": "LOT-P00024267-01",
+        "risk": "1.00",
+        "sku": "P00024267",
+        "zar_at_risk": {
+          "amount": "4445.60",
+          "currency": "ZAR",
+          "minor_units": 444560
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_029",
+        "lot_id": "LOT-P00256349-01",
+        "risk": "1.00",
+        "sku": "P00256349",
+        "zar_at_risk": {
+          "amount": "4441.76",
+          "currency": "ZAR",
+          "minor_units": 444176
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_005",
+        "lot_id": "LOT-P00102045-01",
+        "risk": "1.00",
+        "sku": "P00102045",
+        "zar_at_risk": {
+          "amount": "4406.85",
+          "currency": "ZAR",
+          "minor_units": 440685
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_008",
+        "lot_id": "LOT-P00146968-01",
+        "risk": "1.00",
+        "sku": "P00146968",
+        "zar_at_risk": {
+          "amount": "4361.39",
+          "currency": "ZAR",
+          "minor_units": 436139
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_024",
+        "lot_id": "LOT-P00138944-01",
+        "risk": "1.00",
+        "sku": "P00138944",
+        "zar_at_risk": {
+          "amount": "4351.47",
+          "currency": "ZAR",
+          "minor_units": 435147
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_028",
+        "lot_id": "LOT-P00102668-01",
+        "risk": "1.00",
+        "sku": "P00102668",
+        "zar_at_risk": {
+          "amount": "4289.34",
+          "currency": "ZAR",
+          "minor_units": 428934
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_026",
+        "lot_id": "LOT-P00237386-01",
+        "risk": "1.00",
+        "sku": "P00237386",
+        "zar_at_risk": {
+          "amount": "4266.92",
+          "currency": "ZAR",
+          "minor_units": 426692
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_015",
+        "lot_id": "LOT-P00394855-01",
+        "risk": "1.00",
+        "sku": "P00394855",
+        "zar_at_risk": {
+          "amount": "4258.17",
+          "currency": "ZAR",
+          "minor_units": 425817
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_002",
+        "lot_id": "LOT-P00258162-01",
+        "risk": "1.00",
+        "sku": "P00258162",
+        "zar_at_risk": {
+          "amount": "4215.21",
+          "currency": "ZAR",
+          "minor_units": 421521
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00145021-01",
+        "risk": "1.00",
+        "sku": "P00145021",
+        "zar_at_risk": {
+          "amount": "4167.66",
+          "currency": "ZAR",
+          "minor_units": 416766
+        }
+      },
+      {
+        "days_to_expiry": 2,
+        "location_id": "store_012",
+        "lot_id": "LOT-P00123572-01",
+        "risk": "1.00",
+        "sku": "P00123572",
+        "zar_at_risk": {
+          "amount": "4152.79",
+          "currency": "ZAR",
+          "minor_units": 415279
+        }
+      },
+      {
+        "days_to_expiry": 1,
+        "location_id": "store_021",
+        "lot_id": "LOT-P00115781-01",
+        "risk": "1.00",
+        "sku": "P00115781",
+        "zar_at_risk": {
+          "amount": "4125.51",
+          "currency": "ZAR",
+          "minor_units": 412551
+        }
+      }
+    ],
+    "total_zar_at_risk": {
+      "amount": "300476944.86",
+      "currency": "ZAR",
+      "minor_units": 30047694486
+    }
+  },
+  "seed": 20260713,
+  "started_at": "2026-07-20T21:33:13.153813+00:00",
+  "top_limit": 200
+}
