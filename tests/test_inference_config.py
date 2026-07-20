@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from shelfwise_inference.config import InferenceConfig, ProviderKind, load_inference_config
 
 
@@ -54,17 +56,32 @@ def test_chat_completions_url_preserves_query_string_with_v1_suffix() -> None:
     )
 
 
-def test_provider_detection_fireworks_vllm_offline(monkeypatch) -> None:
+def test_provider_detection_requires_an_explicit_amd_declaration(monkeypatch) -> None:
     monkeypatch.setenv("LLM_BASE_URL", "https://api.fireworks.ai/inference/v1")
     monkeypatch.setenv("LLM_API_KEY", "fw-key")
     assert load_inference_config().provider is ProviderKind.FIREWORKS
 
     monkeypatch.setenv("LLM_BASE_URL", "https://radeon-global.anruicloud.com/proxy/8001")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    generic_config = load_inference_config()
+    assert generic_config.provider is ProviderKind.OPENAI_COMPATIBLE
+    assert generic_config.compute_resource == "OpenAI-compatible endpoint (unverified hardware)"
+
+    monkeypatch.setenv("LLM_PROVIDER", "vllm_mi300x")
     assert load_inference_config().provider is ProviderKind.VLLM_MI300X
 
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
     assert load_inference_config().provider is ProviderKind.OFFLINE
+
+
+def test_invalid_explicit_provider_fails_closed(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_BASE_URL", "https://inference.example/v1")
+    monkeypatch.setenv("LLM_PROVIDER", "unknown_vendor")
+
+    with pytest.raises(ValueError, match="LLM_PROVIDER must be one of"):
+        load_inference_config()
 
 
 def test_dual_model_endpoints_and_credentials_are_independent(monkeypatch) -> None:
@@ -76,6 +93,7 @@ def test_dual_model_endpoints_and_credentials_are_independent(monkeypatch) -> No
     monkeypatch.setenv("LLM_STRONG_API_KEY", "strong-key")
     monkeypatch.setenv("LLM_ROUTINE_MODEL", "google/gemma-4-E4B-it")
     monkeypatch.setenv("LLM_STRONG_MODEL", "google/gemma-4-31B-it")
+    monkeypatch.setenv("LLM_PROVIDER", "vllm_mi300x")
 
     config = load_inference_config()
 

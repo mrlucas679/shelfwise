@@ -68,7 +68,8 @@ From the application repository root, validate the production configuration befo
 
 ```bash
 cp .env.example .env  # only on a new host; keep the file local and ignored
-# Set the production secrets and the two printed LLM_* values in .env.
+# Set the production secrets, the two printed LLM_* endpoint values, and
+# LLM_PROVIDER=vllm_mi300x in .env. AMD identity is explicit; it is never inferred from the IP.
 docker compose -f docker-compose.production.yml config --quiet
 docker compose -f docker-compose.production.yml up --build -d --wait
 python scripts/deployment_shakedown.py \

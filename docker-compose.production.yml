@@ -89,6 +89,7 @@ services:
       SHELFWISE_BUS_BACKEND: redis
       DATABASE_URL: postgresql://shelfwise_app:${POSTGRES_APP_PASSWORD}@postgres:5432/shelfwise
       REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
       LLM_ROUTINE_BASE_URL: ${LLM_ROUTINE_BASE_URL:-http://host.docker.internal:8000}
       LLM_STRONG_BASE_URL: ${LLM_STRONG_BASE_URL:-http://host.docker.internal:8001}
       LLM_ROUTINE_MODEL: ${LLM_ROUTINE_MODEL:-google/gemma-4-E4B-it}

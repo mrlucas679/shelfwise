@@ -23,6 +23,7 @@ def test_default_inference_readiness_is_safe_offline(monkeypatch) -> None:
 
 def test_vllm_mi300x_readiness_uses_openai_contract(monkeypatch) -> None:
     monkeypatch.setenv("LLM_BASE_URL", "http://203.0.113.10:8000")
+    monkeypatch.setenv("LLM_PROVIDER", "vllm_mi300x")
     monkeypatch.setenv("LLM_API_KEY", "demo-key")
     monkeypatch.setenv("LLM_ROUTINE_MODEL", "google/gemma-4-E4B-it")
     monkeypatch.setenv("LLM_STRONG_MODEL", "google/gemma-4-31B-it")
@@ -51,6 +52,7 @@ def test_timeout_can_exceed_former_submission_target(monkeypatch) -> None:
 
 def test_submission_readiness_exposes_track_three_prescreen(monkeypatch) -> None:
     monkeypatch.setenv("LLM_BASE_URL", "http://203.0.113.10:8000")
+    monkeypatch.setenv("LLM_PROVIDER", "vllm_mi300x")
     monkeypatch.setenv("LLM_API_KEY", "demo-key")
     monkeypatch.setenv("LLM_ROUTINE_MODEL", "google/gemma-4-E4B-it")
     monkeypatch.setenv("LLM_STRONG_MODEL", "google/gemma-4-31B-it")

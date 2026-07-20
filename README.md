@@ -187,7 +187,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (747 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (749 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
@@ -213,8 +213,9 @@ set the endpoint before starting the backend (PowerShell shown; a gitignored `.e
 
 ```powershell
 $env:LLM_BASE_URL="http://<your-vllm-endpoint>:8000"
+$env:LLM_PROVIDER="vllm_mi300x"
 $env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
-$env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-31B-it"
 ```
 
 See [Inference Strategy](#inference-strategy) for independent routine/strong tier variables.
@@ -312,7 +313,7 @@ A few endpoints worth knowing by name (used throughout this README):
 |---|---|
 | `POST /chat` | Agentic chat — picks its own tools per question |
 | `POST /scenarios/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
-| `GET /inference/smoke` | Confirms whether a call is offline, Fireworks, or AMD MI300X |
+| `GET /inference/smoke` | Confirms whether a call is offline, generic OpenAI-compatible, Fireworks, or explicitly declared AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
 | `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
@@ -359,7 +360,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         747 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         749 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -396,7 +397,7 @@ Built now:
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
   workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 747 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+- 749 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external
@@ -700,7 +701,9 @@ interpreted as dual-tier capacity evidence.
 
 Configure routine and strong tiers independently with `LLM_ROUTINE_BASE_URL` /
 `LLM_STRONG_BASE_URL` / `LLM_ROUTINE_MODEL` / `LLM_STRONG_MODEL` (single-model fallback still
-supported via the common `LLM_BASE_URL` variables); verify with `GET /inference/readiness` and
+supported via the common `LLM_BASE_URL` variables). Set `LLM_PROVIDER=vllm_mi300x` only after
+verifying the AMD droplet; unknown OpenAI-compatible endpoints remain explicitly unverified and
+cannot pass the AMD gate. Verify with `GET /inference/readiness` and
 `GET /inference/smoke`. For a fresh AMD host, [DROPLET_BOOTSTRAP.md](DROPLET_BOOTSTRAP.md) is the
 full provisioning-to-production runbook (firewall allowlisting, both vLLM tiers, key rotation,
 production Compose config); [docs/mi300x-recreate-runbook.md](docs/mi300x-recreate-runbook.md)

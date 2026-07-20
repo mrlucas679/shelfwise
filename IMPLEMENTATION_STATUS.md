@@ -4,8 +4,8 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-20 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **747 passed / 15 env-gated skips** locally;
+Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
+Branch: `developers` · Gates at time of writing: **749 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -20,9 +20,9 @@ application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
-- The full local backend regression suite passed: **747 passed, 15 environment-gated skips**;
+- The full local backend regression suite passed: **749 passed, 15 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
-- GitHub Actions CI for `35a6329` passed its real Postgres/Redis, browser E2E, production-topology,
+- GitHub Actions CI for `62cf190` passed its real Postgres/Redis, browser E2E, production-topology,
   deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
 - A fresh deterministic fleet-scale run processed **500,000 of 500,000 requested rows** in
   **22,928 ms** (**21,807.4 rows/s**), produced 41,442 threshold candidates and a bounded top-200
@@ -181,6 +181,8 @@ not an oversight).
 
 ## 7. Inference and model operations — ✅
 
+- ✅ Provider identity is explicit at deployment (`LLM_PROVIDER`): arbitrary OpenAI-compatible
+  endpoints are reported as unverified hardware and cannot claim or pass the AMD/MI300X gate.
 - ✅ Two-tier Gemma architecture (routine E4B :8000 / strong 31B :8001), bounded per-call and
   per-cascade deadlines derived from `SHELFWISE_REQUEST_TIMEOUT_SECONDS` (the retired 30s gate
   is structurally gone; sub-budget reclaim/override values are inexpressible), fail-closed

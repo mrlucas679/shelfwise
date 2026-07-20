@@ -92,6 +92,7 @@ def test_track3_production_rejects_non_amd_provider(monkeypatch) -> None:
 def test_track3_production_forces_live_mode_even_when_requested_offline(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("LLM_BASE_URL", "http://amd.example:8000")
+    monkeypatch.setenv("LLM_PROVIDER", "vllm_mi300x")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("LLM_ROUTINE_MODEL", "google/gemma-4-E4B-it")
     monkeypatch.setenv("LLM_STRONG_MODEL", "google/gemma-4-31B-it")

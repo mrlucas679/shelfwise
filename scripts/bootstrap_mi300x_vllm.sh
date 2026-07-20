@@ -428,6 +428,7 @@ Both MI300X vLLM servers are ready.
 On the ShelfWise application host, set these values (supply VLLM_API_KEY separately):
 export LLM_ROUTINE_BASE_URL=http://${host_ip}:${ROUTINE_PORT}
 export LLM_STRONG_BASE_URL=http://${host_ip}:${STRONG_PORT}
+export LLM_PROVIDER=vllm_mi300x
 export LLM_ROUTINE_MODEL=${ROUTINE_MODEL}
 export LLM_STRONG_MODEL=${STRONG_MODEL}
 export LLM_COMPUTE_RESOURCE="AMD Developer Cloud"

@@ -156,7 +156,8 @@ properties an operator must know:
 
 ## Application Shakedown
 
-Run the local ShelfWise backend with MI300X environment values, then run the receipt-driven
+Run the local ShelfWise backend with MI300X environment values (including the explicit
+`LLM_PROVIDER=vllm_mi300x` declaration), then run the receipt-driven
 world harness. It fails on route errors, offline answers, chat failures, decision-ID reuse,
 HITL mismatches, and no-op learning.
 

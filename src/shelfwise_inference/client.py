@@ -147,11 +147,9 @@ class OpenAICompatibleInferenceClient:
         effective_base_url = (
             self._config.base_url_for_agent(agent) if base_url is None else base_url
         )
-        provider = (
-            self._config.provider.value
-            if effective_base_url == self._config.base_url
-            else _provider_label(effective_base_url)
-        )
+        # Endpoint hosts are transport details. Provider identity is an explicit deployment
+        # assertion in InferenceConfig so an arbitrary override cannot masquerade as AMD.
+        provider = self._config.provider.value
         user = _last_user_text(messages)
         input_tokens = _estimate_payload_tokens(messages, tools, response_format)
         if provider == ProviderKind.OFFLINE.value:
@@ -417,16 +415,6 @@ def _chat_completions_url(base_url: str) -> str:
     path = path.rstrip("/")
     path = f"{path}/chat/completions" if path.endswith("/v1") else f"{path}/v1/chat/completions"
     return urlunsplit((scheme, netloc, path, query, fragment))
-
-
-def _provider_label(base_url: str) -> str:
-    """Derive a public provider label for endpoint overrides."""
-    lowered = base_url.lower()
-    if not lowered:
-        return ProviderKind.OFFLINE.value
-    if "fireworks" in lowered:
-        return ProviderKind.FIREWORKS.value
-    return ProviderKind.VLLM_MI300X.value
 
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:

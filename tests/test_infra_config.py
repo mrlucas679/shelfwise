@@ -44,6 +44,7 @@ def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> N
     assert '- "5432:5432"' not in text
     assert '- "6379:6379"' not in text
     assert "host.docker.internal:host-gateway" in text
+    assert 'LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}' in text
     assert "host.docker.internal:8000" in text
     assert "host.docker.internal:8001" in text
     assert 'SHELFWISE_AUTO_SCHEMA: "false"' in text
