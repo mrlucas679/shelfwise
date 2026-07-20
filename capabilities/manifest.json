@@ -3939,7 +3939,7 @@
           "symbol": "create_product_catalog_store"
         },
         {
-          "line": 110,
+          "line": 124,
           "path": "src/shelfwise_connectors/connectors/poll.py",
           "symbol": "create_cursor_store"
         },
@@ -4100,7 +4100,7 @@
           "symbol": "create_product_catalog_store"
         },
         {
-          "line": 112,
+          "line": 126,
           "path": "src/shelfwise_connectors/connectors/poll.py",
           "symbol": "create_cursor_store"
         },
@@ -5157,7 +5157,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:1c063f69ca38a691fb1c08fe354655692e503ffe771070b57a8f510062bdb4cd",
+  "fingerprint": "sha256:69cc0df1b0fa28483f12543f8402551b249e4fdef3095488d6996d2b1fadc415",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

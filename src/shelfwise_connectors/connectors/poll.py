@@ -21,6 +21,8 @@ class CursorStore(Protocol):
 
     async def set(self, *, tenant_id: str, system: SourceSystem, cursor: str) -> None: ...
 
+    async def delete(self, *, tenant_id: str, system: SourceSystem) -> None: ...
+
     def clear(self) -> None: ...
 
 
@@ -36,6 +38,10 @@ class InMemoryCursorStore:
     async def set(self, *, tenant_id: str, system: SourceSystem, cursor: str) -> None:
         with self._lock:
             self._cursors[(tenant_id, system.value)] = cursor
+
+    async def delete(self, *, tenant_id: str, system: SourceSystem) -> None:
+        with self._lock:
+            self._cursors.pop((tenant_id, system.value), None)
 
     def clear(self) -> None:
         with self._lock:
@@ -79,6 +85,14 @@ class PostgresCursorStore:
             )
             conn.commit()
 
+    async def delete(self, *, tenant_id: str, system: SourceSystem) -> None:
+        with self._connect(tenant_id) as conn:
+            conn.execute(
+                "delete from shelfwise_connector_cursors where tenant_id = %s and system = %s",
+                (tenant_id, system.value),
+            )
+            conn.commit()
+
     def clear(self) -> None:
         with self._connect(None) as conn:
             conn.execute("delete from shelfwise_connector_cursors")
@@ -119,6 +133,10 @@ _MAX_POLL_PAGES = 10_000
 
 class PollingConnector(SourceConnector):
     source_system: SourceSystem
+    # Odoo returns a durable `write_date` watermark. ERP OData/SYSPRO connectors return
+    # a continuation for one finite snapshot and must restart at page one after completing
+    # that snapshot; retaining their final page token would poll only the final page forever.
+    uses_incremental_cursor = False
 
     def __init__(self, cursors: InMemoryCursorStore, *, tenant_id: str) -> None:
         self._cursors = cursors
@@ -129,7 +147,6 @@ class PollingConnector(SourceConnector):
             tenant_id=self._tenant_id,
             system=self.source_system,
         )
-        latest_cursor = cursor
         seen: set[tuple[str, str, str, str]] = set()
         # Bounded by _MAX_POLL_PAGES (NASA Power-of-Ten: every loop has a known upper
         # bound) and breaks early on a non-advancing cursor, so a misbehaving or hostile
@@ -145,14 +162,19 @@ class PollingConnector(SourceConnector):
                 yield record
             if next_cursor is None or next_cursor == cursor:
                 break
-            latest_cursor = next_cursor
-            cursor = next_cursor
-        if latest_cursor is not None:
+            # Persist only after callers have processed the page's records. If an intake
+            # failure interrupts the generator, replaying the previous page is safe because
+            # inbound-record deduplication prevents data loss or double application.
             await self._cursors.set(
                 tenant_id=self._tenant_id,
                 system=self.source_system,
-                cursor=latest_cursor,
+                cursor=next_cursor,
             )
+            cursor = next_cursor
+        if not self.uses_incremental_cursor:
+            # A completed pagination scan has no valid continuation to retain. Clearing the
+            # page token makes the next scheduled poll read the full current snapshot.
+            await self._cursors.delete(tenant_id=self._tenant_id, system=self.source_system)
 
     @abstractmethod
     async def fetch_page(

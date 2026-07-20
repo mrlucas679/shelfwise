@@ -17,10 +17,10 @@
 > working-product branch and requires an explicit release decision.
 
 **One consolidated file.** It merges (a) a deep, read-only code audit run with the `improve` skill
-against the repo's own build skills in `plot/skills/`, (b) the verified status of every item in
-[`Things that needs to be implemented.md`](Things%20that%20needs%20to%20be%20implemented.md), and
-(c) a single prioritized backlog that unifies both. Nothing from the "Things" file was dropped; each
-item was re-checked against the current code and given a verified status.
+against the repo's own build skills in `plot/skills/`, (b) the verified status of every item from
+the former `Things that needs to be implemented.md` source (now consolidated into this historical
+backlog), and (c) a single prioritized backlog that unifies both. Nothing from the former "Things"
+file was dropped; each item was re-checked against the current code and given a verified status.
 
 - **Audited at commit:** `c14c297` (branch `feature/chat-first-approval-ui`)
 - **Audit date:** 2026-07-09

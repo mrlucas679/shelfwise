@@ -33,6 +33,7 @@ def map_odoo_product(record: dict, *, tenant_id: str) -> InboundRecord:
 
 class OdooProductConnector(PollingConnector):
     source_system = SourceSystem.ODOO
+    uses_incremental_cursor = True
 
     def __init__(
         self,

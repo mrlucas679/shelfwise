@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from shelfwise_contracts import Money
@@ -55,6 +55,7 @@ def map_yoco_checkout(payload: dict, *, tenant_id: str) -> list[InboundRecord]:
         quantity = parse_quantity(metadata.get("quantity", 1))
         if quantity <= 0:
             raise ValueError("quantity must be positive")
+        unit_price_minor = _exact_unit_price_minor(amount_minor, quantity)
         sale = SalesLine(
             tenant_id=tenant_id,
             order_id=str(metadata.get("order_id") or checkout_id),
@@ -63,7 +64,7 @@ def map_yoco_checkout(payload: dict, *, tenant_id: str) -> list[InboundRecord]:
             location_id=str(metadata.get("location_id") or "online"),
             quantity=quantity,
             unit_price=Money(
-                minor_units=amount_minor,
+                minor_units=unit_price_minor,
                 currency=str(checkout.get("currency") or "ZAR"),
             ),
             sold_at=sold_at,
@@ -93,6 +94,19 @@ def map_yoco_checkout(payload: dict, *, tenant_id: str) -> list[InboundRecord]:
             raw=payload,
         )
     ]
+
+
+def _exact_unit_price_minor(amount_minor: int, quantity: int | Decimal) -> int:
+    """Return an exactly representable unit price for a checkout-total amount.
+
+    Yoco's checkout amount is the money movement for the whole checkout, not a line-unit
+    price. ShelfWise's SalesLine contract stores a unit price in integral minor units, so
+    a non-exact split must be quarantined instead of rounding and corrupting revenue.
+    """
+    unit_price = Decimal(amount_minor) / Decimal(quantity)
+    if not unit_price.is_finite() or unit_price != unit_price.to_integral_value():
+        raise ValueError("checkout total cannot be represented as an exact unit price")
+    return int(unit_price)
 
 
 class YocoCheckoutWebhookReceiver(WebhookReceiver):

@@ -106,9 +106,28 @@ def test_yoco_succeeded_checkout_requires_reconciled_retail_metadata() -> None:
 
     assert valid[0].source_system is SourceSystem.YOCO
     assert valid[0].validation.ok is True
-    assert valid[0].canonical_payload["unit_price"]["minor_units"] == 12_500
+    assert valid[0].canonical_payload["unit_price"]["minor_units"] == 6_250
     assert missing_sku[0].validation.ok is False
     assert missing_sku[0].validation.errors == ("yoco checkout metadata has no sku",)
+
+
+def test_yoco_quarantines_checkout_totals_without_an_exact_unit_price() -> None:
+    records = map_yoco_checkout(
+        {
+            "id": "ch_uneven",
+            "status": "succeeded",
+            "amount": 100,
+            "currency": "ZAR",
+            "createdDate": "2026-07-20T12:00:00Z",
+            "metadata": {"sku": "MILK-2L", "quantity": 3, "location_id": "store-1"},
+        },
+        tenant_id="tenant-a",
+    )
+
+    assert records[0].validation.ok is False
+    assert records[0].validation.errors == (
+        "yoco checkout is malformed: checkout total cannot be represented as an exact unit price",
+    )
 
 
 def test_registry_routes_dynamics_and_yoco() -> None:

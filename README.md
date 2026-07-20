@@ -187,7 +187,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (744 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (747 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
@@ -359,7 +359,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         744 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         747 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -386,15 +386,17 @@ Built now:
 - HITL approve/reject, learning store with visible threshold adjustments, and task-style
   write-back receipts (read-only/pending-write posture toward source systems).
 - Connector provenance layer (SAP/Odoo/SYSPRO/Dynamics polling; Shopify/Square/Lightspeed/Yoco
-  webhook-style intake) with quarantine, per-system mappers, and inbound record persistence.
-  Dynamics preserves opaque Business Central OData continuation links; Yoco accepts a succeeded
-  checkout as a sale only when it supplies explicit SKU, quantity, and location metadata.
+  webhook-style intake) with quarantine, per-system mappers, retry-safe webhook deduplication,
+  and inbound record persistence. Completed Dynamics/SAP/SYSPRO pagination scans clear their
+  opaque continuation before the next interval; Odoo retains its durable `write_date` watermark.
+  Yoco accepts a succeeded checkout as a sale only when it supplies explicit SKU, quantity, and
+  location metadata and the checkout total has an exact minor-unit unit-price split.
 - MLOps run/prompt registries, accountability reporting, observability snapshot, and eval gate.
 - Postgres store with tenant-scoped RLS schema; offline-safe OpenAI-compatible inference gateway
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
   workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 744 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+- 747 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external

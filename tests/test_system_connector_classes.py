@@ -17,7 +17,7 @@ from shelfwise_connectors import (
 )
 
 
-def test_sap_inventory_connector_fetches_pages_and_advances_cursor() -> None:
+def test_sap_inventory_connector_fetches_pages_and_clears_completed_page_cursor() -> None:
     async def run() -> tuple[list[str], str | None, list[dict[str, str]]]:
         calls: list[dict[str, str]] = []
 
@@ -55,7 +55,7 @@ def test_sap_inventory_connector_fetches_pages_and_advances_cursor() -> None:
     ids, cursor, calls = asyncio.run(run())
 
     assert ids == ["4011@0001"]
-    assert cursor == "cursor_2"
+    assert cursor is None
     assert calls == [{"$top": "200"}, {"$top": "200", "$skiptoken": "cursor_2"}]
 
 
@@ -105,7 +105,7 @@ def test_odoo_product_connector_builds_jsonrpc_poll_and_uses_write_date_cursor()
     assert calls[1]["params"]["args"][5] == [[["write_date", ">", cursor]]]
 
 
-def test_syspro_inventory_connector_fetches_items() -> None:
+def test_syspro_inventory_connector_fetches_items_and_clears_completed_page_cursor() -> None:
     async def run() -> tuple[list[str], str | None]:
         async def fetch_json(
             _url: str,
@@ -134,7 +134,7 @@ def test_syspro_inventory_connector_fetches_items() -> None:
     ids, cursor = asyncio.run(run())
 
     assert ids == ["4011@WH1"]
-    assert cursor == "next"
+    assert cursor is None
 
 
 def test_source_specific_webhook_receivers_build_inbound_records_and_dedupe() -> None:
