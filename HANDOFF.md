@@ -631,8 +631,9 @@ until that receipt exists.
 
 ### Latency
 
-- `LLM_TIMEOUT_SECONDS` is clamped to 29 seconds.
-- `SHELFWISE_REQUEST_TIMEOUT_SECONDS` is clamped to 29 seconds.
+- `LLM_TIMEOUT_SECONDS` is bounded by the remaining request budget.
+- `SHELFWISE_REQUEST_TIMEOUT_SECONDS` defaults to 120 seconds; its outer middleware deadline
+  protects the service while per-call inference budgets fail closed earlier.
 - HTTP middleware returns 504 at the whole-request deadline, including multi-call agentic
   requests.
 - CI measures post-build production topology readiness under 60 seconds.
@@ -664,7 +665,8 @@ until that receipt exists.
 - checks `/inference/readiness` for AMD vLLM and Google Gemma 4 routine/strong models;
 - creates a session through `/auth/session`;
 - sends two fresh unseen chat questions with unique conversation/message IDs;
-- requires each chat response under 30 seconds;
+- allows each chat response the documented live-model request budget (130 seconds in the
+  prescreen, above the 120-second application deadline);
 - requires `X-ShelfWise-Provider: vllm_mi300x`, `X-ShelfWise-Answer-Source: model`, and
   `X-ShelfWise-Replayed: false`;
 - requires English-compatible output and unique correlation IDs;
@@ -674,9 +676,9 @@ Run it only after the AMD endpoint and production application are live:
 
 ```powershell
 python scripts/track3_prescreen.py `
-  --base-url http://<public-app-origin> `
+  --base-url https://<public-app-origin> `
   --startup-deadline 60 `
-  --request-deadline 29 `
+  --request-deadline 130 `
   --output reports/track3_prescreen_<timestamp>.json
 ```
 

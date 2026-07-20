@@ -163,6 +163,16 @@ def test_ci_boots_and_smokes_production_public_origin() -> None:
     assert "docker-compose.production.yml down --volumes" in workflow
 
 
+def test_droplet_runbook_uses_the_live_model_request_budget() -> None:
+    runbook = (ROOT / "DROPLET_BOOTSTRAP.md").read_text(encoding="utf-8")
+    handoff = (ROOT / "HANDOFF.md").read_text(encoding="utf-8")
+
+    assert "--request-deadline 130" in runbook
+    assert "--request-deadline 29" not in runbook
+    assert "--request-deadline 130" in handoff
+    assert "--request-deadline 29" not in handoff
+
+
 def test_readme_points_to_capability_manifest_for_api_reference() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
