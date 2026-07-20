@@ -89,7 +89,7 @@ def test_frontend_proxy_includes_all_browser_feature_route_prefixes() -> None:
     text = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
 
     assert "^/(auth|" in text
-    for prefix in ("intelligence", "scan", "trace", "twin", "voice"):
+    for prefix in ("intelligence", "scan", "scenarios", "trace", "twin", "voice"):
         assert f"|{prefix}|" in text
 
 

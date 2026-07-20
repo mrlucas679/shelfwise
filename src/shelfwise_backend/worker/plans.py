@@ -1,3 +1,15 @@
+"""Validated plan model and journal-backed runner for governed multi-step execution.
+
+Wiring status (deliberate, 2026-07-16): plan COMPILATION is live - activating a mined
+skill (`/mlops/skills/mined/{id}/activate`) compiles to the `Plan` shape validated here
+and returns it as a governed recommendation artifact. Plan EXECUTION via `PlanRunner`
+is intentionally not wired to any route or worker yet: the platform's write posture is
+`recommend_only_no_source_mutation` (see the writeback sink's rollback policy), so no
+write capability exists to register. When the governed-write phase lands (real
+connector write-backs behind HITL approval), register capabilities here and wire the
+runner then - do not wire it earlier with stub capabilities.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

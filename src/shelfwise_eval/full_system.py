@@ -8,6 +8,7 @@ It produces row-level evidence and treats integrity failures as process failures
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -195,6 +197,12 @@ class FullSystemConfig:
     run_id: str = ""
     artifact_dir: Path | str | None = None
     allow_overwrite_artifact_dir: bool = False
+    # None resolves per backend: "local" on the in-memory default (state resets between
+    # runs there), a per-run unique tenant on durable backends - a persistent shared
+    # Postgres correctly dedupes a second run's identical events and keeps its terminal
+    # decisions, so re-running the harness under one fixed tenant collides with its own
+    # history instead of proving anything.
+    tenant_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.base_seed is None:
@@ -419,6 +427,11 @@ def audit_full_system_integrity(
 def run_full_system(config: FullSystemConfig | None = None) -> FullSystemReport:
     """Run the complete scenario rotation and return an auditable report."""
     effective = config or FullSystemConfig()
+    # Resolve the run tenant ONCE and align the ambient tenant context with it: routes
+    # verify event tenant against the request context, so a per-run tenant (durable
+    # backends) must also be the default context tenant for the run's requests.
+    resolved_tenant = effective.tenant_id or _default_harness_tenant()
+    effective = dataclasses.replace(effective, tenant_id=resolved_tenant)
     runtime = _load_runtime()
     if effective.reset_state:
         _reset_in_memory_state(runtime)
@@ -427,7 +440,7 @@ def run_full_system(config: FullSystemConfig | None = None) -> FullSystemReport:
     environment = {
         "WORKER_ENABLED": "false",
         "SHELFWISE_AUTH_MODE": "off",
-        "SHELFWISE_TENANT_ID": "local",
+        "SHELFWISE_TENANT_ID": resolved_tenant,
         "SHELFWISE_CHAT_DATA_DOMAIN": "world_simulation",
     }
     with (
@@ -443,7 +456,7 @@ class _FullSystemDriver:
         self.config = config
         self.runtime = runtime
         self.client = client
-        self.tenant_id = "local"
+        self.tenant_id = config.tenant_id or _default_harness_tenant()
         self.site_id = self.runtime.world_facts.get_scenario_facts(self.tenant_id).location
         self.run_id = config.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         self.started_at = datetime.now(UTC).isoformat()
@@ -1055,7 +1068,7 @@ class _FullSystemDriver:
 
     def _probe_misprice(self) -> None:
         seed = self.config.base_seed + 900_000
-        tenant_id = "local"
+        tenant_id = self.tenant_id
         scenario = self.runtime.world_facts.get_scenario_facts(tenant_id)
         observed_price = scenario.unit_price.amount / 2
         event = {
@@ -1428,7 +1441,7 @@ class _FullSystemDriver:
                 secret=secret,
             )
 
-        owner_headers = {"Authorization": f"Bearer {token('local')}"}
+        owner_headers = {"Authorization": f"Bearer {token(self.tenant_id)}"}
         other_headers = {"Authorization": f"Bearer {token('other_tenant')}"}
         event_id = f"evt_full_auth_{self.config.base_seed}"
         with _temporary_environment(
@@ -1445,7 +1458,7 @@ class _FullSystemDriver:
                     "ts": "2026-07-10T10:14:00Z",
                     "actor": self.site_id,
                     "source": "scanner",
-                    "tenant_id": "local",
+                    "tenant_id": self.tenant_id,
                     "data_domain": "world_simulation",
                     "payload": {"sku": "local-probe", "location": "local-site"},
                 },
@@ -1524,7 +1537,7 @@ class _FullSystemDriver:
                 "ts": "2026-07-10T08:00:00Z",
                 "actor": self.site_id,
                 "source": "wms_csv",
-                "tenant_id": "local",
+                "tenant_id": self.tenant_id,
                 "payload": {"sku": "WORKER-PROBE", "on_hand": 10},
             },
         )
@@ -1542,7 +1555,7 @@ class _FullSystemDriver:
                 "ts": "2026-07-10T10:14:00Z",
                 "actor": self.site_id,
                 "source": "scanner",
-                "tenant_id": "local",
+                "tenant_id": self.tenant_id,
                 "payload": {"sku": "local-probe", "location": "local-site"},
             }
         )
@@ -2377,6 +2390,19 @@ def _load_runtime() -> Any:
         writeback_sink=writeback_sink,
         world_facts=world_facts,
     )
+
+
+def _default_harness_tenant() -> str:
+    """Per-run tenant on durable backends; the historical "local" on in-memory.
+
+    In-memory state resets between runs, so "local" stays byte-compatible with every
+    existing receipt. Durable backends never get wiped by the harness (by design), so
+    isolation must come from identity: each run gets its own tenant, exactly like the
+    Postgres contract tests.
+    """
+    if os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower() == "memory":
+        return "local"
+    return f"harness_{uuid4().hex[:10]}"
 
 
 def _reset_in_memory_state(runtime: Any) -> None:

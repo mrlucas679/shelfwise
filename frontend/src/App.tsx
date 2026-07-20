@@ -336,7 +336,11 @@ function configuredBase(): string {
   return (runtimeConfig()?.apiBase ?? env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
 }
 function apiKey(): string {
-  return (runtimeConfig()?.apiKey ?? (import.meta.env as Record<string, string | undefined>).VITE_API_KEY ?? '').trim()
+  // Deliberately runtime-config only (public/shelfwise-config.js, a deployment-owned
+  // file): a VITE_API_KEY build-time fallback would inline the secret into the shipped
+  // JS bundle for every browser to read (SEC-06). Browser auth is the signed httponly
+  // session cookie via /auth/session; x-api-key exists for server-to-server callers.
+  return (runtimeConfig()?.apiKey ?? '').trim()
 }
 function authHeaders(): Record<string, string> {
   const key = apiKey()
@@ -1225,7 +1229,9 @@ const OPERATION_READ_ENDPOINTS = [
 
 const GATED_ENDPOINTS = [
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
-  { label: 'Chat stream', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
+  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/answer/done; deltas only from a live provider).' },
+  { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
+  { label: 'Chat', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
   { label: 'Twin observation ingest', method: 'POST', path: '/twin/observations', group: 'connections', detail: 'Tenant-bound derived observation intake; raw media is rejected.' },
@@ -1251,6 +1257,13 @@ const GATED_ENDPOINTS = [
   { label: 'Tenant profile write', method: 'POST', path: '/tenants/me', group: 'operations', detail: 'Owner-only profile and connector policy update.' },
   { label: 'Worker process one', method: 'POST', path: '/worker/process-one', group: 'operations', detail: 'Manual worker execution; role and API-key gated.' },
   { label: 'Memory consolidation', method: 'POST', path: '/mlops/consolidate-memory', group: 'operations', detail: 'Governed learning fact consolidation.' },
+  { label: 'Skill catalogue', method: 'GET', path: '/mlops/skills', detail: 'Assistant skill manifests with lifecycle status.' },
+  { label: 'Promote skill', method: 'POST', path: '/mlops/skills/{skill_id}/promote', group: 'operations', detail: 'Flip a draft skill to promoted once it clears its own evaluation bar.' },
+  { label: 'Retire skill', method: 'POST', path: '/mlops/skills/{skill_id}/retire', group: 'operations', detail: 'Retire a skill from discovery permanently.' },
+  { label: 'Mined skills', method: 'GET', path: '/mlops/skills/mined', detail: 'Playbooks mined from repeated, measurably successful outcomes.' },
+  { label: 'Activate mined skill', method: 'POST', path: '/mlops/skills/mined/{skill_id}/activate', group: 'operations', detail: 'Activate a reviewed mined draft and compile it to a governed plan artifact.' },
+  { label: 'Execute governed plan', method: 'POST', path: '/mlops/plans/execute', group: 'operations', detail: 'Run a validated plan through the journaled runner; the HITL write-back sink is the sole write capability.' },
+  { label: 'Worker schedules', method: 'GET', path: '/worker/schedules', group: 'operations', detail: 'Recurring governed schedules and their receipts (twin fidelity revalidation).' },
   { label: 'Inference smoke', method: 'GET', path: '/inference/smoke', group: 'operations', detail: 'Manual inference smoke test; records a model run.' },
   { label: 'Chat conversations', method: 'GET', path: '/chat/conversations', group: 'operations', detail: 'List the caller tenant/user chat conversations.' },
   { label: 'Chat conversation detail', method: 'GET', path: '/chat/conversations/{conversation_id}', group: 'operations', detail: 'Full transcript for one conversation.' },
@@ -1844,6 +1857,84 @@ function WorkspaceSection({
       </div>
       {children}
     </section>
+  )
+}
+
+type TwinTopology = {
+  entities?: Array<{ twin_id?: string; entity_type?: string; display_name?: string; local_id?: string }>
+  relationships?: Array<{ from_id?: string; to_id?: string; kind?: string }>
+  fidelity?: { total?: number; dimensions?: Record<string, number>; weakest_dimension?: string }
+}
+
+/** 2D store topology from the REAL twin read model - measured entities only, never a
+ * pretended floor plan. Renders what onboarding/observations actually created; the
+ * honest empty state says so instead of drawing invented shelves. Camera/sensor feeds
+ * later enrich these same entities in place. */
+function TwinTopologySection({ storeId }: { storeId: string }) {
+  const [topology, setTopology] = useState<TwinTopology | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchJson<TwinTopology>(`/twin/stores/${encodeURIComponent(storeId)}`, {}, controller.signal)
+      .then((payload) => {
+        setTopology(payload)
+        setFailed(false)
+      })
+      .catch(() => {
+        // An effect-cleanup abort (StrictMode double-mount, unmount, storeId change) is
+        // not a backend failure - only a genuinely failed request may claim one.
+        if (!controller.signal.aborted) setFailed(true)
+      })
+    return () => controller.abort()
+  }, [storeId])
+  const entities = topology?.entities ?? []
+  const byType = new Map<string, typeof entities>()
+  for (const entity of entities) {
+    const kind = entity.entity_type || 'entity'
+    byType.set(kind, [...(byType.get(kind) ?? []), entity])
+  }
+  const groups = [...byType.entries()]
+  const width = 560
+  const columns = Math.max(1, groups.length)
+  const columnWidth = width / columns
+  return (
+    <WorkspaceSection title="Store topology (digital twin)">
+      {failed || !topology || entities.length === 0 ? (
+        <WorkspaceEmpty>
+          {failed
+            ? 'Twin topology is unavailable right now.'
+            : `No twin entities onboarded yet for ${formatLabel(storeId)} - the topology map fills in as onboarding and observations create real entities.`}
+        </WorkspaceEmpty>
+      ) : (
+        <>
+          <svg viewBox={`0 0 ${width} ${Math.max(120, 40 + Math.max(...groups.map(([, list]) => list.length)) * 26)}`} role="img" aria-label={`Twin topology for ${storeId}: ${entities.length} measured entities`} style={{ width: '100%', height: 'auto' }}>
+            {groups.map(([kind, list], columnIndex) => (
+              <g key={kind} transform={`translate(${columnIndex * columnWidth + 8}, 8)`}>
+                <text x="0" y="12" fontSize="11" fontWeight="600" fill="currentColor">{formatLabel(kind)} ({list.length})</text>
+                {list.slice(0, 12).map((entity, rowIndex) => (
+                  <g key={entity.twin_id ?? rowIndex} transform={`translate(0, ${22 + rowIndex * 26})`}>
+                    <rect width={columnWidth - 16} height="20" rx="4" fill="none" stroke="currentColor" strokeOpacity="0.35" />
+                    <text x="6" y="14" fontSize="10" fill="currentColor">{(entity.display_name || entity.local_id || entity.twin_id || 'entity').slice(0, 28)}</text>
+                  </g>
+                ))}
+                {list.length > 12 ? (
+                  <text x="0" y={22 + 12 * 26 + 12} fontSize="10" fill="currentColor" fillOpacity="0.7">+{list.length - 12} more</text>
+                ) : null}
+              </g>
+            ))}
+          </svg>
+          <div className="workspace-list">
+            <WorkspaceRow
+              label="Fidelity"
+              meta={`weakest: ${formatLabel(topology.fidelity?.weakest_dimension ?? 'unknown')}`}
+              detail={Object.entries(topology.fidelity?.dimensions ?? {}).map(([key, value]) => `${formatLabel(key)}: ${value}`).join(' · ')}
+              value={String(topology.fidelity?.total ?? '—')}
+              tone={(topology.fidelity?.total ?? 0) >= 60 ? 'ok' : 'warn'}
+            />
+          </div>
+        </>
+      )}
+    </WorkspaceSection>
   )
 }
 
@@ -2642,6 +2733,7 @@ function WorkspaceScreen({
 
   const renderOperations = () => (
     <>
+      <TwinTopologySection storeId={seed?.location ?? 'store_12'} />
       <div className="workspace-metrics">
         <WorkspaceMetric label="Health" value={ops.health.ok === true ? 'OK' : data ? 'Live' : 'Loading'} tone={ops.health.ok === true || data ? 'ok' : 'warn'} />
         <WorkspaceMetric label="Ready" value={ops.readiness.ready === true ? 'Ready' : ops.readiness.ready === false ? 'Check' : 'Unknown'} tone={ops.readiness.ready === true ? 'ok' : ops.readiness.ready === false ? 'risk' : 'warn'} />

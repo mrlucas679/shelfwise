@@ -9,6 +9,7 @@ condition, recording the selection transparently in the returned receipt.
 
 from __future__ import annotations
 
+import os
 import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -101,6 +102,22 @@ class PopulationReceipt:
         }
 
 
+def world_mode() -> str:
+    """Return the configured world-population mode (the seam IMPLEMENTATION_PLAN promised).
+
+    ``static`` (default): one-time deterministic population, the mode every current
+    deployment runs. ``continuous``: reserved for an always-on world-evolution service;
+    the continuous DRIVER that exists today is the full-system harness's world rotation
+    (`shelfwise_eval.full_system`, `world_cycles`), which repeatedly evolves and replays
+    the generated world through the real pipeline. Any other value fails loudly rather
+    than silently behaving like static.
+    """
+    mode = os.getenv("SHELFWISE_WORLD_MODE", "static").strip().lower() or "static"
+    if mode not in {"static", "continuous"}:
+        raise ValueError(f"unsupported SHELFWISE_WORLD_MODE: {mode}")
+    return mode
+
+
 def populate_world(
     policy: GenerationPolicy,
     *,
@@ -111,6 +128,13 @@ def populate_world(
     """Generate a deterministic world for one tenant and persist it through ``store``."""
     if not tenant_id.strip():
         raise ValueError("tenant_id is required")
+    if world_mode() == "continuous":
+        raise NotImplementedError(
+            "SHELFWISE_WORLD_MODE=continuous is reserved: an always-on world-evolution "
+            "service is not built. Use the full-system harness's world rotation "
+            "(shelfwise_eval.full_system, --world-cycles) for continuous simulation, or "
+            "leave the mode static for one-time deterministic population."
+        )
     rng = Random(policy.seed)
     products = sample_assortment(
         policy.seed, size=policy.assortment_size, scale=policy.catalog_scale

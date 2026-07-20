@@ -7,7 +7,7 @@
 
 ## Status
 
-- **State**: IN PROGRESS (local implementation complete; remote job proof pending)
+- **State**: DONE (GitHub Actions CI and capability contract passed on `45debdf`)
 - **Priority**: P1
 - **Effort**: M
 - **Risk**: LOW

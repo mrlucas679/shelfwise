@@ -11,11 +11,12 @@ from shelfwise_storage.rls import apply_tenant_rls
 
 
 class InMemoryDecisionStore:
-    """Tiny in-memory HITL store for the hackathon demo.
+    """Process-local HITL decision store used by the default zero-config runtime.
 
-    The durable Postgres journal is a later slice. For the demo we need a
-    clear approval loop that is deterministic, idempotent enough for repeat
-    clicks, and visible to the frontend.
+    Production runs `PostgresDecisionStore` below (selected via
+    SHELFWISE_STORE_BACKEND=postgres); this class keeps the identical approval-loop
+    contract - deterministic, idempotent for repeat clicks, terminal states protected -
+    without any external dependency for local development and tests.
     """
 
     def __init__(self) -> None:

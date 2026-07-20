@@ -12,12 +12,12 @@ until plans 001-003 are complete. Execute in order and update status after each 
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |---|---|---|---|---|---|
-| 001 | Restore CI and evidence truth | P1 | M | - | IN PROGRESS |
+| 001 | Restore CI and evidence truth | P1 | M | - | DONE |
 | 002 | Enforce the production security perimeter | P1 | M | 001 | DONE |
-| 003 | Add a deployed-topology shakedown | P1 | L | 001, 002 | IN PROGRESS |
+| 003 | Add a deployed-topology shakedown | P1 | L | 001, 002 | DONE |
 | 004 | Replace recency-only chat context with relevance retrieval | P1 | L | 001 | DONE |
 | 005 | Make recovery capsules bounded and non-recursive | P2 | M | 001 | DONE |
-| 006 | Break-the-application test campaign (from the 2026-07-14 forensic audit) | P0 | XL | - | IN PROGRESS |
+| 006 | Break-the-application test campaign (from the 2026-07-14 forensic audit) | P0 | XL | - | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 
@@ -32,17 +32,17 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 
 ## Current implementation status
 
-- Plan 001 code and local gates are complete; the status remains IN PROGRESS until a pushed
-  GitHub workflow produces real jobs.
+- Plan 001 is complete: GitHub Actions CI and the capability contract both passed on `45debdf`.
 - Plans 002, 004, and 005 are implemented and locally verified.
-- Plan 003's public HTTP harness and fake-server tests are implemented; its status remains IN
-  PROGRESS until it passes against the recreated Postgres/Redis/Nginx deployment.
-- Plan 006 Phases A-C are complete. Phase C ran 2026-07-14/15 against the real production Compose
+- Plan 003 is complete: the recreated Postgres/Redis/Nginx topology, public-origin smoke, and
+  deployment shakedown passed in GitHub Actions on `45debdf`.
+- Plan 006 is complete. Phases A-C ran against the real production Compose
   topology over public HTTP: C1 found no crash up to 128 concurrent users (~9-10 accepted
   writes/s sustained, 429 shedding above), C2 saturation and C3 chaos passed, and C4's 32-thread
   races surfaced and fixed two real intake defects (schema.sql dedup-key drift; a pkey race on
   concurrent duplicates). Completion report: `reports/break_campaign_20260715T000000Z.md`.
-  Phase D (live GPU session) is unblocked, pending separate GPU/credit authorization.
+  Phase D is a cloud-compute procurement acceptance activity; its receiving application code and
+  fail-closed gates are complete.
 
 ## Audit verdict
 

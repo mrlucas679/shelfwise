@@ -389,3 +389,28 @@ def test_worldgen_drill_large_assortment_still_feeds_every_event_type():
     assert "pos_price_outlier_review" in scenarios, (
         f"no price-outlier decision minted from 3000 products; cascades: {sorted(scenarios)}"
     )
+
+
+def test_world_mode_seam_is_real_static_default_and_honest_continuous(monkeypatch) -> None:
+    """IMPLEMENTATION_PLAN promised a SHELFWISE_WORLD_MODE seam; this pins that it exists,
+    defaults to static, rejects unknown modes loudly, and that continuous fails honestly
+    (pointing at the harness's world rotation) instead of silently behaving like static."""
+    import pytest
+
+    from shelfwise_worldgen.populate import GenerationPolicy, populate_world, world_mode
+    from shelfwise_worldgen.world_store import InMemoryWorldSnapshotStore
+
+    monkeypatch.delenv("SHELFWISE_WORLD_MODE", raising=False)
+    assert world_mode() == "static"
+
+    monkeypatch.setenv("SHELFWISE_WORLD_MODE", "sideways")
+    with pytest.raises(ValueError, match="unsupported SHELFWISE_WORLD_MODE"):
+        world_mode()
+
+    monkeypatch.setenv("SHELFWISE_WORLD_MODE", "continuous")
+    with pytest.raises(NotImplementedError, match="full-system harness"):
+        populate_world(
+            GenerationPolicy(seed=1),
+            tenant_id="world_mode_seam_tenant",
+            store=InMemoryWorldSnapshotStore(),
+        )

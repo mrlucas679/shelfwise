@@ -26,7 +26,12 @@ from .onboarding_store import (
     PostgresOnboardingManifestRegistry,
     create_onboarding_manifest_registry,
 )
-from .projection_worker import ProjectionReceipt, TwinProjectionWorker
+from .projection_worker import (
+    ProjectionReceipt,
+    TwinProjectionLoopService,
+    TwinProjectionWorker,
+    twin_projection_worker_enabled,
+)
 from .projector import ProjectionResult, SourcePolicy, TwinProjector, default_source_policy
 from .scenario import ScenarioDelta, ScenarioEngine, ScenarioRequest
 from .scenario_store import (
@@ -71,6 +76,7 @@ __all__ = [
     "TwinEntitySeed",
     "TwinObservation",
     "TwinOnboardingManifest",
+    "TwinProjectionLoopService",
     "TwinProjectionWorker",
     "TwinProjector",
     "TwinPropertyState",
@@ -85,4 +91,5 @@ __all__ = [
     "create_twin_service",
     "create_twin_store",
     "default_source_policy",
+    "twin_projection_worker_enabled",
 ]

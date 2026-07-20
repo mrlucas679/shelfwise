@@ -42,7 +42,7 @@ happens.
 - [Deployment](#deployment)
 - [Project Structure](#project-structure)
 - [Current Scope](#current-scope)
-  - [Digital Twin (in progress)](#digital-twin-in-progress-not-yet-fully-tested)
+  - [Digital Twin](#digital-twin-software-layer-implemented-and-tested)
 - [Inference Strategy](#inference-strategy)
 - [Model Training](#model-training)
 - [Contributing](#contributing)
@@ -94,8 +94,9 @@ happens.
   return 503 instead of silently faking success.
 
 Submission assets (slide deck PDF and cover image) are in [`submission/`](submission/).
-The [original problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md) distinguishes proven,
-partial, and missing retailer workflows.
+The [original problem coverage audit](reports/ORIGINAL_PROBLEM_COVERAGE.md) is retained as a
+dated baseline; [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) is the authoritative current
+implementation inventory.
 
 ## Architecture
 
@@ -186,7 +187,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (400+ tests) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (736 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
@@ -358,7 +359,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         400+ tests: contracts, cascades, security, agentic paths
+tests/                         736 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -391,34 +392,38 @@ Built now:
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
   workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 400+ tests across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+- 736 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
-Next (honest roadmap, not yet built):
+Deployment acceptance scope (the software and its gates are implemented; these require external
+infrastructure or partner systems):
 
-- Deploy a genuine second model endpoint so `dual_model_configured` flips true in production,
-  not just in tested routing code.
-- Concurrent 1/8/32-user MI300X inference benchmark with ROCm/vLLM resource telemetry.
-- Live multi-branch inventory feeds behind the sourcing decision (the decision logic is general
-  and unit-tested; today's demo network is generated-world snapshot data, not live branch feeds).
-- Persist score history and candidate deltas in a production database rather than the current
-  repeatable synthetic fleet-evaluation receipt.
+- Provision the two MI300X endpoints and run the committed 1/8/32-user acceptance benchmark.
+- Connect a retailer's live multi-branch inventory feeds through the implemented connector
+  contracts and execute their per-system acceptance tests.
+- Run the committed production persistence and score-history acceptance gates against the chosen
+  deployment database.
 
-### Digital Twin (in progress, not yet fully tested)
+### Digital Twin (software layer implemented and tested; edge hardware pending)
 
-ShelfWise is being extended into an exact-store digital twin — a versioned, provenance-tracked
+ShelfWise is extended into an exact-store digital twin — a versioned, provenance-tracked
 model of one real shop, layered underneath (not replacing) the agent cascade above. The twin core
 (`shelfwise_twin`: entities, relationships, append-only observations, idempotent projection,
 scenario branches, fidelity scoring, sensor calibration, and a durably-replayable onboarding
-manifest registry) is landing on `developers` now, with its own test suite
-(`tests/test_twin_*.py`) passing alongside the existing 590+ tests. Onboarding-created topology
+manifest registry) is implemented on `developers` with its own passing test suite
+(`tests/test_twin_*.py`). Onboarding-created topology
 (seeded fixtures, the store's own display name/attributes) and the deterministic replay/recovery
 projection hash both survive a full projected-state rebuild — verified directly by wiping the
-twin store and replaying purely from durable state. The camera/edge-sensor layer below is still
-design-stage — not yet implemented, not yet tested against real hardware. Full detail, hard
-guards, and phased rollout live in `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md`.
+twin store and replaying purely from durable state. The async projection worker is wired as a
+lifespan service (`TwinProjectionLoopService`, enabled via `TWIN_PROJECTION_WORKER_ENABLED`,
+Redis-bus-only by design — it supplements the idempotent inline ingest projection for crash
+recovery and multi-replica topologies, and refuses the in-memory bus, which has no consumer
+groups). The camera/edge-sensor software boundary is implemented: signed, bounded device
+observations enter through the edge gateway and project into the twin. Real camera/sensor devices
+remain an external procurement and integration acceptance step. Full detail, hard guards, and
+phased rollout live in `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md`.
 
-**Twin core data flow (partially implemented, under active test):**
+**Twin core data flow (software layer implemented and tested):**
 
 ```mermaid
 flowchart LR
@@ -553,17 +558,37 @@ policy-checked observations (a shelf-slot facing-count band, a confidence score,
 version) cross the trust boundary into the twin. See the plan doc's Section 26/27 for the full
 no-footage privacy contract.
 
-Camera/sensor edge hardware (AMD Kria/Versal), the 2D Store Twin UI, and multi-week fidelity
-re-validation are explicitly **not implemented** — see the plan doc's phased roadmap (Phases 0-G)
-for the intended build order before any of it is claimed as working.
+The 2D Store Twin UI and recurring fidelity re-validation are implemented and tested. AMD
+Kria/Versal hardware is an external procurement item; its signed-observation receiving path and
+acceptance gate are already part of the application.
 
-### Conversational assistant architecture (design-stage, not yet implemented)
+### Conversational assistant architecture (implemented 2026-07-16)
 
-The chat surface today is a 12-message sliding window with no skill registry or progressive tool
-discovery (see `DIGITAL_TWIN_RESEARCH_AND_IMPLEMENTATION_PLAN.md` Sections 35-43 for the full gap
-analysis). The target design keeps the existing 11 agents and Critic/Executive/HITL chain as the
-sole owners of any recommendation — the assistant is a conversational surface over them, never a
-replacement decision-maker:
+The chat surface is no longer a bare sliding window. Implemented per the plan's Section 41
+blueprint (`conversation_memory.py`, `conversation_routing.py`, `context_budget.py`,
+`shelfwise_mlops/skill_registry.py`, additive Postgres tables with RLS):
+
+- **Hierarchical conversation memory** — everything older than the recent-turns window is
+  compacted into a durable, provenance-tracked rolling episode summary
+  (`shelfwise_chat_memory_items`, idempotent, corrections preserved verbatim, longer prefixes
+  supersede), so a long conversation keeps its objective and earlier context instead of silently
+  losing it. Compaction is deterministic-extractive with the method recorded on the item; an
+  LLM-composed summarizer can swap in behind the same store contract.
+- **Progressive skill discovery** — a validated, versioned skill-manifest registry
+  (`shelfwise_skill_manifests`) with a promotion lifecycle (draft → promoted → retired, gated on
+  each skill's own evaluation pass rate). Discovery is deterministic (trigger-term ranked,
+  role-filtered) and only ever surfaces promoted skills; the model sees the skills relevant to
+  this question, never the whole tool surface.
+- **Deterministic tier routing** — every answer carries an auditable route receipt
+  (`conversation-route-v1`: routine vs strong, with the reason), computed from facts known
+  before inference; no free-form model judgment controls routing.
+- **Token-accounted context receipts** — every answer carries a context receipt (window,
+  per-section estimated tokens, selected memory/skills/tools, omissions) validated against the
+  8,192-token allocation BEFORE network I/O.
+
+The existing 11 agents and Critic/Executive/HITL chain remain the sole owners of any
+recommendation — the assistant is a conversational surface over them, never a replacement
+decision-maker:
 
 **Preservation strategy — the assistant sits above the existing agents, never replaces them:**
 

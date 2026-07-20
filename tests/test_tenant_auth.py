@@ -158,12 +158,20 @@ def test_jwt_auth_mode_scopes_learning_to_the_authenticated_tenant(
     client = TestClient(app)
     monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
     monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
-    tenant_a = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_a')}"}
-    tenant_b = {"Authorization": f"Bearer {_token('manager', tenant_id='tenant_b')}"}
+    # Per-run unique tenants: against a persistent shared Postgres, fixed tenant ids make
+    # the second run's identical ingest a correct duplicate (cascade None) and accumulate
+    # learning rows across runs - rerun-safety requires fresh identity, not a fresh DB.
+    from uuid import uuid4
+
+    suffix = uuid4().hex[:10]
+    tenant_a_id = f"tenant_a_{suffix}"
+    tenant_b_id = f"tenant_b_{suffix}"
+    tenant_a = {"Authorization": f"Bearer {_token('manager', tenant_id=tenant_a_id)}"}
+    tenant_b = {"Authorization": f"Bearer {_token('manager', tenant_id=tenant_b_id)}"}
 
     unauthenticated = client.get("/learning")
-    decision_a = client.post("/ingest", json=_scan_event("tenant_a"), headers=tenant_a)
-    decision_b = client.post("/ingest", json=_scan_event("tenant_b"), headers=tenant_b)
+    decision_a = client.post("/ingest", json=_scan_event(tenant_a_id), headers=tenant_a)
+    decision_b = client.post("/ingest", json=_scan_event(tenant_b_id), headers=tenant_b)
     decision_a_id = decision_a.json()["cascade"]["decision"]["id"]
     decision_b_id = decision_b.json()["cascade"]["decision"]["id"]
     client.post(f"/decisions/{decision_a_id}/approve", headers=tenant_a)
@@ -175,8 +183,12 @@ def test_jwt_auth_mode_scopes_learning_to_the_authenticated_tenant(
     assert unauthenticated.status_code == 401
     assert tenant_a_learning.status_code == 200
     assert tenant_b_learning.status_code == 200
-    assert all(event["tenant_id"] == "tenant_a" for event in tenant_a_learning.json()["events"])
-    assert all(event["tenant_id"] == "tenant_b" for event in tenant_b_learning.json()["events"])
+    assert all(
+        event["tenant_id"] == tenant_a_id for event in tenant_a_learning.json()["events"]
+    )
+    assert all(
+        event["tenant_id"] == tenant_b_id for event in tenant_b_learning.json()["events"]
+    )
     assert {event["decision_id"] for event in tenant_a_learning.json()["events"]} == {decision_a_id}
     assert {event["decision_id"] for event in tenant_b_learning.json()["events"]} == {decision_b_id}
 
@@ -288,3 +300,48 @@ def test_bearer_header_is_used_for_storage_tenant_binding(
     )
 
     assert app_module._tenant_id_from_request(request) == "tenant_a"
+
+
+def test_company_login_mints_the_trusted_owner_session(monkeypatch) -> None:
+    """Real credential verification (stdlib scrypt), honest 503 unconfigured, uniform
+    401 on bad credentials, and the exact owner JWT cookie the platform already trusts."""
+    import hashlib
+    import os as _os
+
+    client = TestClient(app)
+
+    monkeypatch.delenv("SHELFWISE_LOGIN_EMAIL", raising=False)
+    monkeypatch.delenv("SHELFWISE_LOGIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+    unconfigured = client.post(
+        "/auth/login", json={"email": "owner@shop.test", "password": "pw"}
+    )
+    assert unconfigured.status_code == 503, "unconfigured login must never be an open door"
+
+    salt = _os.urandom(16)
+    digest = hashlib.scrypt(b"correct-horse", salt=salt, n=16384, r=8, p=1)
+    monkeypatch.setenv("SHELFWISE_LOGIN_EMAIL", "owner@shop.test")
+    monkeypatch.setenv(
+        "SHELFWISE_LOGIN_PASSWORD_HASH", f"scrypt${salt.hex()}${digest.hex()}"
+    )
+
+    wrong_pw = client.post(
+        "/auth/login", json={"email": "owner@shop.test", "password": "wrong"}
+    )
+    wrong_email = client.post(
+        "/auth/login", json={"email": "intruder@shop.test", "password": "correct-horse"}
+    )
+    assert wrong_pw.status_code == 401
+    assert wrong_email.status_code == 401
+    assert wrong_pw.json() == wrong_email.json(), "no oracle about which field was wrong"
+
+    ok = client.post(
+        "/auth/login", json={"email": "Owner@Shop.Test", "password": "correct-horse"}
+    )
+    assert ok.status_code == 200
+    session = ok.json()["session"]
+    assert session["role"] == "owner"
+    assert session["user_id"] == "owner@shop.test"
+    assert "shelfwise_session" in ok.headers.get("set-cookie", "").lower() or ok.cookies, (
+        "login must set the same session cookie the platform verifies"
+    )

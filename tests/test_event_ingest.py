@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -186,8 +188,8 @@ def test_implausibly_stale_operational_event_is_rejected() -> None:
 def test_complete_operational_scan_uses_only_measured_twin_sources() -> None:
     client = TestClient(app)
     event = {
-        **_scan_event("evt_operational_scan_complete"),
-        "tenant_id": "operational_scan_tenant",
+        **_scan_event(f"evt_operational_scan_complete_{uuid4().hex[:10]}"),
+        "tenant_id": f"operational_scan_tenant_{uuid4().hex[:10]}",
         "data_domain": "operational_twin",
         "payload": {
             "sku": "SKU-OPS-1",
@@ -439,12 +441,12 @@ def test_operational_cold_chain_alert_with_bare_temp_fails_closed_not_fabricated
     """
     client = TestClient(app)
     event = {
-        "id": "evt_operational_cold_chain_bare",
+        "id": f"evt_operational_cold_chain_bare_{uuid4().hex[:10]}",
         "type": "cold_chain_alert",
         "ts": "2026-07-06T10:14:00Z",
         "actor": "store_ops",
         "source": "api",
-        "tenant_id": "operational_cold_chain_tenant",
+        "tenant_id": f"operational_cold_chain_tenant_{uuid4().hex[:10]}",
         "data_domain": "operational_twin",
         "payload": {"site_id": "store_ops", "asset_id": "fridge_1", "temp_c": "9.1"},
     }

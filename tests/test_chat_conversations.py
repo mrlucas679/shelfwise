@@ -32,19 +32,26 @@ def _enable_jwt(monkeypatch) -> None:
 
 def test_chat_returns_stable_conversation_and_message_identity(monkeypatch) -> None:
     _enable_jwt(monkeypatch)
+    # Per-run ids: against a persistent shared Postgres, a fixed conversation/message id
+    # from a prior run is CORRECTLY replayed (Replayed: true is the durable-idempotency
+    # feature working across restarts) - rerun-safety requires fresh identity.
+    from uuid import uuid4
+
+    conversation_id = f"conv_a_{uuid4().hex[:10]}"
+    message_id = f"msg_a_{uuid4().hex[:10]}"
     response = TestClient(app).post(
         "/chat",
         headers=_headers(tenant_id="tenant_a", user_id="user_a"),
         json={
             "question": "What needs attention?",
-            "conversation_id": "conv_a",
-            "message_id": "msg_a",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["X-ShelfWise-Conversation-ID"] == "conv_a"
-    assert response.headers["X-ShelfWise-Message-ID"] == "msg_a"
+    assert response.headers["X-ShelfWise-Conversation-ID"] == conversation_id
+    assert response.headers["X-ShelfWise-Message-ID"] == message_id
     assert response.headers["X-ShelfWise-Replayed"] == "false"
 
 
@@ -52,10 +59,13 @@ def test_duplicate_message_is_idempotent_under_concurrency(monkeypatch) -> None:
     _enable_jwt(monkeypatch)
     client = TestClient(app)
     headers = _headers(tenant_id="tenant_a", user_id="user_a")
+    from uuid import uuid4
+
+    conversation_id = f"conv_duplicate_{uuid4().hex[:10]}"
     payload = {
         "question": "What needs attention?",
-        "conversation_id": "conv_duplicate",
-        "message_id": "msg_duplicate",
+        "conversation_id": conversation_id,
+        "message_id": f"msg_duplicate_{uuid4().hex[:10]}",
     }
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -66,7 +76,7 @@ def test_duplicate_message_is_idempotent_under_concurrency(monkeypatch) -> None:
     assert {response.status_code for response in responses} == {200}
     assert len({response.text for response in responses}) == 1
     assert sum(response.headers["X-ShelfWise-Replayed"] == "false" for response in responses) == 1
-    conversation = client.get("/chat/conversations/conv_duplicate", headers=headers).json()[
+    conversation = client.get(f"/chat/conversations/{conversation_id}", headers=headers).json()[
         "conversation"
     ]
     assert len(conversation["messages"]) == 2
@@ -175,3 +185,93 @@ def test_chat_store_bounds_persisted_history() -> None:
     assert conversation is not None
     assert len(conversation["messages"]) == 6
     assert conversation["messages"][0]["id"] == "msg_7"
+
+
+def test_chat_stream_emits_a_truthful_lifecycle_envelope(monkeypatch) -> None:
+    """SSE streaming, honestly: accepted -> answer (the validated reply, once it truly
+    exists) -> done (the same receipts POST /chat returns). No fake token dribble."""
+    from uuid import uuid4
+
+    _enable_jwt(monkeypatch)
+    client = TestClient(app)
+    conversation_id = f"conv_stream_{uuid4().hex[:10]}"
+
+    response = client.post(
+        "/chat/stream",
+        headers=_headers(tenant_id="tenant_a", user_id="user_a"),
+        json={
+            "question": "What needs attention?",
+            "conversation_id": conversation_id,
+            "message_id": f"msg_stream_{uuid4().hex[:10]}",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    text = response.text
+    assert "event: accepted" in text
+    assert "event: answer" in text
+    assert "event: done" in text
+    assert '"correlation_id"' in text
+    assert "event: delta" not in text, (
+        "no live endpoint is configured, so no token delta may be fabricated"
+    )
+
+    # Idempotent duplicate must be announced as a replay, not a fresh answer.
+    replay = client.post(
+        "/chat/stream",
+        headers=_headers(tenant_id="tenant_a", user_id="user_a"),
+        json={
+            "question": "What needs attention?",
+            "conversation_id": conversation_id,
+            "message_id": text.split('"message_id": "')[1].split('"')[0],
+        },
+    )
+    assert "event: replayed" in replay.text
+
+
+def test_stream_chat_deltas_parses_real_wire_chunks_and_fails_closed_offline(
+    monkeypatch,
+) -> None:
+    """The token-delta parser consumes genuine OpenAI-compatible SSE chunks and refuses
+    to run against an offline provider - streaming never fabricates generation."""
+    import io
+
+    import pytest as _pytest
+
+    from shelfwise_inference.client import (
+        InferenceError,
+        OpenAICompatibleInferenceClient,
+        stream_chat_deltas,
+    )
+
+    offline = OpenAICompatibleInferenceClient()
+    with _pytest.raises(InferenceError, match="live endpoint"):
+        list(stream_chat_deltas(offline, agent="chat", system="s", user="u"))
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://vllm.example/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "gemma-test")
+    wire = io.BytesIO(
+        b'data: {"choices":[{"delta":{"content":"Stock"}}]}\n\n'
+        b": keep-alive comment\n\n"
+        b'data: {"choices":[{"delta":{"content":" is 12 units"}}]}\n\n'
+        b"data: [DONE]\n\n"
+        b'data: {"choices":[{"delta":{"content":"NEVER-EMITTED"}}]}\n\n'
+    )
+
+    class _Resp:
+        def __enter__(self):
+            return wire
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda request, timeout=None: _Resp()
+    )
+    live = OpenAICompatibleInferenceClient()
+    deltas = list(stream_chat_deltas(live, agent="chat", system="s", user="u"))
+    assert deltas == ["Stock", " is 12 units"], (
+        "every yielded delta must be a real wire chunk, ended by [DONE]"
+    )

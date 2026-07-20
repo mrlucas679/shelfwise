@@ -116,6 +116,7 @@ create table if not exists shelfwise_events (
 -- only for this one-time backfill; request-time policy uses Event.data_domain.
 alter table shelfwise_events add column if not exists data_domain text;
 alter table shelfwise_events add column if not exists published boolean not null default false;
+
 update shelfwise_events
 set data_domain = case
     when payload->>'data_domain' in
@@ -431,6 +432,40 @@ create table if not exists shelfwise_chat_conversations (
 create index if not exists idx_shelfwise_chat_conversations_user_updated
 on shelfwise_chat_conversations (tenant_id, user_id, updated_at desc);
 
+-- Hierarchical conversation memory (plan Section 41.5, additive): rolling episode
+-- summaries and provenance-tracked memory items layered over the JSON conversation
+-- store, so long conversations keep their earlier context instead of silently losing
+-- everything past the recent-turns window.
+create table if not exists shelfwise_chat_memory_items (
+    tenant_id text not null,
+    user_id text not null,
+    conversation_id text not null,
+    memory_id text not null,
+    kind text not null,
+    status text not null,
+    summary_version text not null,
+    payload jsonb not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, user_id, conversation_id, memory_id)
+);
+
+create index if not exists idx_shelfwise_chat_memory_active_summary
+on shelfwise_chat_memory_items (tenant_id, user_id, conversation_id, kind, status);
+
+-- Assistant skill catalogue (plan Section 41.4/41.5): versioned, validated manifests of
+-- what the assistant may discover per conversation turn, with a promotion lifecycle -
+-- discovery only ever surfaces promoted manifests.
+create table if not exists shelfwise_skill_manifests (
+    tenant_id text not null,
+    skill_id text not null,
+    version text not null,
+    domain_owner text not null,
+    status text not null,
+    manifest jsonb not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, skill_id)
+);
+
 create table if not exists shelfwise_inventory_positions (
     tenant_id text not null,
     sku text not null,
@@ -737,6 +772,22 @@ create policy shelfwise_chat_conversations_tenant_isolation on shelfwise_chat_co
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 
+alter table shelfwise_chat_memory_items enable row level security;
+alter table shelfwise_chat_memory_items force row level security;
+drop policy if exists shelfwise_chat_memory_items_tenant_isolation
+on shelfwise_chat_memory_items;
+create policy shelfwise_chat_memory_items_tenant_isolation on shelfwise_chat_memory_items
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_skill_manifests enable row level security;
+alter table shelfwise_skill_manifests force row level security;
+drop policy if exists shelfwise_skill_manifests_tenant_isolation
+on shelfwise_skill_manifests;
+create policy shelfwise_skill_manifests_tenant_isolation on shelfwise_skill_manifests
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
 alter table shelfwise_inventory_positions enable row level security;
 alter table shelfwise_inventory_positions force row level security;
 drop policy if exists shelfwise_inventory_positions_tenant_isolation
@@ -805,3 +856,15 @@ create policy shelfwise_twin_scenario_branches_tenant_isolation
 on shelfwise_twin_scenario_branches
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
+
+-- BRIN indexes for append-only time-series ("Things that needs to be implemented" item 7):
+-- physically-correlated timestamps make BRIN the right shape - block-range summaries stay
+-- tiny at millions of rows where a btree would not, and time-window scans (retention,
+-- soak-report queries, replay bounds) prune whole ranges. Placed at end of file so every
+-- indexed table already exists.
+create index if not exists brin_shelfwise_events_received_at
+on shelfwise_events using brin (received_at);
+create index if not exists brin_shelfwise_inbound_records_ingested_at
+on shelfwise_inbound_records using brin (ingested_at);
+create index if not exists brin_cascade_runs_started_at
+on cascade_runs using brin (started_at);

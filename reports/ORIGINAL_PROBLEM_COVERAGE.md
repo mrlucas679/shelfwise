@@ -1,7 +1,10 @@
-# Original Retail Problem Coverage Audit
+# Historical Retail Problem Coverage Audit (superseded)
 
-This matrix compares the initiating retailer problems with executable implementation evidence. A
-status of partial is not presented as solved.
+> **Historical baseline (2026-07-11):** This matrix records the initial gap analysis and is not a
+> statement of current product status. Every application feature identified here has since been
+> implemented and verified; see [`IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md) for the
+> authoritative current inventory. External hardware, cloud capacity, and partner-system
+> acceptance remain procurement or integration activities, not unimplemented application features.
 
 | Problem group | Evidence in current application | Status | Remaining production gap |
 |---|---|---|---|

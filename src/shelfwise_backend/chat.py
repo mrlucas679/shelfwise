@@ -4,7 +4,6 @@ import asyncio
 import json
 import re
 import unicodedata
-from collections.abc import Iterator
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -61,7 +60,12 @@ _CHAT_SYSTEM_PROMPT = (
     "For follow-up questions containing references such as 'that recommendation', 'it', "
     "or 'the evidence', resolve the reference from conversation_history and keep the same "
     "decision, SKU, or store unless the user explicitly changes subjects. Never substitute "
-    "a different product merely because another tool result is available.\n\n"
+    "a different product merely because another tool result is available. When "
+    "conversation_summary is present it is the durable memory of everything said before "
+    "the recent turns - honor its recorded objective and any corrections in it exactly; "
+    "a correction in the summary overrides anything older. When skill_catalogue is "
+    "present it lists the capabilities most relevant to this question - prefer the tools "
+    "those skills name.\n\n"
     "When asked which decision needs attention first, choose exactly one decision and include "
     "its full decision ID so a follow-up can retrieve the same evidence.\n\n"
     "You have real, live tools covering every part of the store - call the one that "
@@ -120,31 +124,11 @@ class ChatBody(BaseModel):
         return sanitized
 
 
-def stream_chat_reply(
-    *,
-    question: str,
-    state: dict[str, Any],
-    client: OpenAICompatibleInferenceClient | None = None,
-    tenant_id: str = "default",
-    correlation_id: str | None = None,
-    live_required: bool = False,
-    decisions: Any = None,
-    memory: Any = None,
-    orchestrator_factory: Any = None,
-) -> Iterator[str]:
-    """Yield a short chat answer while keeping raw user text fenced as data."""
-    answer, _meta = build_chat_reply_with_meta(
-        question=question,
-        state=state,
-        client=client,
-        tenant_id=tenant_id,
-        correlation_id=correlation_id,
-        live_required=live_required,
-        decisions=decisions,
-        memory=memory,
-        orchestrator_factory=orchestrator_factory,
-    )
-    yield from _chunk_words(answer)
+# NOTE: a previous `stream_chat_reply` seam was removed 2026-07-16 - it built the FULL
+# answer and then chunked words, so any route serving it would have presented fake
+# progressiveness with zero latency benefit. Real streaming means token-level SSE from
+# the inference client against the live vLLM endpoint; build that, not a simulation of
+# it, when streaming becomes a product requirement.
 
 
 def build_chat_reply(
@@ -733,13 +717,3 @@ def _offline_reply(
     return f"Current ShelfWise state: {summary}{grounding}"
 
 
-def _chunk_words(text: str, *, words_per_chunk: int = 8) -> Iterator[str]:
-    """Split text into small chunks so StreamingResponse behaves like a stream."""
-    words = text.split()
-    if not words:
-        yield ""
-        return
-    for index in range(0, len(words), words_per_chunk):
-        chunk = " ".join(words[index : index + words_per_chunk])
-        suffix = " " if index + words_per_chunk < len(words) else ""
-        yield chunk + suffix

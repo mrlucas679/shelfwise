@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 from dataclasses import replace
@@ -40,9 +41,16 @@ from shelfwise_inference.orchestration import ExecutionMode
 from shelfwise_mlops import (
     ModelRun,
     OutcomeRecord,
+    SkillStats,
     build_accountability_report,
     decision_economics,
+    draft_skills,
 )
+from shelfwise_mlops import activate as activate_skill
+from shelfwise_mlops import to_plan as skill_to_plan
+from shelfwise_mlops.skill_registry import discover as discover_skills
+from shelfwise_mlops.skill_registry import promote as promote_skill_manifest
+from shelfwise_mlops.skill_registry import retire as retire_skill_manifest
 from shelfwise_runtime.provenance import DataDomain, DataDomainBoundaryError
 from shelfwise_storage import (
     TENANT_SCOPED_TABLES,
@@ -79,6 +87,9 @@ from .chat_context import (
     bounded_chat_learning_events as select_chat_learning_events,
 )
 from .connector_poll_service import ConnectorPollService
+from .context_budget import build_context_receipt
+from .conversation_memory import compact_conversation
+from .conversation_routing import ConversationRouteRequest, choose_conversation_route
 from .deps import (
     _COOKIE_OVERRIDE_ENV,
     _INSECURE_APP_ENV_NAMES,
@@ -113,9 +124,11 @@ from .state import (
     chat_store,
     cold_chain_feed,
     connector_cursor_store,
+    conversation_memory_store,
     decision_store,
     event_bus,
     event_store,
+    fidelity_revalidation_service,
     inbound_record_store,
     inventory_position_store,
     journal,
@@ -123,12 +136,16 @@ from .state import (
     model_run_registry,
     open_order_store,
     operational_facts_for_query,
+    plan_runner,
     product_catalog_store,
     prompt_registry,
+    retention_service,
+    skill_registry,
     tenant_fact_store,
     tenant_profile_store,
     tool_audit,
     trace_registry,
+    twin_projection_service,
     twin_service,
     worker_service,
     world_facts,
@@ -279,6 +296,12 @@ app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
 app.router.add_event_handler("startup", cold_chain_feed.start)
 app.router.add_event_handler("shutdown", cold_chain_feed.stop)
+app.router.add_event_handler("startup", twin_projection_service.start)
+app.router.add_event_handler("shutdown", twin_projection_service.stop)
+app.router.add_event_handler("startup", fidelity_revalidation_service.start)
+app.router.add_event_handler("shutdown", fidelity_revalidation_service.stop)
+app.router.add_event_handler("startup", retention_service.start)
+app.router.add_event_handler("shutdown", retention_service.stop)
 
 
 DEFAULT_MAX_BODY_BYTES = 6 * 1024 * 1024
@@ -365,6 +388,75 @@ def _public_demo_sessions_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+class LoginBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/auth/login", dependencies=[WRITE_LIMIT_DEP])
+def company_login(body: LoginBody) -> JSONResponse:
+    """Company-account login: verify the configured owner account, mint the JWT session.
+
+    Real credential verification with stdlib scrypt (no new dependencies): the deployment
+    configures SHELFWISE_LOGIN_EMAIL and SHELFWISE_LOGIN_PASSWORD_HASH (format
+    "scrypt$<salt_hex>$<hash_hex>"; generation one-liner documented in .env.example).
+    Unconfigured deployments answer an honest 503, never an open door; failures are a
+    uniform 401 with no oracle about which field was wrong. The minted session is the
+    exact owner-role JWT cookie the rest of the platform already trusts and verifies.
+    """
+    secret = os.getenv("TENANT_AUTH_SECRET", "")
+    configured_email = os.getenv("SHELFWISE_LOGIN_EMAIL", "").strip().lower()
+    configured_hash = os.getenv("SHELFWISE_LOGIN_PASSWORD_HASH", "").strip()
+    if not secret or not configured_email or not configured_hash:
+        raise HTTPException(status_code=503, detail="Company login is not configured")
+    if not _login_credentials_valid(
+        email=body.email, password=body.password,
+        configured_email=configured_email, configured_hash=configured_hash,
+    ):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    ctx = TenantContext(
+        tenant_id=default_tenant_context().tenant_id,
+        user_id=configured_email,
+        role=Role.OWNER,
+    )
+    lifetime = _env_positive_int("SHELFWISE_LOGIN_SESSION_SECONDS", 43_200)
+    token = encode_hs256_token(
+        {**ctx.to_dict(), "exp": int(datetime.now(UTC).timestamp()) + lifetime},
+        secret=secret,
+    )
+    response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=lifetime, httponly=True,
+        secure=_cookie_secure_setting(), samesite="strict", path="/",
+    )
+    return response
+
+
+def _login_credentials_valid(
+    *, email: str, password: str, configured_email: str, configured_hash: str
+) -> bool:
+    """Constant-shape verification: hash first, compare both, no early-exit oracle."""
+    import hashlib
+    import hmac as _hmac
+
+    try:
+        scheme, salt_hex, hash_hex = configured_hash.split("$", 2)
+        if scheme != "scrypt":
+            return False
+        expected = bytes.fromhex(hash_hex)
+        computed = hashlib.scrypt(
+            password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=16384, r=8, p=1,
+            dklen=len(expected),
+        )
+    except (ValueError, TypeError):
+        return False
+    email_ok = _hmac.compare_digest(email.strip().lower(), configured_email)
+    password_ok = _hmac.compare_digest(computed, expected)
+    return email_ok and password_ok
 
 
 @app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
@@ -573,6 +665,9 @@ def readiness(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
             "worldgen_run_store": type(worldgen_run_store).__name__,
             "inbound_record_store": type(inbound_record_store).__name__,
             "cold_chain_feed": cold_chain_feed.status(),
+            "twin_projection_worker": twin_projection_service.status(),
+            "fidelity_revalidation": fidelity_revalidation_service.status(),
+            "retention": retention_service.status(),
             "auth_mode": _auth_mode(),
             "tenant_auth_secret_configured": bool(os.getenv("TENANT_AUTH_SECRET", "")),
             "tenant_scoped_tables": sorted(TENANT_SCOPED_TABLES),
@@ -1056,6 +1151,57 @@ def get_chat_conversation(
     return {"conversation": conversation}
 
 
+@app.post("/chat/stream", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
+def chat_stream(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> Any:
+    """SSE chat with a truthful lifecycle envelope - never the chunk-the-answer fake.
+
+    Events say exactly what happened: `accepted` (request queued into the real
+    pipeline), `answer` (the complete, grounding-validated reply - one event, because
+    that is when a validated answer actually exists), `done` (the same metadata
+    receipts POST /chat returns), or `replayed` for an idempotent duplicate. Token
+    deltas from a live endpoint slot into this same envelope as `delta` events via
+    `shelfwise_inference.stream_chat_deltas` once the answer turn streams from a live
+    provider; no event is ever emitted for generation that did not occur.
+    """
+    from fastapi.responses import StreamingResponse
+
+    def sse(event: str, payload: dict[str, Any]) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+    def events() -> Any:
+        conversation_id = body.conversation_id or f"conv_{uuid4().hex}"
+        message_id = body.message_id or f"msg_{uuid4().hex}"
+        yield sse(
+            "accepted",
+            {"conversation_id": conversation_id, "message_id": message_id},
+        )
+        inner = chat(
+            ChatBody(
+                question=body.question,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                data_domain=body.data_domain,
+                live_required=body.live_required,
+            ),
+            ctx,
+        )
+        answer_text = bytes(inner.body).decode("utf-8")
+        replayed = inner.headers.get("X-ShelfWise-Replayed", "false") == "true"
+        yield sse("replayed" if replayed else "answer", {"text": answer_text})
+        yield sse(
+            "done",
+            {
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "correlation_id": inner.headers.get("X-ShelfWise-Correlation-ID", ""),
+                "answer_source": inner.headers.get("X-ShelfWise-Answer-Source", ""),
+                "model": inner.headers.get("X-ShelfWise-Model", ""),
+            },
+        )
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 @app.post("/chat", dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP])
 def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> PlainTextResponse:
     conversation_id = body.conversation_id or f"conv_{uuid4().hex}"
@@ -1174,8 +1320,75 @@ def _new_chat_response(
         user_id=ctx.user_id,
         conversation_id=conversation_id,
     )
+    conversation_summary = None
     if conversation:
         state["conversation_history"] = _bounded_chat_history(conversation["messages"])
+        # Hierarchical memory (plan Section 37/41): everything older than the recent
+        # window is compacted into a durable, provenance-tracked rolling summary instead
+        # of silently falling off the end of a bare sliding window - a long
+        # conversation keeps its objective, corrections, and earlier turns available to
+        # every later answer.
+        conversation_summary = compact_conversation(
+            conversation_memory_store,
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            conversation_id=conversation_id,
+            messages=conversation["messages"],
+            recent_window=_CHAT_HISTORY_LIMIT,
+        )
+        if conversation_summary is not None:
+            state["conversation_summary"] = conversation_summary.text
+
+    # Progressive skill discovery (plan Section 39/41): the model sees only the promoted
+    # skills relevant to THIS question, never the whole tool surface.
+    discovered_skills = discover_skills(
+        skill_registry,
+        question=body.question,
+        role=str(getattr(ctx, "role", "") or "manager"),
+        tenant_id=ctx.tenant_id,
+    )
+    if discovered_skills:
+        state["skill_catalogue"] = [
+            {
+                "id": manifest.id,
+                "name": manifest.name,
+                "description": manifest.description,
+                "tools": list(manifest.required_tools),
+            }
+            for manifest in discovered_skills
+        ]
+
+    # Deterministic tier routing (plan Section 41.1): the route is computed from facts
+    # known before inference and saved as an auditable receipt on the answer metadata.
+    conversation_route = choose_conversation_route(
+        ConversationRouteRequest(
+            domains=tuple({manifest.domain_owner for manifest in discovered_skills}),
+            risk_tier="low",
+            asks_for_scenario=_question_asks_for_scenario(body.question),
+            has_source_conflict=False,
+            has_memory_conflict=False,
+            is_simple_followup=bool(conversation) and len(body.question) <= 80,
+        )
+    )
+
+    # Context receipt (plan Section 41.3): account the conversational sections this
+    # request contributes and fail closed on overflow BEFORE any network I/O.
+    context_receipt = build_context_receipt(
+        sections={
+            "question": body.question,
+            "recent_turns": json.dumps(state.get("conversation_history", [])),
+            "pinned_and_summary": str(state.get("conversation_summary", "")),
+            "skill_catalogue": json.dumps(state.get("skill_catalogue", [])),
+        },
+        selected_memory_ids=(
+            (conversation_summary.id,) if conversation_summary is not None else ()
+        ),
+        selected_skill_ids=tuple(manifest.id for manifest in discovered_skills),
+        selected_tools=tuple(
+            tool for manifest in discovered_skills for tool in manifest.required_tools
+        ),
+        truncated=bool(conversation_summary is not None),
+    )
     client = OpenAICompatibleInferenceClient(
         recorder=lambda payload: _record_model_run(
             {**payload, "data_domain": chat_domain}
@@ -1201,6 +1414,12 @@ def _new_chat_response(
         raise HTTPException(status_code=503, detail="Live chat inference failed") from exc
     _meta["correlation_id"] = correlation_id
     _meta["data_domain"] = chat_domain
+    _meta["conversation_route"] = conversation_route.to_dict()
+    _meta["context_receipt"] = context_receipt.to_dict()
+    if discovered_skills:
+        _meta["skills"] = [manifest.id for manifest in discovered_skills]
+    if conversation_summary is not None:
+        _meta["conversation_summary_id"] = conversation_summary.id
     chat_store.append_exchange(
         tenant_id=ctx.tenant_id,
         user_id=ctx.user_id,
@@ -1724,6 +1943,221 @@ def consolidate_memory(
     )
 
 
+# Plan-step templates for playbooks mined from outcome history. Capabilities name the
+# same governed action types the HITL/writeback path already uses; a compiled plan is a
+# governed RECOMMENDATION artifact (like a writeback task), never an autonomous write -
+# execution stays behind the capability registry and human approval.
+_MINED_SKILL_STEP_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+    "apply_markdown": [
+        {
+            "key": "apply_markdown",
+            "capability": "apply_markdown",
+            "params": {},
+            "compensation": {"undo": "restore_catalog_price"},
+        }
+    ],
+    "reorder": [
+        {
+            "key": "reorder",
+            "capability": "reorder",
+            "params": {},
+            "compensation": {"undo": "cancel_pending_purchase_order"},
+        }
+    ],
+    "quarantine_stock": [
+        {
+            "key": "quarantine_stock",
+            "capability": "quarantine_stock",
+            "params": {},
+            "compensation": {"undo": "release_quarantine_hold"},
+        }
+    ],
+    "dispatch_facilities_check": [
+        {
+            "key": "dispatch_facilities_check",
+            "capability": "dispatch_facilities_check",
+            "params": {},
+            "compensation": {"undo": "cancel_facilities_dispatch"},
+        }
+    ],
+}
+
+
+def _mined_skill_drafts(tenant_id: str, data_domain: str) -> list[Any]:
+    """Mine playbook drafts from this tenant's REAL resolved-outcome history.
+
+    Trigger is the decision's scenario id - the same stable workload classification the
+    rest of the platform uses - so a draft reads as "apply_markdown when
+    stage4_loadshedding_x_payday_yoghurt" and its evidence refs point at the actual
+    decisions that earned it.
+    """
+    decisions = {
+        str(decision.get("id")): decision
+        for decision in decision_store.list()
+        if _decision_tenant_id(decision, tenant_id) == tenant_id
+    }
+    stats = SkillStats()
+    for record in _learning_outcome_records(tenant_id, data_domain):
+        decision = decisions.get(record.evidence_refs[0]) if record.evidence_refs else None
+        scenario_id = str((decision or {}).get("scenario_id") or "") or record.action
+        stats.reflect(record, trigger=scenario_id)
+    return draft_skills(stats, tenant_id=tenant_id, step_template=_MINED_SKILL_STEP_TEMPLATES)
+
+
+@app.get("/mlops/skills/mined")
+def list_mined_skills(
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
+) -> dict[str, object]:
+    """Playbooks mined from repeated, measurably successful outcomes - drafts for review."""
+    resolved_domain = data_domain or _chat_data_domain()
+    drafts = _mined_skill_drafts(ctx.tenant_id, resolved_domain)
+    return {
+        "tenant_id": ctx.tenant_id,
+        "data_domain": resolved_domain,
+        "skills": [skill.to_dict() for skill in drafts],
+    }
+
+
+@app.post(
+    "/mlops/skills/mined/{skill_id}/activate",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def activate_mined_skill(
+    skill_id: str,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Activate a reviewed mined draft and compile it to the validated plan shape.
+
+    The compiled plan is returned as a governed artifact for the approving human - it is
+    NOT executed here. Activation re-mines from current outcome history, so a draft that
+    later outcomes no longer support simply no longer exists to activate (the honest
+    tombstone: evidence, not memory of past drafts, decides what is activatable).
+    """
+    resolved_domain = data_domain or _chat_data_domain()
+    draft = next(
+        (
+            skill
+            for skill in _mined_skill_drafts(ctx.tenant_id, resolved_domain)
+            if skill.id == skill_id
+        ),
+        None,
+    )
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No currently-minable draft has that id - either it never existed or "
+                "later outcomes no longer support it"
+            ),
+        )
+    active = activate_skill(draft)
+    plan = skill_to_plan(
+        active, plan_id=f"plan_{skill_id}_{ctx.tenant_id}", actor_role=ctx.role.value
+    )
+    return {"skill": active.to_dict(), "plan": plan}
+
+
+@app.get("/mlops/skills")
+def list_skill_manifests(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
+    """List the assistant skill catalogue this tenant can discover, with lifecycle status."""
+    manifests = skill_registry.list(tenant_id=ctx.tenant_id)
+    return {
+        "tenant_id": ctx.tenant_id,
+        "skills": [manifest.to_dict() for manifest in manifests],
+    }
+
+
+class SkillPromotionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    measured_pass_rate: float = Field(ge=0.0, le=1.0)
+
+
+@app.post(
+    "/mlops/skills/{skill_id}/promote",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def promote_skill(
+    skill_id: str,
+    body: SkillPromotionBody,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Flip a draft skill to promoted - only past its own evaluation bar.
+
+    The promotion gate is the enforcement point that makes the lifecycle real: discovery
+    only ever surfaces promoted manifests, so this route is how a validated draft skill
+    actually reaches conversations. Requires an approval-capable role, like every other
+    governance write.
+    """
+    try:
+        manifest = promote_skill_manifest(
+            skill_registry,
+            skill_id,
+            measured_pass_rate=body.measured_pass_rate,
+            tenant_id=ctx.tenant_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"skill": manifest.to_dict()}
+
+
+@app.post(
+    "/mlops/skills/{skill_id}/retire",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def retire_skill(
+    skill_id: str,
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Retire a skill from discovery permanently (re-register a new version to revive)."""
+    try:
+        manifest = retire_skill_manifest(skill_registry, skill_id, tenant_id=ctx.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"skill": manifest.to_dict()}
+
+
+@app.post(
+    "/mlops/plans/execute",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+async def execute_plan(
+    body: dict[str, Any],
+    ctx: TenantContext = APPROVAL_AUTH_DEP,
+) -> dict[str, object]:
+    """Execute a validated governed plan through the journaled runner.
+
+    The governed-write phase, live: the only registered write capability is the HITL
+    write-back task sink, every step is journaled with compensation recorded, and the
+    plan's tenant is forced to the caller's - a plan can never execute across tenants.
+    Compile plans via /mlops/skills/mined/{id}/activate; execute them here after review.
+    """
+    from shelfwise_backend.worker.plans import Plan as _Plan
+
+    try:
+        plan = _Plan.model_validate({**body, "tenant_id": ctx.tenant_id})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:400]) from exc
+    result = await plan_runner.run(plan)
+    if result.status != "done":
+        raise HTTPException(
+            status_code=422,
+            detail=f"plan failed at step: {result.failed_step}",
+        )
+    return {"result": result.to_dict()}
+
+
+@app.get("/worker/schedules")
+def list_schedules() -> dict[str, object]:
+    """Recurring governed schedules and their receipts."""
+    return {
+        "fidelity_revalidation": fidelity_revalidation_service.status(),
+        "retention": retention_service.status(),
+    }
+
+
 @app.get("/worker/runs")
 def list_worker_runs(
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -1850,6 +2284,21 @@ def _demo_event(
             "site_id": scenario.location,
         },
     )
+
+
+def _reject_operational_domain_for_synthetic_drill(
+    data_domain: str | None, *, drill: str
+) -> None:
+    """Fail closed when a synthetic-anomaly drill is pointed at real twin data."""
+    if data_domain == DataDomain.OPERATIONAL_TWIN.value:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The {drill} drill fabricates a synthetic anomaly and is "
+                "simulation-only; live operational anomalies enter through the real "
+                "ingest pipeline, never through a drill projected onto twin data."
+            ),
+        )
 
 
 def _agentic_cascade_context(
@@ -2103,7 +2552,10 @@ def demo_golden_agentic(
 
 @app.post("/scenarios/procurement/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_procurement_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the procurement reorder/supplier verdicts through a real Gemma tool loop.
 
@@ -2111,15 +2563,25 @@ def demo_procurement_agentic(
     requires an actual model call and tool-calling round trip over get_reorder_policy and
     get_supplier_ranking. With live_required=true (default) it hard-fails with 503 instead
     of silently falling back to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state
+    (`OperationalFactsProvider`), the same contract the golden agentic route uses;
+    raises 422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.SUPPLIER_UPDATE, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_procurement_cascade_via_agents(
-            _demo_event(ctx, EventType.SUPPLIER_UPDATE, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2133,7 +2595,10 @@ def demo_procurement_agentic(
 
 @app.post("/scenarios/sales/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_sales_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the POS price-integrity verdict through a real Gemma tool loop.
 
@@ -2141,15 +2606,24 @@ def demo_sales_agentic(
     an actual model call and tool-calling round trip over check_price_integrity. With
     live_required=true (default) it hard-fails with 503 instead of silently falling back
     to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state; raises
+    422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.SALE, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_sales_cascade_via_agents(
-            _demo_event(ctx, EventType.SALE, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2163,9 +2637,19 @@ def demo_sales_agentic(
 
 @app.post("/scenarios/catalog-price/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_catalog_price_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    """Run the POS catalogue-price guardrail through a real Gemma tool loop."""
+    """Run the POS catalogue-price guardrail through a real Gemma tool loop.
+
+    Simulation-only by contract: this drill fabricates a synthetic price outlier to
+    demonstrate the guardrail, and fabricating an anomaly from a real store's twin data
+    would be invented telemetry. Live operational price exceptions enter through the
+    real POS/ingest pipeline, where the catalog-price dispatcher already screens every
+    sale.
+    """
+    _reject_operational_domain_for_synthetic_drill(data_domain, drill="catalog-price")
     mode = _production_execution_mode(live_required)
     try:
         result = run_catalog_price_check_via_agents(
@@ -2189,9 +2673,18 @@ def demo_catalog_price_agentic(
 
 @app.post("/scenarios/expiry-risk/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_expiry_risk_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
-    """Run the imminent-expiry guardrail through a real Gemma tool loop."""
+    """Run the imminent-expiry guardrail through a real Gemma tool loop.
+
+    Simulation-only by contract, for the same reason as the catalog-price drill: the
+    synthetic near-expiry entry it fabricates must never be projected onto real twin
+    data. Live expiry entries arrive through the real ingest pipeline's expiry-risk
+    dispatcher.
+    """
+    _reject_operational_domain_for_synthetic_drill(data_domain, drill="expiry-risk")
     mode = _production_execution_mode(live_required)
     try:
         result = run_expiry_risk_check_via_agents(
@@ -2215,7 +2708,10 @@ def demo_expiry_risk_agentic(
 
 @app.post("/scenarios/cold-chain/agentic", dependencies=_SCENARIO_WRITE_DEPS)
 def demo_cold_chain_agentic(
-    live_required: bool = True, ctx: TenantContext = CURRENT_TENANT_DEP
+    live_required: bool = True,
+    data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    store_id: str | None = None,
+    ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     """Run the cold-chain facilities-escalation verdict through a real Gemma tool loop.
 
@@ -2223,15 +2719,24 @@ def demo_cold_chain_agentic(
     requires an actual model call and tool-calling round trip over get_cold_chain_status.
     With live_required=true (default) it hard-fails with 503 instead of silently falling
     back to an offline/deterministic answer.
+
+    `data_domain=operational_twin` grounds the tool calls in reported twin state; raises
+    422 when the twin cannot yet answer for this tenant/store.
     """
     mode = _production_execution_mode(live_required)
     try:
+        facts, event = _agentic_cascade_context(
+            ctx, EventType.COLD_CHAIN_ALERT, data_domain=data_domain, store_id=store_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         result = run_cold_chain_cascade_via_agents(
-            _demo_event(ctx, EventType.COLD_CHAIN_ALERT, variant="agentic"),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
-            facts=world_facts,
+            facts=facts,
             audit=tool_audit,
             model_run_recorder=_record_model_run,
             deadline=_cascade_deadline(),
@@ -2630,6 +3135,15 @@ def _bounded_chat_decisions(
         pending_limit=_CHAT_PENDING_DECISION_LIMIT,
         resolved_limit=_CHAT_RESOLVED_DECISION_LIMIT,
     )
+
+
+_SCENARIO_QUESTION_MARKERS = ("what if", "scenario", "simulate", "would happen", "suppose")
+
+
+def _question_asks_for_scenario(question: str) -> bool:
+    """Deterministic routing fact: scenario/what-if reasoning requires the strong tier."""
+    lowered = question.lower()
+    return any(marker in lowered for marker in _SCENARIO_QUESTION_MARKERS)
 
 
 def _bounded_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
