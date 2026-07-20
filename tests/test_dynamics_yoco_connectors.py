@@ -34,6 +34,29 @@ def test_dynamics_item_maps_to_inventory_snapshot() -> None:
     assert record.canonical_payload["quantity"] == "12.5"
 
 
+def test_dynamics_and_yoco_malformed_timestamps_are_quarantined() -> None:
+    dynamics = map_dynamics_inventory(
+        {"id": "item-guid", "number": "1000", "inventory": 2, "lastModifiedDateTime": "nope"},
+        tenant_id="tenant-a",
+        location_id="warehouse-1",
+    )
+    yoco = map_yoco_checkout(
+        {
+            "id": "ch_123",
+            "status": "succeeded",
+            "amount": 100,
+            "createdDate": "nope",
+            "metadata": {"sku": "SKU"},
+        },
+        tenant_id="tenant-a",
+    )
+
+    assert dynamics.validation.ok is False
+    assert dynamics.validation.errors == ("dynamics item lastModifiedDateTime is malformed",)
+    assert yoco[0].validation.ok is False
+    assert yoco[0].validation.errors == ("yoco checkout timestamp is malformed",)
+
+
 def test_dynamics_connector_reuses_opaque_odata_next_link() -> None:
     calls: list[tuple[str, dict[str, str]]] = []
 

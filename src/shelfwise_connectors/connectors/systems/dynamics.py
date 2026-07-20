@@ -24,9 +24,18 @@ def map_dynamics_inventory(
     configured location therefore names the inventory scope and is required rather
     than silently assigning an arbitrary store.
     """
-    observed_at = parse_time(row.get("lastModifiedDateTime"))
     sku = str(row.get("number") or "").strip()
     item_id = str(row.get("id") or sku or "unknown")
+    try:
+        observed_at = parse_time(row.get("lastModifiedDateTime"))
+    except (TypeError, ValueError):
+        return _invalid_record(
+            row,
+            tenant_id=tenant_id,
+            object_id=item_id,
+            event_time=now_utc(),
+            error="dynamics item lastModifiedDateTime is malformed",
+        )
     if not sku:
         return _invalid_record(
             row,

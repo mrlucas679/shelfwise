@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-20 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **743 passed / 15 env-gated skips** locally;
+Branch: `developers` · Gates at time of writing: **744 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -20,7 +20,7 @@ application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
-- The full local backend regression suite passed: **743 passed, 15 environment-gated skips**;
+- The full local backend regression suite passed: **744 passed, 15 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
 - GitHub Actions CI for `35a6329` passed its real Postgres/Redis, browser E2E, production-topology,
   deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
@@ -147,7 +147,8 @@ not an oversight).
   scheduled poll loop (`CONNECTOR_POLL_ENABLED`, env-tunable cadence with hot-loop floor),
   status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked inbound
   records, money minor-units. Dynamics preserves opaque OData continuation URLs; Yoco requires
-  explicit SKU/quantity/location metadata before a succeeded payment can emit a sales event.
+  explicit SKU/quantity/location metadata before a succeeded payment can emit a sales event;
+  malformed source timestamps are quarantined without emitting an event.
 - ✅ Edge gateway: HMAC-signed device observations, body-size bounds, twin intake.
 
 ## 6. Digital twin — ✅ (software layer)

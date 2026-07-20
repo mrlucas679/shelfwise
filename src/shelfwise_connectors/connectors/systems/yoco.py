@@ -23,7 +23,18 @@ def map_yoco_checkout(payload: dict, *, tenant_id: str) -> list[InboundRecord]:
     """
     checkout = _checkout_object(payload)
     checkout_id = str(checkout.get("id") or payload.get("id") or "unknown")
-    sold_at = parse_time(checkout.get("createdDate") or checkout.get("created_at"))
+    try:
+        sold_at = parse_time(checkout.get("createdDate") or checkout.get("created_at"))
+    except (TypeError, ValueError):
+        return [
+            _invalid(
+                payload,
+                tenant_id,
+                checkout_id,
+                parse_time(None),
+                "yoco checkout timestamp is malformed",
+            )
+        ]
     metadata = checkout.get("metadata")
     if not isinstance(metadata, dict):
         return [_invalid(payload, tenant_id, checkout_id, sold_at, "yoco checkout has no metadata")]
