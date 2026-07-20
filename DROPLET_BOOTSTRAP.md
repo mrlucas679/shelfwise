@@ -114,6 +114,13 @@ curl --connect-timeout 5 --fail \
   http://<mi300x-private-ip>:8000/v1/models
 ```
 
+If the model host name resolves but this check reports **connection refused**, the CIDR firewall
+is not the cause: no vLLM listener is running on that port. Do not broaden the firewall. Connect to
+the MI300X host, inspect `/root/shelfwise-vllm/vllm-8000.log` or `vllm-8001.log`, then rerun
+`bash scripts/bootstrap_mi300x_vllm.sh` after fixing the reported startup cause. A timeout instead
+indicates a network-path or firewall problem and should be investigated without exposing either
+port publicly.
+
 After the public HTTPS terminator is active, verify the browser session response contains
 `Secure`, `HttpOnly`, and `SameSite=Strict` on `shelfwise_session`:
 
