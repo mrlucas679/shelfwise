@@ -28,6 +28,9 @@ not an application feature, and classifying it as one misstates both.
 - Scenario mutations now require an ingest-capable tenant role; enabled production multimodal
   processing requires JWT protection plus the shared write guard/rate limiter; Postgres learning
   thresholds use a database-level maximum so concurrent approvals cannot regress an exposure.
+- Production Compose defaults its explicit provider identity to `vllm_mi300x`; generic
+  OpenAI-compatible routing remains available only when an operator deliberately selects it
+  outside the AMD production profile.
 - The regenerated capability manifest records **214** wired capabilities. Its only six `partial`
   records are deliberately external-proof boundaries (live Fireworks/MI300X inference and actual
   training/serving execution), not missing backend routes, workers, or event consumers.
