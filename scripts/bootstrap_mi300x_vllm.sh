@@ -234,14 +234,17 @@ start_quick_start_server() {
 
 restrict_host_network_port() {
   # The fallback image uses host networking, so Docker's NAT chain cannot enforce the
-  # source allowlist. Put the narrow ACCEPT before the port-specific DROP in INPUT.
+  # source allowlist. Normalize these exact port rules before adding them so a stale
+  # DROP can never remain ahead of the source-specific ACCEPT after a rerun.
   local port="$1"
-  if ! iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; then
-    iptables -I INPUT 1 -p tcp --dport "$port" -j DROP
-  fi
-  if ! iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
-    iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
-  fi
+  while iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT 2>/dev/null; do
+    iptables -D INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
+  done
+  while iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; do
+    iptables -D INPUT -p tcp --dport "$port" -j DROP
+  done
+  iptables -I INPUT 1 -p tcp --dport "$port" -j DROP
+  iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
 }
 
 start_server() {

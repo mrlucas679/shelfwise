@@ -22,6 +22,13 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "ensure_quick_start_container_running" in source
     assert "publish_quick_start_port" in source
     assert "restrict_host_network_port" in source
+    assert (
+        'while iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT'
+        in source
+    )
+    assert 'while iptables -C INPUT -p tcp --dport "$port" -j DROP' in source
+    assert 'iptables -D INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT' in source
+    assert 'iptables -D INPUT -p tcp --dport "$port" -j DROP' in source
     assert 'iptables -I INPUT 1 -p tcp --dport "$port" -j DROP' in source
     assert 'iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT' in source
     assert "iptables -t nat" in source
