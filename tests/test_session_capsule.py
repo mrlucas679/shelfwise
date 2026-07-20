@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,15 +24,24 @@ def _git(repo: Path, *arguments: str) -> None:
 
 
 def test_path_relation_handles_sibling_nested_ancestor_and_case(tmp_path: Path) -> None:
-    """Classify protected paths with Windows case normalization and boundaries."""
+    """Classify protected paths with OS-correct case normalization and boundaries.
+
+    `_path_relation` compares through `os.path.normcase`, which is a no-op on POSIX
+    (case-sensitive filesystems) and case-folds on Windows - so a differently-cased
+    path is a genuinely different, unrelated path on Linux/macOS, not an alias of the
+    original. Assert the platform-correct outcome instead of hardcoding Windows
+    behavior, which made this test fail deterministically in Linux CI.
+    """
     protected = tmp_path / "Capsule" / "active"
     sibling = tmp_path / "Capsule" / "other"
+    case_insensitive_fs = os.path.normcase("A") == os.path.normcase("a")
 
     assert session_capsule._path_relation(protected, protected) == "equal"
     assert session_capsule._path_relation(protected / "file.txt", protected) == "inside"
     assert session_capsule._path_relation(protected.parent, protected) == "ancestor"
     assert session_capsule._path_relation(sibling, protected) is None
-    assert session_capsule._path_relation(Path(str(protected).lower()), protected) == "equal"
+    recased = session_capsule._path_relation(Path(str(protected).lower()), protected)
+    assert recased == ("equal" if case_insensitive_fs else None)
 
 
 def test_path_relation_resolves_symlink_target(tmp_path: Path) -> None:
