@@ -174,7 +174,7 @@ not queue both back to back:
 
 ```bash
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-python -m shelfwise_eval.full_system \
+/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system \
   --duration-seconds 900 --live-required \
   --output-dir "reports/soak_15m_${RUN_STAMP}" \
   --run-id "mi300x_live_15m_${RUN_STAMP}"
@@ -187,7 +187,7 @@ timestamp:
 
 ```bash
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-python -m shelfwise_eval.full_system \
+/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system \
   --duration-seconds 1800 --live-required \
   --output-dir "reports/soak_30m_${RUN_STAMP}" \
   --run-id "mi300x_live_30m_${RUN_STAMP}"

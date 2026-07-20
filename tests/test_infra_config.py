@@ -173,6 +173,12 @@ def test_droplet_runbook_uses_the_live_model_request_budget() -> None:
     assert "--request-deadline 29" not in handoff
 
 
+def test_mi300x_runbook_uses_the_bootstrap_host_environment() -> None:
+    runbook = (ROOT / "docs" / "mi300x-recreate-runbook.md").read_text(encoding="utf-8")
+
+    assert runbook.count("/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system") == 2
+
+
 def test_readme_points_to_capability_manifest_for_api_reference() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
