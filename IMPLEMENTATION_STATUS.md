@@ -28,6 +28,10 @@ application feature, and classifying it as one misstates both.
   **22,928 ms** (**21,807.4 rows/s**), produced 41,442 threshold candidates and a bounded top-200
   queue with zero LLM calls. The reproducibility receipt is
   [`reports/fleet-scale-shakedown-20260720.json`](reports/fleet-scale-shakedown-20260720.json).
+- A fresh 8-cycle, fault-injected full-system replay completed with **0 failures**: 577 accepted
+  world events, all 63 injected malformed/duplicate/stale/tenant faults rejected, a verified
+  retry-to-dead-letter worker path, 87 unique decisions, 84 learning events, and 26 feature
+  receipts. This is in-process deterministic proof; it is distinct from the live-model gate.
 - The external acceptance still required tomorrow is deliberately not relabeled as local proof:
   the MI300X bootstrap and public-HTTPS live-model run require the rented droplet, its narrow
   application-host CIDR, and real credentials. `DROPLET_BOOTSTRAP.md` and
