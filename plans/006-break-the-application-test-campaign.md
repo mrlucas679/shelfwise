@@ -34,8 +34,8 @@ droplet credit, and it must not start until A–C are green.
 | B5 reuse audit | COMPLETE | one deterministic/agentic convergence allowed; same-source reuse still fails |
 | B6 dissenting autopilot | COMPLETE | deterministic dissent, terminal rejection learning, zero rejected write-backs |
 | B7 adversarial chat | COMPLETE | off-catalog, multi-turn, hostile corpus; full bounded samples; post-hoc grounding receipts |
-| C1-C4 deployed break campaign | PARTIAL / BLOCKED | Compose and controlled Redis/backend recovery executed; authenticated HTTP work is blocked by Secure cookies on the HTTP-only local origin |
-| D1-D4 live GPU campaign | BLOCKED BY C | do not spend credit until Phase C is green |
+| C1-C4 deployed break campaign | COMPLETE | Real deployed-topology capacity ramp, saturation, chaos, and 32-thread race campaign completed; see `reports/break_campaign_20260715T000000Z.md`. |
+| D1-D4 live GPU campaign | READY FOR EXTERNAL EXECUTION | Phase C is green. Execution requires an approved GPU rental, current credentials, and a public HTTPS origin; no application code remains to implement. |
 
 Current local evidence: the full repository suite passed `649` tests with `6` skipped, Ruff passed,
 and the

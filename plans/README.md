@@ -18,6 +18,11 @@ until plans 001-003 are complete. Execute in order and update status after each 
 | 004 | Replace recency-only chat context with relevance retrieval | P1 | L | 001 | DONE |
 | 005 | Make recovery capsules bounded and non-recursive | P2 | M | 001 | DONE |
 | 006 | Break-the-application test campaign (from the 2026-07-14 forensic audit) | P0 | XL | - | DONE |
+| 007 | Guard and bound the intelligence API surface | P1 | S | - | DONE |
+| 008 | Make edge-batch receipt recording recoverable | P1 | M | - | DONE |
+| 009 | Enforce roles for state-changing scenario routes | P1 | S | - | DONE |
+| 010 | Secure and rate-limit multimodal processing routes | P1 | M | - | DONE |
+| 011 | Make concurrent learning-threshold updates monotonic | P1 | M | - | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 
@@ -29,6 +34,15 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 - Plan 003 is the release gate that distinguishes in-process domain proof from deployed-system proof.
 - Plan 004 can proceed after plan 001, but its production soak belongs in plan 003's gate.
 - Plan 005 is independent at runtime but should use the restored CI baseline.
+- Plans 007 and 008 are independently executable; both add the missing negative-path regression coverage discovered during the 2026-07-21 book-driven audit.
+- Plan 009 is independent of plans 007 and 008, but should be reviewed with them because all three close authorization or reliability gaps hidden by happy-path tests.
+- Plan 010 follows the same trust-boundary policy for optional voice and scan services; it can execute independently after the multimodal product-access contract is confirmed.
+- Plan 011 is independent of the access-control plans and targets a Postgres-only correctness race in the learning loop.
+
+## 2026-07-21 implementation update
+
+- Plans 007-010 are implemented and covered by the full local regression suite.
+- Plan 011's database-level monotonic upsert and real-Postgres concurrency regression are implemented and passed in the GitHub Actions Postgres/Redis backend gate on `20c7c36`. This local workspace has no `SHELFWISE_TEST_DATABASE_URL` for a redundant run.
 
 ## Current implementation status
 
