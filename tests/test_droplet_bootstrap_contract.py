@@ -57,3 +57,5 @@ def test_droplet_bootstrap_docs_keep_required_secrets_out_of_git() -> None:
     assert "SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI=true" in source
     assert "non-allowlisted host" in source
     assert "old key fails" in source
+    assert "```powershell\npython scripts/track3_prescreen.py" not in source
+    assert "```bash\npython scripts/track3_prescreen.py " in source

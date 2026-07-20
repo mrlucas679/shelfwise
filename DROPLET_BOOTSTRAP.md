@@ -137,11 +137,11 @@ Git, shell history where practical, logs, screenshots, and reports.
 
 Then run:
 
-```powershell
-python scripts/track3_prescreen.py `
-  --base-url https://<public-shelfwise-origin> `
-  --startup-deadline 60 `
-  --request-deadline 130 `
+```bash
+python scripts/track3_prescreen.py \
+  --base-url https://<public-shelfwise-origin> \
+  --startup-deadline 60 \
+  --request-deadline 130 \
   --output reports/track3_prescreen.json
 ```
 
