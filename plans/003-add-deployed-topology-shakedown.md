@@ -7,7 +7,7 @@
 
 ## Status
 
-- **State**: IN PROGRESS (harness implemented; public deployment receipt pending)
+- **State**: DONE (public-origin production topology and shakedown passed in GitHub Actions on `45debdf`)
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: MED
