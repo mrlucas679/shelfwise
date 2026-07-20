@@ -51,6 +51,11 @@ delays during demo bootstrap. It validates the host tools, ports, ROCm devices, 
 before downloading weights, and writes `/root/shelfwise-mi300x-bootstrap.json` only after both
 model IDs are returned by authenticated `/v1/models` checks.
 
+If the AMD Quick Start `rocm` container is not present, the bootstrap falls back to the official
+ROCm image with host networking. In that mode it adds ordered `INPUT` allow-then-drop rules for
+each vLLM port, because Docker NAT filtering does not govern host-networked processes. Keep the
+cloud firewall source restriction in place in either mode.
+
 Keep the commit from `git rev-parse HEAD` and that receipt with the run artifacts. If the command
 times out, inspect the printed `/root/shelfwise-vllm/vllm-8000.log` or `vllm-8001.log` tail before
 retrying; the failure is otherwise indistinguishable from a long model download.

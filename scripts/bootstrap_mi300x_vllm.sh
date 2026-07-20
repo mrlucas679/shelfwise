@@ -232,6 +232,18 @@ start_quick_start_server() {
     "pgrep -f '[v]llm serve.*--port ${port}' >/dev/null || { cat /root/shelfwise-vllm/vllm-${port}.log; exit 1; }"
 }
 
+restrict_host_network_port() {
+  # The fallback image uses host networking, so Docker's NAT chain cannot enforce the
+  # source allowlist. Put the narrow ACCEPT before the port-specific DROP in INPUT.
+  local port="$1"
+  if ! iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; then
+    iptables -I INPUT 1 -p tcp --dport "$port" -j DROP
+  fi
+  if ! iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
+  fi
+}
+
 start_server() {
   # Launch one constrained vLLM server sharing the MI300X safely with the other tier.
   local name="$1"
@@ -244,6 +256,7 @@ start_server() {
     return 0
   fi
 
+  restrict_host_network_port "$port"
   remove_existing_container "$name"
   docker run -d \
     --name "$name" \

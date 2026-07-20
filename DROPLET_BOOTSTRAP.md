@@ -53,7 +53,9 @@ The script detects the Quick Start's preinstalled `rocm` vLLM 0.23 container and
 models inside it, avoiding an incompatible duplicate image. It downloads E4B routine and 31B strong
 models into the Hugging Face cache, starts them on `8000` and `8001`, then waits for `/v1/models` to
 prove each model is loaded. It is safe to rerun; it only replaces its named vLLM processes. On a
-non-Quick-Start host it falls back to the official Gemma 4 ROCm vLLM image.
+non-Quick-Start host it falls back to the official Gemma 4 ROCm vLLM image. That fallback uses
+host networking, so the bootstrap installs an ordered `INPUT` allow-then-drop pair for each vLLM
+port; Docker NAT rules alone do not protect a host-networked process.
 
 On the application host, set the printed URLs and the same `VLLM_API_KEY` before starting the
 production Compose stack. Production Compose defaults `SHELFWISE_COOKIE_SECURE=true`; terminate
@@ -91,6 +93,9 @@ sudo iptables -t nat -S DOCKER | grep -- '--dport 8000'
 sudo iptables -t nat -S DOCKER | grep -- '--dport 8001'
 sudo iptables -S DOCKER | grep -- '--dport 8000'
 sudo iptables -S DOCKER | grep -- '--dport 8001'
+# Required too if the bootstrap used the non-Quick-Start host-network fallback.
+sudo iptables -S INPUT | grep -- '--dport 8000'
+sudo iptables -S INPUT | grep -- '--dport 8001'
 ```
 
 From the allowlisted application host, prove authenticated access with a placeholder only:
