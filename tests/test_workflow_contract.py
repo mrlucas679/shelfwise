@@ -36,5 +36,5 @@ def test_ci_scopes_insecure_cookie_override_to_http_smoke() -> None:
         in boot
     )
     assert "docker compose -f docker-compose.production.yml logs --no-color" in boot
-    assert "docker compose -f docker-compose.production.yml up -d --wait" in smoke
+    assert "timeout 90s docker compose -f docker-compose.production.yml up -d --wait" in smoke
     assert "python scripts/deployment_shakedown.py" in smoke
