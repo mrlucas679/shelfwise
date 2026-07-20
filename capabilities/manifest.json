@@ -2674,7 +2674,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 157,
+          "line": 160,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_entity"
         }
@@ -2696,7 +2696,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 205,
+          "line": 208,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_fidelity"
         }
@@ -2718,7 +2718,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 169,
+          "line": 172,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "list_twin_observations"
         }
@@ -2740,7 +2740,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 110,
+          "line": 113,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_store_twin"
         }
@@ -2762,7 +2762,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 53,
+          "line": 56,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "list_twin_devices"
         }
@@ -2784,7 +2784,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 80,
+          "line": 83,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "compare_twin_scenario"
         }
@@ -2806,7 +2806,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 123,
+          "line": 126,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_snapshot"
         }
@@ -3158,7 +3158,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 90,
+          "line": 95,
           "path": "src/shelfwise_backend/intelligence_api.py",
           "symbol": "reconcile_delivery_endpoint"
         }
@@ -3180,7 +3180,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 128,
+          "line": 133,
           "path": "src/shelfwise_backend/intelligence_api.py",
           "symbol": "summarize_outcome_endpoint"
         }
@@ -3202,7 +3202,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 66,
+          "line": 71,
           "path": "src/shelfwise_backend/intelligence_api.py",
           "symbol": "split_stock_endpoint"
         }
@@ -3224,7 +3224,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 111,
+          "line": 116,
           "path": "src/shelfwise_backend/intelligence_api.py",
           "symbol": "plan_supplier_cover_endpoint"
         }
@@ -3779,7 +3779,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 216,
+          "line": 219,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "ingest_edge_observations"
         }
@@ -3801,7 +3801,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 187,
+          "line": 190,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "ingest_twin_observation"
         }
@@ -3823,7 +3823,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 93,
+          "line": 96,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "onboard_twin"
         }
@@ -3845,7 +3845,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 132,
+          "line": 135,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "bootstrap_twin_from_events"
         }
@@ -3867,7 +3867,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 29,
+          "line": 32,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "calibrate_twin_device"
         }
@@ -3889,7 +3889,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 62,
+          "line": 65,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "create_twin_scenario"
         }
@@ -5291,7 +5291,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:56e1db553901bf07c74360da330fc61b9ff34a41ec397ce04ae0a612b6fe21fb",
+  "fingerprint": "sha256:0a57c9ac69564daa2976e760cc4405827b882763781e60219ccfac229acd97ad",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

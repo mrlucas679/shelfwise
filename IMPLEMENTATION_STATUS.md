@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **749 passed / 15 env-gated skips** locally;
+Branch: `developers` · Gates at time of writing: **752 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -20,8 +20,11 @@ application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
-- The full local backend regression suite passed: **749 passed, 15 environment-gated skips**;
+- The full local backend regression suite passed: **752 passed, 15 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
+- All intelligence calculation POST routes now use the shared API-key write guard and bounded
+  write-rate limiter. Edge-observation batch receipts now release failed projection claims, so a
+  valid signed retry cannot be permanently misreported as a duplicate.
 - The regenerated capability manifest records **214** wired capabilities. Its only six `partial`
   records are deliberately external-proof boundaries (live Fireworks/MI300X inference and actual
   training/serving execution), not missing backend routes, workers, or event consumers.
