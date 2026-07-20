@@ -225,7 +225,9 @@ def test_worker_loop_service_processes_queue_when_enabled(monkeypatch) -> None:
         )
         await service.start()
         try:
-            for _ in range(50):
+            # The actual cascade runs on a worker thread; permit a bounded five-second
+            # deadline so full-suite CPU contention cannot make this integration check flaky.
+            for _ in range(250):
                 if decisions.list():
                     break
                 await asyncio.sleep(0.02)
