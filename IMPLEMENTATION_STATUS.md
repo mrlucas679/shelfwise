@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **755 passed / 16 env-gated skips** locally;
+Branch: `developers` · Gates at time of writing: **756 passed / 16 env-gated skips** locally;
 **770 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
 ([run 29787464704](https://github.com/mrlucas679/shelfwise/actions/runs/29787464704)); ruff
 clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
@@ -20,7 +20,7 @@ not an application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
-- The full local backend regression suite passed: **755 passed, 16 environment-gated skips**;
+- The full local backend regression suite passed: **756 passed, 16 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
 - All intelligence calculation POST routes now use the shared API-key write guard and bounded
   write-rate limiter. Edge-observation batch receipts now release failed projection claims, so a
