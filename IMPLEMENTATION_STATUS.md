@@ -22,6 +22,9 @@ application feature, and classifying it as one misstates both.
 
 - The full local backend regression suite passed: **749 passed, 15 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
+- The regenerated capability manifest records **214** wired capabilities. Its only six `partial`
+  records are deliberately external-proof boundaries (live Fireworks/MI300X inference and actual
+  training/serving execution), not missing backend routes, workers, or event consumers.
 - GitHub Actions CI for `62cf190` passed its real Postgres/Redis, browser E2E, production-topology,
   deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
 - A fresh deterministic fleet-scale run processed **500,000 of 500,000 requested rows** in

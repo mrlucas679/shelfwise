@@ -156,9 +156,19 @@
       "kind": "agent",
       "metadata_only": false,
       "name": "Orchestrator",
-      "note": "A bounded, schema-validating AgentOrchestrator is unit-tested but not yet wired into the backend cascade.",
+      "note": null,
       "relationships": [],
       "sources": [
+        {
+          "line": 372,
+          "path": "src/shelfwise_backend/agentic_cascade.py",
+          "symbol": "AgentOrchestrator"
+        },
+        {
+          "line": 606,
+          "path": "src/shelfwise_backend/chat.py",
+          "symbol": "AgentOrchestrator"
+        },
         {
           "line": 21,
           "path": "src/shelfwise_inference/config.py",
@@ -170,9 +180,9 @@
           "symbol": "AgentOrchestrator"
         }
       ],
-      "status": "partial",
+      "status": "verified",
       "verification_nodeids": [
-        "tests/test_agent_orchestration.py::test_agent_executes_tool_feeds_result_back_and_returns_valid_json"
+        "tests/test_golden_cascade.py::test_golden_cascade_returns_all_demo_agents"
       ]
     },
     {
@@ -730,11 +740,11 @@
       "worker_enabled": false
     },
     {
-      "consumer": "CascadeWorker.default_cascade_handler",
+      "consumer": "CascadeDispatcher._run",
       "event_type": "cold_chain_alert",
-      "id": "event_consumer:cascade_worker:cold_chain_alert",
+      "id": "event_consumer:cascade_dispatcher:cold_chain_alert",
       "kind": "event_consumer",
-      "name": "Cascade worker consumes cold_chain_alert",
+      "name": "Cascade Dispatcher consumes cold_chain_alert",
       "note": null,
       "relationships": [
         {
@@ -748,9 +758,9 @@
       ],
       "sources": [
         {
-          "line": 198,
-          "path": "src/shelfwise_backend/worker/worker.py",
-          "symbol": "default_cascade_handler"
+          "line": 105,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
         }
       ],
       "status": "verified",
@@ -759,11 +769,11 @@
       ]
     },
     {
-      "consumer": "CascadeWorker.default_cascade_handler",
+      "consumer": "CascadeDispatcher._run",
       "event_type": "expiry_entry",
-      "id": "event_consumer:cascade_worker:expiry_entry",
+      "id": "event_consumer:cascade_dispatcher:expiry_entry",
       "kind": "event_consumer",
-      "name": "Cascade worker consumes expiry_entry",
+      "name": "Cascade Dispatcher consumes expiry_entry",
       "note": null,
       "relationships": [
         {
@@ -777,9 +787,9 @@
       ],
       "sources": [
         {
-          "line": 217,
-          "path": "src/shelfwise_backend/worker/worker.py",
-          "symbol": "default_cascade_handler"
+          "line": 93,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
         }
       ],
       "status": "verified",
@@ -788,11 +798,69 @@
       ]
     },
     {
-      "consumer": "CascadeWorker.default_cascade_handler",
-      "event_type": "sale",
-      "id": "event_consumer:cascade_worker:sale",
+      "consumer": "CascadeDispatcher._run",
+      "event_type": "inventory_exception",
+      "id": "event_consumer:cascade_dispatcher:inventory_exception",
       "kind": "event_consumer",
-      "name": "Cascade worker consumes sale",
+      "name": "Cascade Dispatcher consumes inventory_exception",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:inventory_exception"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 87,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeDispatcher._run",
+      "event_type": "recall_notice",
+      "id": "event_consumer:cascade_dispatcher:recall_notice",
+      "kind": "event_consumer",
+      "name": "Cascade Dispatcher consumes recall_notice",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:recall_notice"
+        },
+        {
+          "kind": "requires",
+          "target": "worker:cascade_worker"
+        }
+      ],
+      "sources": [
+        {
+          "line": 85,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "CascadeDispatcher._run",
+      "event_type": "sale",
+      "id": "event_consumer:cascade_dispatcher:sale",
+      "kind": "event_consumer",
+      "name": "Cascade Dispatcher consumes sale",
       "note": null,
       "relationships": [
         {
@@ -806,9 +874,9 @@
       ],
       "sources": [
         {
-          "line": 197,
-          "path": "src/shelfwise_backend/worker/worker.py",
-          "symbol": "default_cascade_handler"
+          "line": 89,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
         }
       ],
       "status": "verified",
@@ -817,11 +885,11 @@
       ]
     },
     {
-      "consumer": "CascadeWorker.default_cascade_handler",
+      "consumer": "CascadeDispatcher._run",
       "event_type": "scan",
-      "id": "event_consumer:cascade_worker:scan",
+      "id": "event_consumer:cascade_dispatcher:scan",
       "kind": "event_consumer",
-      "name": "Cascade worker consumes scan",
+      "name": "Cascade Dispatcher consumes scan",
       "note": null,
       "relationships": [
         {
@@ -835,9 +903,9 @@
       ],
       "sources": [
         {
-          "line": 195,
-          "path": "src/shelfwise_backend/worker/worker.py",
-          "symbol": "default_cascade_handler"
+          "line": 99,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
         }
       ],
       "status": "verified",
@@ -846,11 +914,11 @@
       ]
     },
     {
-      "consumer": "CascadeWorker.default_cascade_handler",
+      "consumer": "CascadeDispatcher._run",
       "event_type": "supplier_update",
-      "id": "event_consumer:cascade_worker:supplier_update",
+      "id": "event_consumer:cascade_dispatcher:supplier_update",
       "kind": "event_consumer",
-      "name": "Cascade worker consumes supplier_update",
+      "name": "Cascade Dispatcher consumes supplier_update",
       "note": null,
       "relationships": [
         {
@@ -864,9 +932,59 @@
       ],
       "sources": [
         {
-          "line": 196,
-          "path": "src/shelfwise_backend/worker/worker.py",
-          "symbol": "default_cascade_handler"
+          "line": 101,
+          "path": "src/shelfwise_backend/cascade_dispatcher.py",
+          "symbol": "CascadeDispatcher._run"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "app._record_pipeline_event",
+      "event_type": "shipment",
+      "id": "event_consumer:ingestion_pipeline:shipment",
+      "kind": "event_consumer",
+      "name": "Ingestion Pipeline consumes shipment",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:shipment"
+        }
+      ],
+      "sources": [
+        {
+          "line": 3393,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "_record_pipeline_event"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_worker_journal.py::test_worker_processes_one_bus_event_and_records_done_run"
+      ]
+    },
+    {
+      "consumer": "app._record_pipeline_event",
+      "event_type": "stock_update",
+      "id": "event_consumer:ingestion_pipeline:stock_update",
+      "kind": "event_consumer",
+      "name": "Ingestion Pipeline consumes stock_update",
+      "note": null,
+      "relationships": [
+        {
+          "kind": "consumes",
+          "target": "event_type:stock_update"
+        }
+      ],
+      "sources": [
+        {
+          "line": 3393,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "_record_pipeline_event"
         }
       ],
       "status": "verified",
@@ -876,7 +994,7 @@
     },
     {
       "consumers": [
-        "event_consumer:cascade_worker:cold_chain_alert"
+        "event_consumer:cascade_dispatcher:cold_chain_alert"
       ],
       "event_type": "cold_chain_alert",
       "id": "event_type:cold_chain_alert",
@@ -898,7 +1016,7 @@
     },
     {
       "consumers": [
-        "event_consumer:cascade_worker:expiry_entry"
+        "event_consumer:cascade_dispatcher:expiry_entry"
       ],
       "event_type": "expiry_entry",
       "id": "event_type:expiry_entry",
@@ -919,7 +1037,9 @@
       ]
     },
     {
-      "consumers": [],
+      "consumers": [
+        "event_consumer:cascade_dispatcher:inventory_exception"
+      ],
       "event_type": "inventory_exception",
       "id": "event_type:inventory_exception",
       "kind": "event_type",
@@ -933,11 +1053,15 @@
           "symbol": "EventType.inventory_exception"
         }
       ],
-      "status": "partial",
-      "verification_nodeids": []
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
     },
     {
-      "consumers": [],
+      "consumers": [
+        "event_consumer:cascade_dispatcher:recall_notice"
+      ],
       "event_type": "recall_notice",
       "id": "event_type:recall_notice",
       "kind": "event_type",
@@ -951,12 +1075,14 @@
           "symbol": "EventType.recall_notice"
         }
       ],
-      "status": "partial",
-      "verification_nodeids": []
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
     },
     {
       "consumers": [
-        "event_consumer:cascade_worker:sale"
+        "event_consumer:cascade_dispatcher:sale"
       ],
       "event_type": "sale",
       "id": "event_type:sale",
@@ -978,7 +1104,7 @@
     },
     {
       "consumers": [
-        "event_consumer:cascade_worker:scan"
+        "event_consumer:cascade_dispatcher:scan"
       ],
       "event_type": "scan",
       "id": "event_type:scan",
@@ -999,12 +1125,14 @@
       ]
     },
     {
-      "consumers": [],
+      "consumers": [
+        "event_consumer:ingestion_pipeline:shipment"
+      ],
       "event_type": "shipment",
       "id": "event_type:shipment",
       "kind": "event_type",
       "name": "Shipment",
-      "note": "Canonical event type exists but CascadeWorker has no shipment consumer branch.",
+      "note": null,
       "relationships": [],
       "sources": [
         {
@@ -1013,16 +1141,20 @@
           "symbol": "EventType.shipment"
         }
       ],
-      "status": "partial",
-      "verification_nodeids": []
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
     },
     {
-      "consumers": [],
+      "consumers": [
+        "event_consumer:ingestion_pipeline:stock_update"
+      ],
       "event_type": "stock_update",
       "id": "event_type:stock_update",
       "kind": "event_type",
       "name": "Stock Update",
-      "note": "Canonical event type exists but CascadeWorker has no stock-update consumer branch.",
+      "note": null,
       "relationships": [],
       "sources": [
         {
@@ -1031,12 +1163,14 @@
           "symbol": "EventType.stock_update"
         }
       ],
-      "status": "partial",
-      "verification_nodeids": []
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_event_ingest.py::test_event_contract_is_traceable_and_tolerant"
+      ]
     },
     {
       "consumers": [
-        "event_consumer:cascade_worker:supplier_update"
+        "event_consumer:cascade_dispatcher:supplier_update"
       ],
       "event_type": "supplier_update",
       "id": "event_type:supplier_update",
@@ -5157,7 +5291,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:22dfe1a8fe087b0ce322da74fa6b72b9f8c202dd47c259b998536b7d944bf325",
+  "fingerprint": "sha256:56e1db553901bf07c74360da330fc61b9ff34a41ec397ce04ae0a612b6fe21fb",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

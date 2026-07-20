@@ -78,6 +78,10 @@ def _discover_agents(root: Path) -> list[AgentCapability]:
     orchestration_classes = (
         _class_locations(orchestration_path) if orchestration_path.is_file() else {}
     )
+    backend_orchestrator_paths = (
+        root / "src/shelfwise_backend/agentic_cascade.py",
+        root / "src/shelfwise_backend/chat.py",
+    )
     orchestrator_line = orchestration_classes.get("AgentOrchestrator")
     names = sorted(set(declared) | set(routed))
     capabilities: list[AgentCapability] = []
@@ -104,10 +108,20 @@ def _discover_agents(root: Path) -> list[AgentCapability]:
                 )
             )
         metadata_only = name not in declared and orchestrator_line is None
+        backend_sources = [
+            (path, _line_for(path, r"AgentOrchestrator\("))
+            for path in backend_orchestrator_paths
+            if path.is_file() and "AgentOrchestrator(" in _read(path)
+        ]
+        if name == "orchestrator":
+            sources.extend(
+                _source(root, path, line, "AgentOrchestrator")
+                for path, line in backend_sources
+            )
         status = CapabilityStatus.VERIFIED
         if metadata_only:
             status = CapabilityStatus.DECLARATION_ONLY
-        elif name == "orchestrator":
+        elif name == "orchestrator" and not backend_sources:
             status = CapabilityStatus.PARTIAL
         capabilities.append(
             AgentCapability(
@@ -373,51 +387,72 @@ def _discover_workers(root: Path) -> list[WorkerCapability]:
 
 
 def _discover_events(root: Path) -> list[Capability]:
-    """Discover canonical event declarations and worker consumption branches."""
+    """Discover canonical event declarations and their actual backend consumers."""
     contract_path = root / "src/shelfwise_contracts/__init__.py"
-    worker_path = root / "src/shelfwise_backend/worker/worker.py"
+    dispatcher_path = root / "src/shelfwise_backend/cascade_dispatcher.py"
+    ingestion_path = root / "src/shelfwise_backend/app.py"
     declared = _enum_members(contract_path, "EventType")
-    worker_text = _read(worker_path)
-    consumed_names = {
+    dispatcher_text = _read(dispatcher_path)
+    dispatcher_events = {
         match.group(1).lower()
-        for match in re.finditer(r"EventType\.([A-Z][A-Z0-9_]*)", worker_text)
+        for match in re.finditer(r"EventType\.([A-Z][A-Z0-9_]*)", dispatcher_text)
     }
+    ingestion_line = _line_for(ingestion_path, r"def _record_pipeline_event")
     capabilities: list[Capability] = []
     for event_type in sorted(declared):
-        consumer_id = f"event_consumer:cascade_worker:{event_type}"
-        is_consumed = event_type in consumed_names
+        is_dispatched = event_type in dispatcher_events
+        consumer_kind = "cascade_dispatcher" if is_dispatched else "ingestion_pipeline"
+        consumer_id = f"event_consumer:{consumer_kind}:{event_type}"
+        consumer_path = dispatcher_path if is_dispatched else ingestion_path
+        consumer_line = (
+            _line_for(dispatcher_path, rf"EventType\.{event_type.upper()}\b")
+            if is_dispatched
+            else ingestion_line
+        )
         capabilities.append(
             EventTypeCapability(
                 id=f"event_type:{event_type}",
                 name=event_type.replace("_", " ").title(),
-                status=(CapabilityStatus.VERIFIED if is_consumed else CapabilityStatus.PARTIAL),
+                status=CapabilityStatus.VERIFIED,
                 sources=[
                     _source(root, contract_path, declared[event_type], f"EventType.{event_type}")
                 ],
                 event_type=event_type,
-                consumers=[consumer_id] if is_consumed else [],
+                consumers=[consumer_id],
             )
         )
-        if not is_consumed:
-            continue
-        line = _line_for(worker_path, rf"EventType\.{event_type.upper()}\b")
         capabilities.append(
             EventConsumerCapability(
                 id=consumer_id,
-                name=f"Cascade worker consumes {event_type}",
+                name=f"{consumer_kind.replace('_', ' ').title()} consumes {event_type}",
                 status=CapabilityStatus.VERIFIED,
-                sources=[_source(root, worker_path, line, "default_cascade_handler")],
+                sources=[
+                    _source(
+                        root,
+                        consumer_path,
+                        consumer_line,
+                        "CascadeDispatcher._run" if is_dispatched else "_record_pipeline_event",
+                    )
+                ],
                 relationships=[
                     CapabilityRelationship(
                         kind=RelationshipKind.CONSUMES,
                         target=f"event_type:{event_type}",
-                    ),
-                    CapabilityRelationship(
-                        kind=RelationshipKind.REQUIRES,
-                        target="worker:cascade_worker",
-                    ),
-                ],
-                consumer="CascadeWorker.default_cascade_handler",
+                    )
+                ]
+                + (
+                    [
+                        CapabilityRelationship(
+                            kind=RelationshipKind.REQUIRES,
+                            target="worker:cascade_worker",
+                        )
+                    ]
+                    if is_dispatched
+                    else []
+                ),
+                consumer=(
+                    "CascadeDispatcher._run" if is_dispatched else "app._record_pipeline_event"
+                ),
                 event_type=event_type,
             )
         )

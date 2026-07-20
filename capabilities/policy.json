@@ -7,13 +7,6 @@
         "tests/test_golden_cascade.py::test_cold_chain_cascade_routes_facilities_review"
       ]
     },
-    "agent:orchestrator": {
-      "note": "A bounded, schema-validating AgentOrchestrator is unit-tested but not yet wired into the backend cascade.",
-      "status": "partial",
-      "verification_nodeids": [
-        "tests/test_agent_orchestration.py::test_agent_executes_tool_feeds_result_back_and_returns_valid_json"
-      ]
-    },
     "agent:procurement": {
       "note": null,
       "status": null,
@@ -41,16 +34,6 @@
       "verification_nodeids": [
         "tests/test_dynamics_yoco_connectors.py::test_yoco_succeeded_checkout_requires_reconciled_retail_metadata"
       ]
-    },
-    "event_type:shipment": {
-      "note": "Canonical event type exists but CascadeWorker has no shipment consumer branch.",
-      "status": "partial",
-      "verification_nodeids": []
-    },
-    "event_type:stock_update": {
-      "note": "Canonical event type exists but CascadeWorker has no stock-update consumer branch.",
-      "status": "partial",
-      "verification_nodeids": []
     },
     "tool:multimodal:scan_tool": {
       "note": null,

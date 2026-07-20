@@ -238,14 +238,19 @@ def test_expired_or_overlong_waivers_fail_closed() -> None:
     )
 
 
-def test_partial_claims_remain_honest() -> None:
+def test_runtime_gated_claims_remain_honest() -> None:
     """Runtime-gated capabilities cannot silently look complete."""
     manifest, _, _ = _documents()
     by_id = {item.id: item for item in manifest.capabilities}
 
     orchestrator = by_id["agent:orchestrator"]
-    assert orchestrator.status is CapabilityStatus.PARTIAL
+    assert orchestrator.status is CapabilityStatus.VERIFIED
     assert orchestrator.metadata_only is False  # type: ignore[union-attr]
+
+    for event_type in ("inventory_exception", "recall_notice", "shipment", "stock_update"):
+        event = by_id[f"event_type:{event_type}"]
+        assert event.status is CapabilityStatus.VERIFIED
+        assert event.consumers  # type: ignore[union-attr]
 
     for connector_id in ("connector:dynamics", "connector:yoco"):
         connector = by_id[connector_id]
