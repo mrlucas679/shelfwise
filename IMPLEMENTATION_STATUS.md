@@ -25,7 +25,7 @@ application feature, and classifying it as one misstates both.
 - The regenerated capability manifest records **214** wired capabilities. Its only six `partial`
   records are deliberately external-proof boundaries (live Fireworks/MI300X inference and actual
   training/serving execution), not missing backend routes, workers, or event consumers.
-- GitHub Actions CI for `62cf190` passed its real Postgres/Redis, browser E2E, production-topology,
+- GitHub Actions CI on the current `developers` branch passed its real Postgres/Redis, browser E2E, production-topology,
   deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
 - A fresh deterministic fleet-scale run processed **500,000 of 500,000 requested rows** in
   **22,928 ms** (**21,807.4 rows/s**), produced 41,442 threshold candidates and a bounded top-200
