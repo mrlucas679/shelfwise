@@ -118,8 +118,9 @@ jobs:
         run: |
           docker compose -f docker-compose.production.yml build
           for service in backend frontend; do
-            image=$(docker compose -f docker-compose.production.yml images -q "$service")
-            test -n "$image"
+            # `docker compose images` lists containers, so it is empty before `up`.
+            # Compose builds these unqualified local tags from the service names.
+            image="shelfwise-${service}"
             architecture=$(docker image inspect "$image" --format '{{.Architecture}}')
             echo "$service image architecture: $architecture"
             test "$architecture" = amd64

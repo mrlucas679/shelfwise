@@ -29,13 +29,14 @@ endpoint before this was ever demoed. Artifacts are committed under [`reports/`]
 | Chat calls genuinely model-backed | 333 / 333 (zero offline fallbacks, zero errors) |
 | Decisions created | 4,618 (zero ID collisions) |
 | Human approve/reject cycles | 2,990 (zero mismatches) |
-| Automated tests passing | 415 |
-| Machine-verified capabilities | 165 (CI fails on drift) |
+| Automated tests passing | 736 (15 environment-gated skips) |
+| Machine-verified capabilities | 210 (CI fails on drift) |
 
 See [`reports/SUBMISSION_EVIDENCE_REPORT.md`](reports/SUBMISSION_EVIDENCE_REPORT.md) for the full,
 honest breakdown of measured vs. configured behavior, and
-[`reports/ORIGINAL_PROBLEM_COVERAGE.md`](reports/ORIGINAL_PROBLEM_COVERAGE.md) for which retailer
-workflows are proven, partial, or roadmap.
+[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the current complete application
+inventory. [`reports/ORIGINAL_PROBLEM_COVERAGE.md`](reports/ORIGINAL_PROBLEM_COVERAGE.md) is a
+dated baseline retained for auditability.
 
 ## Run Locally
 
