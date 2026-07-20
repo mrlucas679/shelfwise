@@ -311,7 +311,7 @@ def test_learning_threshold_never_regresses_for_distinct_concurrent_decisions(
             "data_domain": "world_simulation",
             "status": "approved",
             "action": {"type": "apply_markdown", "params": {"sku": "SKU-MAX", "units": 8}},
-            "expected_outcome": {"incremental_profit_minor_units": exposure},
+            "expected_outcome": {"predicted_sell_through_units": exposure},
         }
 
     decisions = (
