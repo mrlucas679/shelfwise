@@ -4,12 +4,14 @@ from collections.abc import Callable
 
 from ...canonical import SourceSystem
 from ...provenance import InboundRecord
+from .dynamics import map_dynamics_inventory
 from .lightspeed import map_lightspeed_sale
 from .odoo import map_odoo_product
 from .sap import map_sap_inventory
 from .shopify import map_shopify_order
 from .square import map_square_inventory
 from .syspro import map_syspro_inventory
+from .yoco import map_yoco_checkout
 
 # Webhook mappers may fan a single payload out into multiple records (e.g. one sales
 # line per line item); poll mappers process one source row per call.
@@ -20,9 +22,18 @@ WEBHOOK_MAPPERS: dict[SourceSystem, WebhookMapper] = {
     SourceSystem.LIGHTSPEED: map_lightspeed_sale,
     SourceSystem.SHOPIFY: map_shopify_order,
     SourceSystem.SQUARE: map_square_inventory,
+    SourceSystem.YOCO: map_yoco_checkout,
 }
 
 POLL_MAPPERS: dict[SourceSystem, PollMapper] = {
+    # Manual intake must name its warehouse just as scheduled polling does.  A Business
+    # Central item resource has no warehouse dimension, so inventing a default would
+    # create an unsafe stock fact.
+    SourceSystem.DYNAMICS: lambda payload, tenant_id: map_dynamics_inventory(
+        payload,
+        tenant_id=tenant_id,
+        location_id=str(payload.get("location_id") or "").strip(),
+    ),
     SourceSystem.ODOO: map_odoo_product,
     SourceSystem.SAP: map_sap_inventory,
     SourceSystem.SYSPRO: map_syspro_inventory,

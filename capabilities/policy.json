@@ -29,14 +29,18 @@
       ]
     },
     "connector:dynamics": {
-      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
-      "status": "declaration_only",
-      "verification_nodeids": []
+      "note": "Business Central items polling maps inventory snapshots and preserves opaque OData continuation links.",
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_dynamics_yoco_connectors.py::test_dynamics_connector_reuses_opaque_odata_next_link"
+      ]
     },
     "connector:yoco": {
-      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
-      "status": "declaration_only",
-      "verification_nodeids": []
+      "note": "Succeeded checkout intake requires explicit SKU, quantity, and location metadata before emitting a sales event.",
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_dynamics_yoco_connectors.py::test_yoco_succeeded_checkout_requires_reconciled_retail_metadata"
+      ]
     },
     "event_type:shipment": {
       "note": "Canonical event type exists but CascadeWorker has no shipment consumer branch.",
@@ -133,7 +137,7 @@
     ],
     "connector": [
       "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-      "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+      "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
     ],
     "deployment_profile": [
       "tests/test_infra_config.py::test_backend_container_sandbox_is_declared_in_compose",

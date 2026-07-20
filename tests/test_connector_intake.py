@@ -170,14 +170,24 @@ def test_invalid_connector_record_is_persisted_without_event() -> None:
     assert records.json()["records"][0]["validation"]["ok"] is False
 
 
-def test_connector_intake_rejects_unknown_and_unmapped_systems() -> None:
+def test_connector_intake_rejects_unknown_systems() -> None:
     client = TestClient(app)
 
-    unmapped = client.post("/connectors/dynamics/intake", json={"payload": {}})
+    dynamics = client.post(
+        "/connectors/dynamics/intake",
+        json={
+            "payload": {
+                "id": "item-1",
+                "number": "1000",
+                "inventory": 2,
+                "location_id": "warehouse-1",
+            }
+        },
+    )
     unknown = client.post("/connectors/not-a-system/intake", json={"payload": {}})
 
-    assert unmapped.status_code == 422
-    assert "no connector mapper registered" in unmapped.json()["detail"]
+    assert dynamics.status_code == 200
+    assert dynamics.json()["status"] == "accepted"
     assert unknown.status_code == 404
     assert unknown.json()["detail"] == "Unknown connector system"
 

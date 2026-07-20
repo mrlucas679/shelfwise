@@ -307,30 +307,42 @@
       "transport": "file",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
-      "catalogued": false,
+      "catalogued": true,
       "declared": true,
       "id": "connector:dynamics",
       "kind": "connector",
-      "mapped": false,
-      "mapper_registered_claim": null,
-      "name": "Dynamics",
-      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "mapped": true,
+      "mapper_registered_claim": true,
+      "name": "Dynamics 365 Business Central",
+      "note": "Business Central items polling maps inventory snapshots and preserves opaque OData continuation links.",
       "relationships": [],
       "sources": [
         {
           "line": 16,
           "path": "src/shelfwise_connectors/canonical.py",
           "symbol": "SourceSystem.DYNAMICS"
+        },
+        {
+          "line": 35,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 32,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "POLL_MAPPERS"
         }
       ],
-      "status": "declaration_only",
+      "status": "verified",
       "system": "dynamics",
-      "transport": null,
-      "verification_nodeids": []
+      "transport": "poll",
+      "verification_nodeids": [
+        "tests/test_dynamics_yoco_connectors.py::test_dynamics_connector_reuses_opaque_odata_next_link"
+      ]
     },
     {
       "catalogued": true,
@@ -349,12 +361,12 @@
           "symbol": "SourceSystem.LIGHTSPEED"
         },
         {
-          "line": 57,
+          "line": 67,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
         {
-          "line": 20,
+          "line": 22,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "WEBHOOK_MAPPERS"
         }
@@ -364,7 +376,7 @@
       "transport": "webhook",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
@@ -389,7 +401,7 @@
           "symbol": "_CATALOG"
         },
         {
-          "line": 26,
+          "line": 37,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "POLL_MAPPERS"
         }
@@ -399,7 +411,7 @@
       "transport": "poll",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
@@ -419,12 +431,12 @@
           "symbol": "SourceSystem.SAP"
         },
         {
-          "line": 36,
+          "line": 46,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
         {
-          "line": 27,
+          "line": 38,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "POLL_MAPPERS"
         }
@@ -434,7 +446,7 @@
       "transport": "poll",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
@@ -454,12 +466,12 @@
           "symbol": "SourceSystem.SHOPIFY"
         },
         {
-          "line": 46,
+          "line": 56,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
         {
-          "line": 21,
+          "line": 23,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "WEBHOOK_MAPPERS"
         }
@@ -469,7 +481,7 @@
       "transport": "webhook",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
@@ -489,12 +501,12 @@
           "symbol": "SourceSystem.SQUARE"
         },
         {
-          "line": 35,
+          "line": 45,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
         {
-          "line": 22,
+          "line": 24,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "WEBHOOK_MAPPERS"
         }
@@ -504,7 +516,7 @@
       "transport": "webhook",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
@@ -524,12 +536,12 @@
           "symbol": "SourceSystem.SYSPRO"
         },
         {
-          "line": 56,
+          "line": 66,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
         {
-          "line": 28,
+          "line": 39,
           "path": "src/shelfwise_connectors/connectors/systems/registry.py",
           "symbol": "POLL_MAPPERS"
         }
@@ -539,30 +551,42 @@
       "transport": "poll",
       "verification_nodeids": [
         "tests/test_connector_catalog.py::test_connector_catalog_lists_available_and_roadmap_systems",
-        "tests/test_system_connectors.py::test_registry_routes_to_registered_mapper_and_rejects_unsupported_system"
+        "tests/test_system_connectors.py::test_registry_routes_to_registered_mappers"
       ]
     },
     {
-      "catalogued": false,
+      "catalogued": true,
       "declared": true,
       "id": "connector:yoco",
       "kind": "connector",
-      "mapped": false,
-      "mapper_registered_claim": null,
+      "mapped": true,
+      "mapper_registered_claim": true,
       "name": "Yoco",
-      "note": "SourceSystem declaration only; no catalogue row or mapper is registered.",
+      "note": "Succeeded checkout intake requires explicit SKU, quantity, and location metadata before emitting a sales event.",
       "relationships": [],
       "sources": [
         {
           "line": 20,
           "path": "src/shelfwise_connectors/canonical.py",
           "symbol": "SourceSystem.YOCO"
+        },
+        {
+          "line": 77,
+          "path": "src/shelfwise_connectors/catalog.py",
+          "symbol": "_CATALOG"
+        },
+        {
+          "line": 25,
+          "path": "src/shelfwise_connectors/connectors/systems/registry.py",
+          "symbol": "WEBHOOK_MAPPERS"
         }
       ],
-      "status": "declaration_only",
+      "status": "verified",
       "system": "yoco",
-      "transport": null,
-      "verification_nodeids": []
+      "transport": "webhook",
+      "verification_nodeids": [
+        "tests/test_dynamics_yoco_connectors.py::test_yoco_succeeded_checkout_requires_reconciled_retail_metadata"
+      ]
     },
     {
       "bus_backend": "redis",
@@ -5133,7 +5157,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:b02908455efa9aa3bf06976cbae6ac49b77314f4e79c12a88bdd18a0cde81a41",
+  "fingerprint": "sha256:1c063f69ca38a691fb1c08fe354655692e503ffe771070b57a8f510062bdb4cd",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

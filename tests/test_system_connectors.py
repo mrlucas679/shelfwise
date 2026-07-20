@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
-
 from shelfwise_connectors import (
     InventoryState,
     SourceSystem,
@@ -217,7 +215,7 @@ def test_square_webhook_maps_every_inventory_count_not_just_the_first() -> None:
     assert all(rec.validation.ok for rec in records)
 
 
-def test_registry_routes_to_registered_mapper_and_rejects_unsupported_system() -> None:
+def test_registry_routes_to_registered_mappers() -> None:
     payload = {
         "type": "inventory.count.updated",
         "data": {
@@ -233,8 +231,6 @@ def test_registry_routes_to_registered_mapper_and_rejects_unsupported_system() -
 
     assert len(mapped) == 1
     assert mapped[0].source_system is SourceSystem.SQUARE
-    with pytest.raises(ValueError, match="no connector mapper registered"):
-        map_for(SourceSystem.DYNAMICS, {}, tenant_id="t1")
 
 
 def test_registry_wraps_single_record_poll_mappers_in_a_list() -> None:

@@ -13,10 +13,12 @@ _EVENT_SOURCE_BY_SYSTEM = {
     SourceSystem.CSV: EventSource.WMS_CSV,
     SourceSystem.SAP: EventSource.WMS_CSV,
     SourceSystem.SYSPRO: EventSource.WMS_CSV,
+    SourceSystem.DYNAMICS: EventSource.WMS_CSV,
     SourceSystem.ODOO: EventSource.WMS_CSV,
     SourceSystem.SQUARE: EventSource.POS_CSV,
     SourceSystem.SHOPIFY: EventSource.POS_CSV,
     SourceSystem.LIGHTSPEED: EventSource.POS_CSV,
+    SourceSystem.YOCO: EventSource.POS_CSV,
 }
 
 

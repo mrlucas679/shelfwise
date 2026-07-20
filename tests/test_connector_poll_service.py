@@ -32,6 +32,11 @@ _SYSPRO_VARS = {
     "SHELFWISE_CONNECTOR_SYSPRO_BASE_URL": "https://syspro.example.com",
     "SHELFWISE_CONNECTOR_SYSPRO_TOKEN": "token",
 }
+_DYNAMICS_VARS = {
+    "SHELFWISE_CONNECTOR_DYNAMICS_BASE_URL": "https://bc.example.com/items",
+    "SHELFWISE_CONNECTOR_DYNAMICS_TOKEN": "token",
+    "SHELFWISE_CONNECTOR_DYNAMICS_LOCATION_ID": "warehouse-1",
+}
 
 
 def _record(object_id: str) -> InboundRecord:
@@ -74,7 +79,7 @@ def test_connector_poll_enabled_reads_the_flag(monkeypatch: pytest.MonkeyPatch) 
 def test_no_connectors_are_built_when_no_credentials_are_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for key in (*_ODOO_VARS, *_SAP_VARS, *_SYSPRO_VARS):
+    for key in (*_ODOO_VARS, *_SAP_VARS, *_SYSPRO_VARS, *_DYNAMICS_VARS):
         monkeypatch.delenv(key, raising=False)
 
     connectors = build_configured_connectors(cursors=InMemoryCursorStore(), tenant_id="t1")
@@ -85,7 +90,7 @@ def test_no_connectors_are_built_when_no_credentials_are_configured(
 def test_a_system_is_only_polled_when_every_one_of_its_env_vars_is_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for key in (*_ODOO_VARS, *_SAP_VARS, *_SYSPRO_VARS):
+    for key in (*_ODOO_VARS, *_SAP_VARS, *_SYSPRO_VARS, *_DYNAMICS_VARS):
         monkeypatch.delenv(key, raising=False)
     # Odoo partially configured (missing api key) must not build a broken connector.
     partial_odoo = dict(_ODOO_VARS)
@@ -98,8 +103,8 @@ def test_a_system_is_only_polled_when_every_one_of_its_env_vars_is_set(
     assert [c.source_system for c in connectors] == [SourceSystem.SAP]
 
 
-def test_all_three_systems_build_when_fully_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    for mapping in (_ODOO_VARS, _SAP_VARS, _SYSPRO_VARS):
+def test_all_poll_systems_build_when_fully_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    for mapping in (_ODOO_VARS, _SAP_VARS, _SYSPRO_VARS, _DYNAMICS_VARS):
         for key, value in mapping.items():
             monkeypatch.setenv(key, value)
 
@@ -109,6 +114,7 @@ def test_all_three_systems_build_when_fully_configured(monkeypatch: pytest.Monke
         SourceSystem.ODOO,
         SourceSystem.SAP,
         SourceSystem.SYSPRO,
+        SourceSystem.DYNAMICS,
     }
 
 

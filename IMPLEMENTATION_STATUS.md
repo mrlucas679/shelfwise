@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-20 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **738 passed / 15 env-gated skips** locally;
+Branch: `developers` · Gates at time of writing: **743 passed / 15 env-gated skips** locally;
 **735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
 against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
 rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
@@ -20,7 +20,7 @@ application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
-- The full local backend regression suite passed: **738 passed, 15 environment-gated skips**;
+- The full local backend regression suite passed: **743 passed, 15 environment-gated skips**;
   Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
 - GitHub Actions CI for `35a6329` passed its real Postgres/Redis, browser E2E, production-topology,
   deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
@@ -141,11 +141,13 @@ not an oversight).
 
 ## 5. Connectors and integrations — ✅
 
-- ✅ Seven system connectors (Odoo/SAP/SYSPRO polling; Square/Shopify/Lightspeed webhooks; CSV):
+- ✅ Nine system connectors (Odoo/SAP/SYSPRO/Dynamics Business Central polling;
+  Square/Shopify/Lightspeed/Yoco webhook-style intake; CSV):
   HMAC webhook verification, durable poll cursors (restart-surviving, real-Postgres verified),
   scheduled poll loop (`CONNECTOR_POLL_ENABLED`, env-tunable cadence with hot-loop floor),
-  status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked
-  inbound records, money minor-units.
+  status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked inbound
+  records, money minor-units. Dynamics preserves opaque OData continuation URLs; Yoco requires
+  explicit SKU/quantity/location metadata before a succeeded payment can emit a sales event.
 - ✅ Edge gateway: HMAC-signed device observations, body-size bounds, twin intake.
 
 ## 6. Digital twin — ✅ (software layer)
@@ -246,6 +248,6 @@ software already live and its acceptance gate committed. These are purchases, no
    that receives their observations and the topology view that displays them are both
    live software today.
 
-Integrating any retail system beyond the seven implemented connectors is likewise
+Integrating any retail system beyond the nine implemented connectors is likewise
 per-system contract work against that system's real API, undertaken when a real system
 appears - never faked in advance.

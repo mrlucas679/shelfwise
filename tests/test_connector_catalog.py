@@ -21,6 +21,8 @@ def test_connector_catalog_lists_available_and_roadmap_systems() -> None:
         SourceSystem.SHOPIFY,
         SourceSystem.SYSPRO,
         SourceSystem.LIGHTSPEED,
+        SourceSystem.DYNAMICS,
+        SourceSystem.YOCO,
     } <= systems
 
 
@@ -36,6 +38,8 @@ def test_connector_status_reflects_tenant_policy_and_mapper_coverage() -> None:
     assert by_system["square"]["enabled_for_tenant"] is False
     assert by_system["square"]["status"] == "available"
     assert by_system["lightspeed"]["status"] == "available"
+    assert by_system["dynamics"]["status"] == "available"
+    assert by_system["yoco"]["status"] == "available"
 
 
 def test_connector_status_accepts_single_allowed_system_string() -> None:
