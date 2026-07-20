@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections import defaultdict
@@ -29,6 +30,8 @@ from .models import (
 )
 from .routing import StrategyRouter, strategy_unavailable_reason
 from .telemetry import AmdSmiSampler, HostResourceSampler, TelemetryCollector
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -308,6 +311,14 @@ class BenchmarkRunner:
         try:
             outcome = await self.adapter.complete(endpoint, agent, request_id)
         except Exception:
+            _LOGGER.warning(
+                "benchmark adapter request failed: workflow=%s agent=%s endpoint=%s provider=%s",
+                workflow_id,
+                agent.name,
+                endpoint.name,
+                endpoint.provider,
+                exc_info=True,
+            )
             outcome = _adapter_failure()
         return _request_metric(
             run_id,

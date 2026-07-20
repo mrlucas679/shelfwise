@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 
 from shelfwise_benchmark.adapters import VllmMetricsSnapshot
@@ -52,6 +53,16 @@ class FakeInferenceAdapter:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FailingInferenceAdapter:
+    """Raise from every request to verify failures remain observable and contained."""
+
+    async def complete(self, endpoint, agent, request_id) -> RequestOutcome:
+        raise RuntimeError("simulated adapter outage")
+
+    async def aclose(self) -> None:
+        return None
 
 
 class FakeMetricsClient:
@@ -165,6 +176,25 @@ def test_runner_records_required_metrics_and_synchronized_worst_case() -> None:
     assert comparison.request_rps_ratio_vs_shared is not None
     assert comparison.gpu_util_ratio_vs_shared is None
     assert "control-plane-only" in comparison.notes
+
+
+def test_runner_logs_adapter_failures_and_records_safe_request_metrics(caplog) -> None:
+    """An adapter outage must be diagnosable without aborting the whole benchmark receipt."""
+    caplog.set_level(logging.WARNING, logger="shelfwise_benchmark.runner")
+
+    result = asyncio.run(
+        BenchmarkRunner(
+            _config(),
+            scope=EvidenceScope.CONTROL_PLANE_ONLY,
+            adapter=FailingInferenceAdapter(),
+            metrics_client=FakeMetricsClient(),
+            host_sampler=FakeHostSampler(),
+            strict_preflight=False,
+        ).run()
+    )
+
+    assert all(request.error_code == "adapter_exception" for request in result.requests)
+    assert "benchmark adapter request failed" in caplog.text
 
 
 def test_runner_honors_explicit_workflow_cap_even_when_window_is_short() -> None:

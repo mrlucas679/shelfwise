@@ -6,17 +6,17 @@
 
 Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
 Branch: `developers` · Gates at time of writing: **755 passed / 16 env-gated skips** locally;
-**735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
-against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
-rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
-governed-execution features added later that day are covered by the local suite and CI's
-real-infra job); ruff clean; frontend `tsc --noEmit` clean; capability manifest
-**210 capabilities**, contract-verified.
+**770 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
+([run 29787464704](https://github.com/mrlucas679/shelfwise/actions/runs/29787464704)); ruff
+clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
+contract-verified.
 
-**Every application feature is fully implemented. Nothing in the software is left
-behind.** Deployment infrastructure still to be purchased (a GPU rental, GPU-hours,
-cameras) is inventoried separately in the final appendix - procurement is not an
-application feature, and classifying it as one misstates both.
+**Every feature enabled by the supported application deployment profiles is implemented and
+covered by the applicable local or CI gate.** The six capability records marked `partial` are
+truthful external-proof boundaries: live provider inference and hardware-backed training/serving
+must be run on the rented GPU environment. Deployment infrastructure still to be purchased (a
+GPU rental, GPU-hours, cameras) is inventoried separately in the final appendix - procurement is
+not an application feature, and classifying it as one misstates both.
 
 ## 2026-07-20 readiness verification update
 
