@@ -126,7 +126,13 @@ jobs:
             test "$architecture" = amd64
           done
           started=$(date +%s)
-          docker compose -f docker-compose.production.yml up --build -d --wait
+          # `--wait` otherwise has no upper bound: a failed healthcheck can occupy a CI runner
+          # forever and leave the release state ambiguous. Keep the deadline above the Compose
+          # health budgets (including Postgres and backend start periods), then print logs on fail.
+          if ! timeout 90s docker compose -f docker-compose.production.yml up --build -d --wait; then
+            docker compose -f docker-compose.production.yml logs --no-color backend postgres migrate frontend
+            exit 1
+          fi
           elapsed=$(( $(date +%s) - started ))
           echo "Track 3 container readiness: ${elapsed}s"
           test "$elapsed" -lt 60
