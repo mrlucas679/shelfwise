@@ -337,7 +337,8 @@ def test_learning_threshold_never_regresses_for_distinct_concurrent_decisions(
         reset_tenant_context(token)
 
     metric = "SKU-MAX:markdown_sell_through_target_units"
-    assert thresholds[metric] == 9_000
+    # Markdown learning stores the confirmed units after the deterministic 12% uplift.
+    assert thresholds[metric] == 10_080
     assert {event["decision_id"] for event in events} >= {item["id"] for item in decisions}
     assert {record["decision_id"] for record in records} == {item["id"] for item in decisions}
 
