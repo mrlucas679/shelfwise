@@ -74,7 +74,7 @@ def test_config_selects_exact_profile_revision_and_runtime_boundary() -> None:
     config = load_training_config(CONFIG)
 
     assert config.model_profile.model_name_or_path == config.model_name_or_path
-    assert config.model_revision == "main"
+    assert config.model_revision == "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
     assert config.runtime.training_target == "w7900_jupyter"
     assert config.runtime.serving_target == "mi300x_endpoint"
     assert config.shakedown.train_examples == 120
@@ -88,7 +88,7 @@ def test_adapter_compatibility_accepts_exact_base_and_default_revision(tmp_path:
     result = validate_adapter_compatibility(adapter_dir, config)
 
     assert result["compatible"] is True
-    assert result["base_model_revision"] == "main"
+    assert result["base_model_revision"] == "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
     assert result["revision_source"] == "profile_default"
 
 
@@ -122,3 +122,11 @@ def test_profile_and_model_id_cannot_drift() -> None:
 
     with pytest.raises(ValueError, match="requires"):
         validate_training_config(mismatched)
+
+
+def test_training_config_rejects_mutable_model_revision() -> None:
+    """A rented-GPU run must record an immutable upstream base-model commit."""
+    mutable = replace(load_training_config(CONFIG), model_revision="main")
+
+    with pytest.raises(ValueError, match="immutable 40-character commit SHA"):
+        validate_training_config(mutable)
