@@ -6,8 +6,8 @@
 
 Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
 Branch: `developers` · Gates at time of writing: **761 passed / 16 env-gated skips** locally;
-**770 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
-([run 29787464704](https://github.com/mrlucas679/shelfwise/actions/runs/29787464704)); ruff
+**776 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
+([run 29789599559](https://github.com/mrlucas679/shelfwise/actions/runs/29789599559)); ruff
 clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
 contract-verified.
 
