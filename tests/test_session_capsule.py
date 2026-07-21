@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,25 @@ def test_archive_cannot_be_written_inside_capsule(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="inside the capsule"):
         session_capsule._write_archive(capsule, capsule / "archive.tar.gz")
+
+
+def test_zstd_capsules_are_refused_in_favor_of_verified_gzip_restore_path(
+    tmp_path: Path,
+) -> None:
+    """Do not delegate untrusted archive extraction to a system tar implementation."""
+    with pytest.raises(ValueError, match=r"use a .tar.gz archive"):
+        session_capsule._write_archive(tmp_path / "capsule", tmp_path / "capsule.tar.zst")
+
+
+@pytest.mark.parametrize("member_type", [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE])
+def test_restore_rejects_non_regular_tar_members(tmp_path: Path, member_type: bytes) -> None:
+    """Links and special files must not bypass the archive path-traversal check."""
+    archive = tmp_path / "malicious.tar.gz"
+    member = tarfile.TarInfo("capsule/link")
+    member.type = member_type
+    member.linkname = "../../outside"
+    with tarfile.open(archive, "w:gz") as handle:
+        handle.addfile(member)
+
+    with pytest.raises(RuntimeError, match="member type is not allowed"):
+        session_capsule._safe_extract_tar(archive, tmp_path / "restore")

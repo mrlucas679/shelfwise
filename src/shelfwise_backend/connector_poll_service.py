@@ -24,6 +24,7 @@ from typing import Any
 
 from shelfwise_connectors import (
     CursorStore,
+    DynamicsBusinessCentralInventoryConnector,
     OdooProductConnector,
     PollingConnector,
     SapS4InventoryConnector,
@@ -39,9 +40,7 @@ def connector_poll_enabled() -> bool:
     return os.getenv("CONNECTOR_POLL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def build_configured_connectors(
-    *, cursors: CursorStore, tenant_id: str
-) -> list[PollingConnector]:
+def build_configured_connectors(*, cursors: CursorStore, tenant_id: str) -> list[PollingConnector]:
     """Construct one connector per polling system that has complete env credentials."""
     connectors: list[PollingConnector] = []
 
@@ -79,6 +78,20 @@ def build_configured_connectors(
         connectors.append(
             SysproInventoryConnector(
                 cursors, base_url=syspro_base, token=syspro_token, tenant_id=tenant_id
+            )
+        )
+
+    dynamics_base = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_BASE_URL", "").strip()
+    dynamics_token = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_TOKEN", "").strip()
+    dynamics_location = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_LOCATION_ID", "").strip()
+    if dynamics_base and dynamics_token and dynamics_location:
+        connectors.append(
+            DynamicsBusinessCentralInventoryConnector(
+                cursors,
+                base_url=dynamics_base,
+                token=dynamics_token,
+                location_id=dynamics_location,
+                tenant_id=tenant_id,
             )
         )
 
@@ -142,9 +155,7 @@ class ConnectorPollService:
             "running": running,
             "tenant_id": self._tenant_id,
             "interval_s": self._interval_s,
-            "configured_systems": sorted(
-                connector.source_system.value for connector in connectors
-            ),
+            "configured_systems": sorted(connector.source_system.value for connector in connectors),
             "runs": self._runs,
             "records_pulled": self._pulled,
             "last_status": self._last_status,

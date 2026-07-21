@@ -7,6 +7,8 @@ shared `twin_service` singleton (`state.py`) and the tenant/write-path dependenc
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from shelfwise_contracts import Event
@@ -24,6 +26,7 @@ from .state import event_store, scenario_engine, twin_service
 from .tenant import TenantContext
 
 router = APIRouter()
+_LOG = logging.getLogger(__name__)
 
 
 @router.post(
@@ -248,9 +251,22 @@ async def ingest_edge_observations(
         )
     ):
         raise HTTPException(status_code=403, detail="Edge batch scope mismatch")
-    if not edge_device_registry.record_batch(batch.tenant_id, batch.batch_id):
+    batch_state = edge_device_registry.claim_batch(batch.tenant_id, batch.batch_id)
+    if batch_state == "completed":
         return {"status": "duplicate", "batch_id": batch.batch_id, "accepted": 0}
-    receipts = [twin_service.accept(item) for item in batch.observations]
+    if batch_state == "in_progress":
+        raise HTTPException(status_code=409, detail="Edge batch is already being projected")
+    try:
+        receipts = [twin_service.accept(item) for item in batch.observations]
+    except Exception as exc:
+        edge_device_registry.release_batch(batch.tenant_id, batch.batch_id)
+        _LOG.exception("edge batch projection failed for batch %s", batch.batch_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Edge batch projection failed; retry the same signed batch",
+        ) from exc
+    if not edge_device_registry.complete_batch(batch.tenant_id, batch.batch_id):
+        raise HTTPException(status_code=409, detail="Edge batch claim was lost before completion")
     return {
         "status": "accepted",
         "batch_id": batch.batch_id,

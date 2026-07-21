@@ -31,5 +31,10 @@ def test_ci_scopes_insecure_cookie_override_to_http_smoke() -> None:
     assert 'SHELFWISE_COOKIE_SECURE: "false"' in smoke
     assert 'SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI: "true"' in smoke
     assert "SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI" not in boot
-    assert "docker compose -f docker-compose.production.yml up -d --wait" in smoke
+    assert (
+        "timeout 90s docker compose -f docker-compose.production.yml up --build -d --wait"
+        in boot
+    )
+    assert "docker compose -f docker-compose.production.yml logs --no-color" in boot
+    assert "timeout 90s docker compose -f docker-compose.production.yml up -d --wait" in smoke
     assert "python scripts/deployment_shakedown.py" in smoke

@@ -220,8 +220,14 @@ class PostgresLearningStore:
                     (tenant_id, data_domain, metric, sku, threshold_units, updated_at)
                 values (%s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id, data_domain, metric) do update
-                set threshold_units = excluded.threshold_units,
-                    updated_at = excluded.updated_at
+                set threshold_units = greatest(
+                        shelfwise_learning_thresholds.threshold_units,
+                        excluded.threshold_units
+                    ),
+                    updated_at = greatest(
+                        shelfwise_learning_thresholds.updated_at,
+                        excluded.updated_at
+                    )
                 """,
                 (
                     tenant_id,
@@ -232,6 +238,22 @@ class PostgresLearningStore:
                     event.created_at,
                 ),
             )
+            committed_threshold = conn.execute(
+                """
+                select threshold_units
+                from shelfwise_learning_thresholds
+                where tenant_id = %s and data_domain = %s and metric = %s
+                """,
+                (tenant_id, data_domain, event.metric),
+            ).fetchone()
+            if committed_threshold is None:
+                raise RuntimeError("learning threshold was not persisted")
+            final_threshold = int(committed_threshold["threshold_units"])
+            if final_threshold != event.updated_threshold:
+                payload["updated_threshold"] = final_threshold
+                payload["delta_units"] = final_threshold - event.previous_threshold
+                message_prefix = str(payload["message"]).split("largest confirmed is now", 1)[0]
+                payload["message"] = f"{message_prefix}largest confirmed is now {final_threshold}."
             # Two concurrent approvals of the same decision can both pass the
             # existing-event check above (the decision-store transition lets the loser
             # through with the already-approved record), so the insert must absorb the

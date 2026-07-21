@@ -7,6 +7,7 @@ import pytest
 from shelfwise_backend.app import (
     _cookie_secure_setting,
     _reject_insecure_production_cookie_config,
+    _reject_unsafe_multimodal_config,
     cors_allowed_origins,
 )
 
@@ -34,16 +35,18 @@ def test_backend_container_sandbox_is_declared_in_compose() -> None:
 def test_production_compose_has_one_public_origin_and_reserves_vllm_ports() -> None:
     text = (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
 
-    assert 'APP_ENV: production' in text
-    assert 'SHELFWISE_AUTH_MODE: jwt' in text
+    assert "APP_ENV: production" in text
+    assert "SHELFWISE_AUTH_MODE: jwt" in text
+    assert "MULTIMODAL_ENABLED: ${MULTIMODAL_ENABLED:-false}" in text
     assert 'SHELFWISE_PUBLIC_DEMO_SESSION: "true"' in text
-    assert 'SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}' in text
+    assert "SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}" in text
     assert "SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI" in text
     assert '- "80:80"' in text
     assert '- "8000:8000"' not in text
     assert '- "5432:5432"' not in text
     assert '- "6379:6379"' not in text
     assert "host.docker.internal:host-gateway" in text
+    assert "LLM_PROVIDER: ${LLM_PROVIDER:-vllm_mi300x}" in text
     assert "host.docker.internal:8000" in text
     assert "host.docker.internal:8001" in text
     assert 'SHELFWISE_AUTO_SCHEMA: "false"' in text
@@ -83,6 +86,18 @@ def test_disposable_ci_is_the_only_insecure_production_cookie_override(monkeypat
     _reject_insecure_production_cookie_config()
 
     assert _cookie_secure_setting() is False
+
+
+def test_production_multimodal_requires_jwt_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("MULTIMODAL_ENABLED", "true")
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "off")
+
+    with pytest.raises(RuntimeError, match="requires SHELFWISE_AUTH_MODE=jwt"):
+        _reject_unsafe_multimodal_config()
+
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    _reject_unsafe_multimodal_config()
 
 
 def test_frontend_proxy_includes_all_browser_feature_route_prefixes() -> None:
@@ -161,6 +176,22 @@ def test_ci_boots_and_smokes_production_public_origin() -> None:
     assert "--request POST http://127.0.0.1/scenarios/golden" in workflow
     assert "logs --no-color backend postgres migrate frontend" in workflow
     assert "docker-compose.production.yml down --volumes" in workflow
+
+
+def test_droplet_runbook_uses_the_live_model_request_budget() -> None:
+    runbook = (ROOT / "DROPLET_BOOTSTRAP.md").read_text(encoding="utf-8")
+    handoff = (ROOT / "HANDOFF.md").read_text(encoding="utf-8")
+
+    assert "--request-deadline 130" in runbook
+    assert "--request-deadline 29" not in runbook
+    assert "--request-deadline 130" in handoff
+    assert "--request-deadline 29" not in handoff
+
+
+def test_mi300x_runbook_uses_the_bootstrap_host_environment() -> None:
+    runbook = (ROOT / "docs" / "mi300x-recreate-runbook.md").read_text(encoding="utf-8")
+
+    assert runbook.count("/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system") == 2
 
 
 def test_readme_points_to_capability_manifest_for_api_reference() -> None:

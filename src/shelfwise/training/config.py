@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -127,7 +128,7 @@ class ServingSettings:
 class TrainingConfig:
     profile_name: str = "gemma-4-12b-it"
     model_name_or_path: str = "google/gemma-4-12B-it"
-    model_revision: str = "main"
+    model_revision: str = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
     output_dir: Path = Path("runs/gemma4-multimodal")
     run_name: str = "gemma4-mm"
     max_seq_length: int = 2048
@@ -358,8 +359,8 @@ def validate_training_config(config: TrainingConfig) -> None:
             f"model profile {profile.name!r} requires {profile.model_name_or_path!r}, "
             f"not {config.model_name_or_path!r}"
         )
-    if not config.model_revision.strip():
-        raise ValueError("model_revision must be explicit")
+    if not re.fullmatch(r"[0-9a-f]{40}", config.model_revision.strip()):
+        raise ValueError("model_revision must be an immutable 40-character commit SHA")
     if not config.max_seq_length or config.max_seq_length >= TOKENIZER_PLACEHOLDER_MAX_LENGTH:
         raise ValueError("max_seq_length must be explicit and must not use tokenizer placeholder")
     if config.max_seq_length not in {2048, 4096}:

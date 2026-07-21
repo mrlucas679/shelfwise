@@ -294,6 +294,55 @@ def test_concurrent_double_approve_learning_never_500s_and_records_once(
     assert len([e for e in events if e["decision_id"] == decision["id"]]) == 1
 
 
+def test_learning_threshold_never_regresses_for_distinct_concurrent_decisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The database upsert, not a stale pre-read, owns the monotonic max invariant."""
+    from uuid import uuid4
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"postgres_learning_max_{uuid4().hex[:10]}"
+    store = PostgresLearningStore(_DATABASE_URL)
+
+    def decision(decision_id: str, exposure: int) -> dict[str, object]:
+        return {
+            "id": decision_id,
+            "tenant_id": tenant_id,
+            "data_domain": "world_simulation",
+            "status": "approved",
+            "action": {"type": "apply_markdown", "params": {"sku": "SKU-MAX", "units": 8}},
+            "expected_outcome": {"predicted_sell_through_units": exposure},
+        }
+
+    decisions = (
+        decision(f"dec_low_{uuid4().hex[:10]}", 1_000),
+        decision(f"dec_high_{uuid4().hex[:10]}", 9_000),
+    )
+
+    def record(item: dict[str, object]) -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.record_approved_decision(item)
+        finally:
+            reset_tenant_context(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        records = list(pool.map(record, decisions))
+
+    token = bind_tenant_context(tenant_id)
+    try:
+        thresholds = store.thresholds(tenant_id=tenant_id, data_domain="world_simulation")
+        events = store.list_events(tenant_id=tenant_id, data_domain="world_simulation")
+    finally:
+        reset_tenant_context(token)
+
+    metric = "SKU-MAX:markdown_sell_through_target_units"
+    # Markdown learning stores the confirmed units after the deterministic 12% uplift.
+    assert thresholds[metric] == 10_080
+    assert {event["decision_id"] for event in events} >= {item["id"] for item in decisions}
+    assert {record["decision_id"] for record in records} == {item["id"] for item in decisions}
+
+
 def test_postgres_open_orders_dedupe_and_ignore_late_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -232,6 +232,21 @@ start_quick_start_server() {
     "pgrep -f '[v]llm serve.*--port ${port}' >/dev/null || { cat /root/shelfwise-vllm/vllm-${port}.log; exit 1; }"
 }
 
+restrict_host_network_port() {
+  # The fallback image uses host networking, so Docker's NAT chain cannot enforce the
+  # source allowlist. Normalize these exact port rules before adding them so a stale
+  # DROP can never remain ahead of the source-specific ACCEPT after a rerun.
+  local port="$1"
+  while iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT 2>/dev/null; do
+    iptables -D INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
+  done
+  while iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; do
+    iptables -D INPUT -p tcp --dport "$port" -j DROP
+  done
+  iptables -I INPUT 1 -p tcp --dport "$port" -j DROP
+  iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT
+}
+
 start_server() {
   # Launch one constrained vLLM server sharing the MI300X safely with the other tier.
   local name="$1"
@@ -244,6 +259,7 @@ start_server() {
     return 0
   fi
 
+  restrict_host_network_port "$port"
   remove_existing_container "$name"
   docker run -d \
     --name "$name" \
@@ -412,6 +428,7 @@ Both MI300X vLLM servers are ready.
 On the ShelfWise application host, set these values (supply VLLM_API_KEY separately):
 export LLM_ROUTINE_BASE_URL=http://${host_ip}:${ROUTINE_PORT}
 export LLM_STRONG_BASE_URL=http://${host_ip}:${STRONG_PORT}
+export LLM_PROVIDER=vllm_mi300x
 export LLM_ROUTINE_MODEL=${ROUTINE_MODEL}
 export LLM_STRONG_MODEL=${STRONG_MODEL}
 export LLM_COMPUTE_RESOURCE="AMD Developer Cloud"

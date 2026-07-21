@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
-from shelfwise_backend.deps import _request_authorization
-from shelfwise_backend.tenant import default_tenant_context, verify_bearer_token
+from shelfwise_backend.deps import INGEST_AUTH_DEP
+from shelfwise_backend.tenant import TenantContext
 from shelfwise_contracts import Event, EventSource, EventType, SourceRef
 
 from .contracts import SpeechPurpose, Tone
@@ -135,25 +135,22 @@ def build_scan_router(*, api_key: str | None = None) -> APIRouter:
     @router.post("/barcode")
     async def scan_barcode(
         body: BarcodeScanBody,
-        request: Request,
-        authorization: str | None = Header(default=None, alias="authorization"),
+        ctx: TenantContext = INGEST_AUTH_DEP,
     ) -> dict[str, object]:
         candidate = _scan_event_candidate(
             body,
-            tenant_id=_tenant_id(_request_authorization(request, authorization)),
+            tenant_id=ctx.tenant_id,
         )
         return {"candidate": candidate, "requires_human_review": True}
 
     @router.post("/receipt")
     async def scan_receipt(
         body: ReceiptScanBody,
-        request: Request,
-        authorization: str | None = Header(default=None, alias="authorization"),
+        ctx: TenantContext = INGEST_AUTH_DEP,
     ) -> dict[str, object]:
-        tenant_id = _tenant_id(_request_authorization(request, authorization))
         return {
             "candidates": [
-                _receipt_line_candidate(body, line, tenant_id=tenant_id) for line in body.lines
+                _receipt_line_candidate(body, line, tenant_id=ctx.tenant_id) for line in body.lines
             ],
             "requires_human_review": True,
         }
@@ -197,9 +194,7 @@ def _persist_upload(content: bytes, filename: str) -> str | None:
         return None
     suffix = Path(filename).suffix.lower()
     suffix = (
-        suffix
-        if suffix.startswith(".") and suffix[1:].isalnum() and len(suffix) <= 8
-        else ".bin"
+        suffix if suffix.startswith(".") and suffix[1:].isalnum() and len(suffix) <= 8 else ".bin"
     )
     digest = hashlib.sha256(content).hexdigest()
     target = Path(raw_dir).expanduser() / f"{digest}{suffix}"
@@ -270,19 +265,6 @@ def _sku_from_code(code: str) -> str:
     if cleaned.startswith("SKU-"):
         return cleaned.removeprefix("SKU-")
     return cleaned
-
-
-def _tenant_id(authorization: str | None) -> str:
-    """Resolve tenant identity from trusted auth, never from scan payload data."""
-    if os.getenv("SHELFWISE_AUTH_MODE", "off").strip().lower() != "jwt":
-        return default_tenant_context().tenant_id
-    try:
-        return verify_bearer_token(
-            authorization,
-            secret=os.getenv("TENANT_AUTH_SECRET", ""),
-        ).tenant_id
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid tenant token") from exc
 
 
 def _event_id(prefix: str, *parts: str) -> str:

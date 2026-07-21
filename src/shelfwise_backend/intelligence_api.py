@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from .deps import WRITE_LIMIT_DEP, write_path_guard
 from .retail_intelligence import (
     DecisionOutcome,
     DeliveryReceipt,
@@ -17,7 +18,11 @@ from .retail_intelligence import (
     summarize_outcome,
 )
 
-router = APIRouter(prefix="/intelligence", tags=["intelligence"])
+router = APIRouter(
+    prefix="/intelligence",
+    tags=["intelligence"],
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
 
 
 class StockBatchPayload(BaseModel):

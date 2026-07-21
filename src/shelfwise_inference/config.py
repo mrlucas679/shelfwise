@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 class ProviderKind(StrEnum):
     FIREWORKS = "fireworks"
     VLLM_MI300X = "vllm_mi300x"
+    OPENAI_COMPATIBLE = "openai_compatible"
     OFFLINE = "offline"
 
 
@@ -104,7 +105,21 @@ def _detect_provider(base_url: str) -> ProviderKind:
         return ProviderKind.OFFLINE
     if "fireworks" in lowered:
         return ProviderKind.FIREWORKS
-    return ProviderKind.VLLM_MI300X
+    # An OpenAI-compatible URL proves only the transport contract. AMD hardware is a
+    # deployment assertion and must never be inferred from an arbitrary hostname or IP.
+    return ProviderKind.OPENAI_COMPATIBLE
+
+
+def _configured_provider(base_url: str) -> ProviderKind:
+    """Resolve an explicit provider declaration, falling back only to safe detection."""
+    configured = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if not configured:
+        return _detect_provider(base_url)
+    try:
+        return ProviderKind(configured)
+    except ValueError as exc:
+        allowed = ", ".join(kind.value for kind in ProviderKind)
+        raise ValueError(f"LLM_PROVIDER must be one of: {allowed}") from exc
 
 
 def _host_label(base_url: str) -> str:
@@ -134,6 +149,8 @@ def _default_compute_resource(provider: ProviderKind) -> str:
         return "AMD Developer Cloud"
     if provider is ProviderKind.FIREWORKS:
         return "Fireworks AI"
+    if provider is ProviderKind.OPENAI_COMPATIBLE:
+        return "OpenAI-compatible endpoint (unverified hardware)"
     return "local deterministic fallback"
 
 
@@ -151,7 +168,7 @@ def load_inference_config() -> InferenceConfig:
     api_key = os.getenv("LLM_API_KEY", "")
     routine_api_key = os.getenv("LLM_ROUTINE_API_KEY", api_key)
     strong_api_key = os.getenv("LLM_STRONG_API_KEY", api_key)
-    provider = _detect_provider(base_url)
+    provider = _configured_provider(base_url)
     return InferenceConfig(
         provider=provider,
         base_url=base_url,

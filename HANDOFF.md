@@ -504,7 +504,7 @@ python scripts/session_capsule.py create \
   --repo /workspace/shelfwise \
   --root /workspace/persist \
   --strict \
-  --archive /workspace/persist/capsules/shelfwise-session-$(date -u +%Y%m%dT%H%M%SZ).tar.zst
+  --archive /workspace/persist/capsules/shelfwise-session-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
 ```
 
 The command must exit successfully and print an empty `failures` list. Verify the capsule before
@@ -512,7 +512,7 @@ downloading it:
 
 ```bash
 python scripts/session_capsule.py verify /workspace/persist/capsules/shelfwise-session-<timestamp>
-sha256sum /workspace/persist/capsules/shelfwise-session-<timestamp>.tar.zst
+sha256sum /workspace/persist/capsules/shelfwise-session-<timestamp>.tar.gz
 ```
 
 Only after API/training shutdown, database dumps, Redis persistence, capsule creation, checksum
@@ -520,7 +520,7 @@ verification, download, and local checksum verification have succeeded may the D
 destroyed. Restore into a new MI300X with:
 
 ```bash
-python scripts/session_capsule.py restore shelfwise-session-<timestamp>.tar.zst \
+python scripts/session_capsule.py restore shelfwise-session-<timestamp>.tar.gz \
   --target /workspace/recovery
 ```
 
@@ -631,8 +631,9 @@ until that receipt exists.
 
 ### Latency
 
-- `LLM_TIMEOUT_SECONDS` is clamped to 29 seconds.
-- `SHELFWISE_REQUEST_TIMEOUT_SECONDS` is clamped to 29 seconds.
+- `LLM_TIMEOUT_SECONDS` is bounded by the remaining request budget.
+- `SHELFWISE_REQUEST_TIMEOUT_SECONDS` defaults to 120 seconds; its outer middleware deadline
+  protects the service while per-call inference budgets fail closed earlier.
 - HTTP middleware returns 504 at the whole-request deadline, including multi-call agentic
   requests.
 - CI measures post-build production topology readiness under 60 seconds.
@@ -664,7 +665,8 @@ until that receipt exists.
 - checks `/inference/readiness` for AMD vLLM and Google Gemma 4 routine/strong models;
 - creates a session through `/auth/session`;
 - sends two fresh unseen chat questions with unique conversation/message IDs;
-- requires each chat response under 30 seconds;
+- allows each chat response the documented live-model request budget (130 seconds in the
+  prescreen, above the 120-second application deadline);
 - requires `X-ShelfWise-Provider: vllm_mi300x`, `X-ShelfWise-Answer-Source: model`, and
   `X-ShelfWise-Replayed: false`;
 - requires English-compatible output and unique correlation IDs;
@@ -672,11 +674,11 @@ until that receipt exists.
 
 Run it only after the AMD endpoint and production application are live:
 
-```powershell
-python scripts/track3_prescreen.py `
-  --base-url http://<public-app-origin> `
-  --startup-deadline 60 `
-  --request-deadline 29 `
+```bash
+python scripts/track3_prescreen.py \
+  --base-url https://<public-app-origin> \
+  --startup-deadline 60 \
+  --request-deadline 130 \
   --output reports/track3_prescreen_<timestamp>.json
 ```
 

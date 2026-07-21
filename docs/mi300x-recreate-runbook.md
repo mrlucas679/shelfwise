@@ -51,6 +51,11 @@ delays during demo bootstrap. It validates the host tools, ports, ROCm devices, 
 before downloading weights, and writes `/root/shelfwise-mi300x-bootstrap.json` only after both
 model IDs are returned by authenticated `/v1/models` checks.
 
+If the AMD Quick Start `rocm` container is not present, the bootstrap falls back to the official
+ROCm image with host networking. In that mode it adds ordered `INPUT` allow-then-drop rules for
+each vLLM port, because Docker NAT filtering does not govern host-networked processes. Keep the
+cloud firewall source restriction in place in either mode.
+
 Keep the commit from `git rev-parse HEAD` and that receipt with the run artifacts. If the command
 times out, inspect the printed `/root/shelfwise-vllm/vllm-8000.log` or `vllm-8001.log` tail before
 retrying; the failure is otherwise indistinguishable from a long model download.
@@ -151,7 +156,8 @@ properties an operator must know:
 
 ## Application Shakedown
 
-Run the local ShelfWise backend with MI300X environment values, then run the receipt-driven
+Run the local ShelfWise backend with MI300X environment values (including the explicit
+`LLM_PROVIDER=vllm_mi300x` declaration), then run the receipt-driven
 world harness. It fails on route errors, offline answers, chat failures, decision-ID reuse,
 HITL mismatches, and no-op learning.
 
@@ -174,7 +180,7 @@ not queue both back to back:
 
 ```bash
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-python -m shelfwise_eval.full_system \
+/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system \
   --duration-seconds 900 --live-required \
   --output-dir "reports/soak_15m_${RUN_STAMP}" \
   --run-id "mi300x_live_15m_${RUN_STAMP}"
@@ -187,7 +193,7 @@ timestamp:
 
 ```bash
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-python -m shelfwise_eval.full_system \
+/opt/shelfwise/.venv/bin/python -m shelfwise_eval.full_system \
   --duration-seconds 1800 --live-required \
   --output-dir "reports/soak_30m_${RUN_STAMP}" \
   --run-id "mi300x_live_30m_${RUN_STAMP}"

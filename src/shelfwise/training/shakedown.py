@@ -203,7 +203,7 @@ def _write_final_report(run_dir: Path, report: dict[str, Any]) -> None:
             "",
             "- Replace transcript/frame fallbacks with raw processor tensors once verified.",
             "- Deploy the compatible adapter to the MI300X endpoint and run generated_inference.",
-            "- Pin a model revision commit instead of `main` before a release candidate run.",
+            "- Keep the configured immutable model revision in the release evidence.",
         ]
     )
     (run_dir / "shakedown_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -1,6 +1,6 @@
 model_profile: gemma-4-12b-it
 model_name_or_path: google/gemma-4-12B-it
-model_revision: main
+model_revision: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
 output_dir: runs/gemma4-multimodal
 run_name: gemma4-mm
 max_seq_length: 2048

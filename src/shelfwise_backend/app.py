@@ -265,8 +265,20 @@ def _reject_insecure_production_cookie_config() -> None:
     )
 
 
+def _reject_unsafe_multimodal_config() -> None:
+    """Require JWT protection before costly upload routes can be enabled in production."""
+    enabled = os.getenv("MULTIMODAL_ENABLED", "false").strip().lower() in _TRUE_ENV_VALUES
+    if (
+        enabled
+        and _is_production_deployment()
+        and os.getenv("SHELFWISE_AUTH_MODE", "off").strip().lower() != "jwt"
+    ):
+        raise RuntimeError("MULTIMODAL_ENABLED requires SHELFWISE_AUTH_MODE=jwt in production")
+
+
 _reject_insecure_auth_in_named_deployments()
 _reject_insecure_production_cookie_config()
+_reject_unsafe_multimodal_config()
 
 app = FastAPI(title="ShelfWise", version="0.1.0")
 app.add_middleware(
@@ -288,9 +300,15 @@ except ImportError:
     build_voice_router = None
 
 if build_voice_router is not None:
-    app.include_router(build_voice_router())
+    app.include_router(
+        build_voice_router(),
+        dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP, CURRENT_TENANT_DEP],
+    )
 if build_scan_router is not None:
-    app.include_router(build_scan_router())
+    app.include_router(
+        build_scan_router(),
+        dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP, CURRENT_TENANT_DEP],
+    )
 
 app.router.add_event_handler("startup", worker_service.start)
 app.router.add_event_handler("shutdown", worker_service.stop)
@@ -414,8 +432,10 @@ def company_login(body: LoginBody) -> JSONResponse:
     if not secret or not configured_email or not configured_hash:
         raise HTTPException(status_code=503, detail="Company login is not configured")
     if not _login_credentials_valid(
-        email=body.email, password=body.password,
-        configured_email=configured_email, configured_hash=configured_hash,
+        email=body.email,
+        password=body.password,
+        configured_email=configured_email,
+        configured_hash=configured_hash,
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     ctx = TenantContext(
@@ -430,8 +450,13 @@ def company_login(body: LoginBody) -> JSONResponse:
     )
     response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
     response.set_cookie(
-        SESSION_COOKIE, token, max_age=lifetime, httponly=True,
-        secure=_cookie_secure_setting(), samesite="strict", path="/",
+        SESSION_COOKIE,
+        token,
+        max_age=lifetime,
+        httponly=True,
+        secure=_cookie_secure_setting(),
+        samesite="strict",
+        path="/",
     )
     return response
 
@@ -449,7 +474,11 @@ def _login_credentials_valid(
             return False
         expected = bytes.fromhex(hash_hex)
         computed = hashlib.scrypt(
-            password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=16384, r=8, p=1,
+            password.encode("utf-8"),
+            salt=bytes.fromhex(salt_hex),
+            n=16384,
+            r=8,
+            p=1,
             dklen=len(expected),
         )
     except (ValueError, TypeError):
@@ -749,9 +778,7 @@ def submission_readiness() -> dict[str, object]:
             "hosted_url": "recommended",
             "docker_image_required": "required",
             "amd_compute_usage": "ok" if inference_ready["ready_for_amd_demo"] else "pending",
-            "response_timeout": (
-                "configured" if _request_timeout_seconds() > 0 else "missing"
-            ),
+            "response_timeout": ("configured" if _request_timeout_seconds() > 0 else "missing"),
             "english_responses": "enforced_in_code",
             "unseen_inputs": "not_cached_by_question",
             "live_cloud_measurements": "required_before_submission",
@@ -776,9 +803,7 @@ def inference_smoke(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object
     )
     try:
         result = OpenAICompatibleInferenceClient(
-            recorder=lambda payload: _record_model_run(
-                {**payload, "data_domain": data_domain}
-            )
+            recorder=lambda payload: _record_model_run({**payload, "data_domain": data_domain})
         ).complete(
             agent="critic",
             system=system_prompt,
@@ -1124,15 +1149,11 @@ def list_chat_conversations(
     return {
         "data_domain": data_domain,
         "conversations": [
-            {
-                key: value
-                for key, value in item.items()
-                if key != "messages"
-            }
+            {key: value for key, value in item.items() if key != "messages"}
             | {"data_domain": _conversation_data_domain(item)}
             | {"message_count": len(item["messages"])}
             for item in conversations
-        ]
+        ],
     }
 
 
@@ -1218,13 +1239,15 @@ def chat(body: ChatBody, ctx: TenantContext = CURRENT_TENANT_DEP) -> PlainTextRe
             conversation_id=conversation_id,
         )
         existing_domains = {_conversation_data_domain(conversation)} if conversation else set()
-        existing_domains.update({
-            str(item.get("metadata", {}).get("data_domain"))
-            for item in (conversation or {}).get("messages", [])
-            if isinstance(item, dict)
-            and isinstance(item.get("metadata"), dict)
-            and item.get("metadata", {}).get("data_domain")
-        })
+        existing_domains.update(
+            {
+                str(item.get("metadata", {}).get("data_domain"))
+                for item in (conversation or {}).get("messages", [])
+                if isinstance(item, dict)
+                and isinstance(item.get("metadata"), dict)
+                and item.get("metadata", {}).get("data_domain")
+            }
+        )
         if existing_domains and requested_domain not in existing_domains:
             raise HTTPException(
                 status_code=409,
@@ -1390,9 +1413,7 @@ def _new_chat_response(
         truncated=bool(conversation_summary is not None),
     )
     client = OpenAICompatibleInferenceClient(
-        recorder=lambda payload: _record_model_run(
-            {**payload, "data_domain": chat_domain}
-        )
+        recorder=lambda payload: _record_model_run({**payload, "data_domain": chat_domain})
     )
     _require_amd_inference()
     correlation_id = f"chat:{conversation_id}:{message_id}"
@@ -1522,9 +1543,7 @@ def list_worldgen_runs(
 
 
 @app.get("/scenarios/worldgen-runs/{run_id}")
-def get_worldgen_run(
-    run_id: str, ctx: TenantContext = CURRENT_TENANT_DEP
-) -> dict[str, object]:
+def get_worldgen_run(run_id: str, ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     run = worldgen_run_store.get(run_id, tenant_id=ctx.tenant_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Worldgen run not found")
@@ -2191,7 +2210,10 @@ def process_one_worker_event() -> dict[str, object]:
     return {"result": result}
 
 
-_SCENARIO_WRITE_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
+# Scenario POSTs create events and decisions. Keep their operational role requirement beside
+# the shared write guard/rate limit; GET previews retain only the existing bounded access policy.
+_SCENARIO_MUTATION_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP, INGEST_AUTH_DEP]
+_SCENARIO_PREVIEW_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 
 
 def _demo_occurrence_suffix(
@@ -2262,9 +2284,7 @@ def _demo_event(
     prefix_scope = "" if legacy else f"_{variant_slug}"
     key = f"{ctx.tenant_id}{scope}:{event_type.value}:{scenario.sku}:{today}"
     id_prefix = f"evt_demo{prefix_scope}_{event_type.value}"
-    suffix = _demo_occurrence_suffix(
-        key, id_prefix=id_prefix, tenant_id=ctx.tenant_id
-    )
+    suffix = _demo_occurrence_suffix(key, id_prefix=id_prefix, tenant_id=ctx.tenant_id)
     return Event(
         id=f"{id_prefix}_{suffix}",
         type=event_type,
@@ -2286,9 +2306,7 @@ def _demo_event(
     )
 
 
-def _reject_operational_domain_for_synthetic_drill(
-    data_domain: str | None, *, drill: str
-) -> None:
+def _reject_operational_domain_for_synthetic_drill(data_domain: str | None, *, drill: str) -> None:
     """Fail closed when a synthetic-anomaly drill is pointed at real twin data."""
     if data_domain == DataDomain.OPERATIONAL_TWIN.value:
         raise HTTPException(
@@ -2417,14 +2435,12 @@ def _assign_result_tenant(result: dict[str, Any], tenant_id: str) -> dict[str, A
     return result
 
 
-@app.post("/scenarios/golden", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/golden", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_golden(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return _record_cascade(
-        run_golden_cascade(_demo_event(ctx, EventType.SCAN), facts=world_facts)
-    )
+    return _record_cascade(run_golden_cascade(_demo_event(ctx, EventType.SCAN), facts=world_facts))
 
 
-@app.post("/scenarios/recall", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/recall", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_recall(
     run_scope: str | None = None,
     ctx: TenantContext = CURRENT_TENANT_DEP,
@@ -2435,9 +2451,7 @@ def demo_recall(
     today_date = datetime.now(UTC).date()
     today = today_date.isoformat()
     key = f"{ctx.tenant_id}:recall:{scenario.sku}:{today}{_demo_run_scope(run_scope)}"
-    suffix = _demo_occurrence_suffix(
-        key, id_prefix="evt_demo_recall", tenant_id=ctx.tenant_id
-    )
+    suffix = _demo_occurrence_suffix(key, id_prefix="evt_demo_recall", tenant_id=ctx.tenant_id)
     event = Event(
         id=f"evt_demo_recall_{suffix}",
         type=EventType.RECALL_NOTICE,
@@ -2461,7 +2475,7 @@ def demo_recall(
     return _resolve_demo_pipeline_cascade(outcome, event, ctx)
 
 
-@app.post("/scenarios/inventory-exception", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/inventory-exception", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_inventory_exception(
     run_scope: str | None = None,
     ctx: TenantContext = CURRENT_TENANT_DEP,
@@ -2470,10 +2484,7 @@ def demo_inventory_exception(
     scenario = world_facts.get_scenario_facts(ctx.tenant_id)
     today_date = datetime.now(UTC).date()
     today = today_date.isoformat()
-    key = (
-        f"{ctx.tenant_id}:inventory_exception:{scenario.sku}:{today}"
-        f"{_demo_run_scope(run_scope)}"
-    )
+    key = f"{ctx.tenant_id}:inventory_exception:{scenario.sku}:{today}{_demo_run_scope(run_scope)}"
     suffix = _demo_occurrence_suffix(
         key, id_prefix="evt_demo_inventory_exception", tenant_id=ctx.tenant_id
     )
@@ -2501,12 +2512,12 @@ def demo_inventory_exception(
     return _resolve_demo_pipeline_cascade(outcome, event, ctx)
 
 
-@app.get("/scenarios/golden", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/golden", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_golden_get() -> dict[str, object]:
     return _preview_demo_cascade(run_golden_cascade(facts=world_facts))
 
 
-@app.post("/scenarios/golden/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/golden/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_golden_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2550,7 +2561,7 @@ def demo_golden_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/procurement/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/procurement/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_procurement_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2593,7 +2604,7 @@ def demo_procurement_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/sales/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/sales/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_sales_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2635,7 +2646,7 @@ def demo_sales_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/catalog-price/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/catalog-price/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_catalog_price_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2671,7 +2682,7 @@ def demo_catalog_price_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/expiry-risk/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/expiry-risk/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_expiry_risk_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2706,7 +2717,7 @@ def demo_expiry_risk_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/cold-chain/agentic", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/cold-chain/agentic", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_cold_chain_agentic(
     live_required: bool = True,
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
@@ -2748,55 +2759,53 @@ def demo_cold_chain_agentic(
     return _record_cascade(result)
 
 
-@app.post("/scenarios/critic-rejection", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/critic-rejection", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_critic_rejection(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         _assign_result_tenant(run_critic_rejection_cascade(facts=world_facts), ctx.tenant_id)
     )
 
 
-@app.get("/scenarios/critic-rejection", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/critic-rejection", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_critic_rejection_get() -> dict[str, object]:
     return _preview_demo_cascade(run_critic_rejection_cascade(facts=world_facts))
 
 
-@app.post("/scenarios/procurement", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/procurement", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_procurement(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_procurement_cascade(_demo_event(ctx, EventType.SUPPLIER_UPDATE), facts=world_facts)
     )
 
 
-@app.get("/scenarios/procurement", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/procurement", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_procurement_get() -> dict[str, object]:
     return _preview_demo_cascade(run_procurement_cascade(facts=world_facts))
 
 
-@app.post("/scenarios/sales", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/sales", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_sales(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
-    return _record_cascade(
-        run_sales_cascade(_demo_event(ctx, EventType.SALE), facts=world_facts)
-    )
+    return _record_cascade(run_sales_cascade(_demo_event(ctx, EventType.SALE), facts=world_facts))
 
 
-@app.get("/scenarios/sales", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/sales", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_sales_get() -> dict[str, object]:
     return _preview_demo_cascade(run_sales_cascade(facts=world_facts))
 
 
-@app.post("/scenarios/cold-chain", dependencies=_SCENARIO_WRITE_DEPS)
+@app.post("/scenarios/cold-chain", dependencies=_SCENARIO_MUTATION_DEPS)
 def demo_cold_chain(ctx: TenantContext = CURRENT_TENANT_DEP) -> dict[str, object]:
     return _record_cascade(
         run_cold_chain_cascade(_demo_event(ctx, EventType.COLD_CHAIN_ALERT), facts=world_facts)
     )
 
 
-@app.get("/scenarios/cold-chain", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/cold-chain", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_cold_chain_get() -> dict[str, object]:
     return _preview_demo_cascade(run_cold_chain_cascade(facts=world_facts))
 
 
-@app.get("/scenarios/worldgen/{scenario_id}", dependencies=_SCENARIO_WRITE_DEPS)
+@app.get("/scenarios/worldgen/{scenario_id}", dependencies=_SCENARIO_PREVIEW_DEPS)
 def demo_worldgen_drill(
     scenario_id: str,
     limit: int = 80,
@@ -3026,9 +3035,7 @@ def _record_completed_inventory_movement(task: dict[str, Any]) -> list[dict[str,
         return []
     params = action.get("params") if isinstance(action.get("params"), dict) else {}
     receipt = (
-        task.get("completion_receipt")
-        if isinstance(task.get("completion_receipt"), dict)
-        else {}
+        task.get("completion_receipt") if isinstance(task.get("completion_receipt"), dict) else {}
     )
     tenant_id = str(task.get("tenant_id") or "")
     sku = str(params.get("sku") or "")
@@ -3183,11 +3190,7 @@ def _compact_chat_decision(decision: dict[str, Any]) -> dict[str, Any]:
     compact = {key: decision[key] for key in fields if key in decision}
     action = decision.get("action")
     if isinstance(action, dict):
-        compact["action"] = {
-            key: action[key]
-            for key in ("type", "risk_tier")
-            if key in action
-        }
+        compact["action"] = {key: action[key] for key in ("type", "risk_tier") if key in action}
     return compact
 
 
@@ -3256,8 +3259,7 @@ def _tenant_scoped_decisions(
     decisions = [
         item
         for item in decision_store.list()
-        if data_domain is None
-        or str(item.get("data_domain") or "world_simulation") == data_domain
+        if data_domain is None or str(item.get("data_domain") or "world_simulation") == data_domain
     ]
     if _auth_mode() != "jwt":
         return decisions
@@ -3539,13 +3541,14 @@ def _project_twin_event(event: Event) -> dict[str, Any]:
         "event_id": event.id,
         "observations": [result.to_dict() for result in results],
     }
+
+
 def _learning_outcome_records(tenant_id: str, data_domain: str) -> list[OutcomeRecord]:
     decisions = {
         str(decision.get("id")): decision
         for decision in decision_store.list()
         if _decision_tenant_id(decision, tenant_id) == tenant_id
-        and str(decision.get("data_domain") or DataDomain.WORLD_SIMULATION.value)
-        == data_domain
+        and str(decision.get("data_domain") or DataDomain.WORLD_SIMULATION.value) == data_domain
     }
     records: list[OutcomeRecord] = []
     for event in learning_store.list_events(
@@ -3660,9 +3663,7 @@ def _worldgen_cold_chain_alert(
                 "predicted_minutes_to_unsafe": "18",
                 "measured_outage_hours": str(measured_outage_hours),
                 "temp_c": "8.2",
-                "stock_at_risk": (
-                    scenario.unit_price * scenario.units_on_hand
-                ).to_dict(),
+                "stock_at_risk": (scenario.unit_price * scenario.units_on_hand).to_dict(),
                 "synthetic": True,
             },
         }

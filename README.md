@@ -1,11 +1,11 @@
 # ShelfWise
 
-> **Working-product branch boundary:** This repository is being continued on `developers` after
-> the hackathon. The working product remains on `main`; keep implementation commits on
-> `developers` and do not merge them to `main` without an explicit release decision.
+> **Working-product branch boundary:** The current working product source is `developers`.
+> `main` is the protected release branch; keep implementation commits on `developers` and do
+> not merge them to `main` without an explicit release decision.
 
-[![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
-[![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
+[![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=developers)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
+[![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=developers)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 [![Built on AMD](https://img.shields.io/badge/AMD-Instinct%20MI300X-ED1C24.svg)](#built-on-amd-compute-usage-proof)
@@ -107,7 +107,7 @@ flowchart TD
     end
 
     subgraph SOURCES["Event Sources"]
-        POS["POS / Connectors<br/>SAP · Odoo · SYSPRO · Shopify · Square"]
+        POS["POS / Connectors<br/>SAP · Odoo · SYSPRO · Dynamics · Shopify · Square · Lightspeed · Yoco"]
         SENSOR["Cold-chain sensors"]
     end
 
@@ -187,7 +187,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (736 passing, 15 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (755 passing, 16 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
@@ -213,8 +213,9 @@ set the endpoint before starting the backend (PowerShell shown; a gitignored `.e
 
 ```powershell
 $env:LLM_BASE_URL="http://<your-vllm-endpoint>:8000"
+$env:LLM_PROVIDER="vllm_mi300x"
 $env:LLM_ROUTINE_MODEL="google/gemma-4-E4B-it"
-$env:LLM_STRONG_MODEL="google/gemma-4-E4B-it"
+$env:LLM_STRONG_MODEL="google/gemma-4-31B-it"
 ```
 
 See [Inference Strategy](#inference-strategy) for independent routine/strong tier variables.
@@ -312,7 +313,7 @@ A few endpoints worth knowing by name (used throughout this README):
 |---|---|
 | `POST /chat` | Agentic chat — picks its own tools per question |
 | `POST /scenarios/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
-| `GET /inference/smoke` | Confirms whether a call is offline, Fireworks, or AMD MI300X |
+| `GET /inference/smoke` | Confirms whether a call is offline, generic OpenAI-compatible, Fireworks, or explicitly declared AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
 | `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
@@ -359,7 +360,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         736 passing tests (15 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         755 passing tests (16 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -385,14 +386,18 @@ Built now:
   misplaced stock) with required evidence, Critic review, HITL, and world-sim receipts.
 - HITL approve/reject, learning store with visible threshold adjustments, and task-style
   write-back receipts (read-only/pending-write posture toward source systems).
-- Connector provenance layer (SAP/Odoo/SYSPRO/Shopify/Square/Lightspeed-style) with quarantine,
-  per-system mappers, and inbound record persistence.
+- Connector provenance layer (SAP/Odoo/SYSPRO/Dynamics polling; Shopify/Square/Lightspeed/Yoco
+  webhook-style intake) with quarantine, per-system mappers, retry-safe webhook deduplication,
+  and inbound record persistence. Completed Dynamics/SAP/SYSPRO pagination scans clear their
+  opaque continuation before the next interval; Odoo retains its durable `write_date` watermark.
+  Yoco accepts a succeeded checkout as a sale only when it supplies explicit SKU, quantity, and
+  location metadata and the checkout total has an exact minor-unit unit-price split.
 - MLOps run/prompt registries, accountability reporting, observability snapshot, and eval gate.
 - Postgres store with tenant-scoped RLS schema; offline-safe OpenAI-compatible inference gateway
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
   workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 736 passing tests (15 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+- 755 passing tests (16 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external
@@ -696,7 +701,9 @@ interpreted as dual-tier capacity evidence.
 
 Configure routine and strong tiers independently with `LLM_ROUTINE_BASE_URL` /
 `LLM_STRONG_BASE_URL` / `LLM_ROUTINE_MODEL` / `LLM_STRONG_MODEL` (single-model fallback still
-supported via the common `LLM_BASE_URL` variables); verify with `GET /inference/readiness` and
+supported via the common `LLM_BASE_URL` variables). Set `LLM_PROVIDER=vllm_mi300x` only after
+verifying the AMD droplet; unknown OpenAI-compatible endpoints remain explicitly unverified and
+cannot pass the AMD gate. Verify with `GET /inference/readiness` and
 `GET /inference/smoke`. For a fresh AMD host, [DROPLET_BOOTSTRAP.md](DROPLET_BOOTSTRAP.md) is the
 full provisioning-to-production runbook (firewall allowlisting, both vLLM tiers, key rotation,
 production Compose config); [docs/mi300x-recreate-runbook.md](docs/mi300x-recreate-runbook.md)

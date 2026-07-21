@@ -21,6 +21,16 @@ def test_mi300x_bootstrap_starts_distinct_authenticated_gemma_tiers() -> None:
     assert "start_quick_start_server" in source
     assert "ensure_quick_start_container_running" in source
     assert "publish_quick_start_port" in source
+    assert "restrict_host_network_port" in source
+    assert (
+        'while iptables -C INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT'
+        in source
+    )
+    assert 'while iptables -C INPUT -p tcp --dport "$port" -j DROP' in source
+    assert 'iptables -D INPUT -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT' in source
+    assert 'iptables -D INPUT -p tcp --dport "$port" -j DROP' in source
+    assert 'iptables -I INPUT 1 -p tcp --dport "$port" -j DROP' in source
+    assert 'iptables -I INPUT 1 -s "$VLLM_ALLOWED_CIDR" -p tcp --dport "$port" -j ACCEPT' in source
     assert "iptables -t nat" in source
     assert 'VLLM_ALLOWED_CIDR="${VLLM_ALLOWED_CIDR:-}"' in source
     assert "VLLM_ALLOWED_CIDR is required" in source
@@ -47,3 +57,5 @@ def test_droplet_bootstrap_docs_keep_required_secrets_out_of_git() -> None:
     assert "SHELFWISE_ALLOW_INSECURE_COOKIE_IN_DISPOSABLE_CI=true" in source
     assert "non-allowlisted host" in source
     assert "old key fails" in source
+    assert "```powershell\npython scripts/track3_prescreen.py" not in source
+    assert "```bash\npython scripts/track3_prescreen.py " in source

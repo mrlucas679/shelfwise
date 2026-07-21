@@ -21,7 +21,7 @@ class InMemoryEdgeDeviceRegistry:
     def __init__(self) -> None:
         self._lock = Lock()
         self._devices: dict[str, EdgeDevice] = {}
-        self._batches: set[tuple[str, str]] = set()
+        self._batches: dict[tuple[str, str], str] = {}
 
     def register(self, device: EdgeDevice) -> None:
         """Register or replace one device scope without exposing its secret."""
@@ -72,13 +72,32 @@ class InMemoryEdgeDeviceRegistry:
             )
             return True
 
-    def record_batch(self, tenant_id: str, batch_id: str) -> bool:
-        """Record one tenant/batch pair and reject an exact replay."""
+    def claim_batch(self, tenant_id: str, batch_id: str) -> str:
+        """Claim a batch for projection, preserving completed replay safety."""
         key = (tenant_id, batch_id)
         with self._lock:
-            if key in self._batches:
+            state = self._batches.get(key)
+            if state is not None:
+                return "in_progress" if state == "claimed" else state
+            self._batches[key] = "claimed"
+            return "claimed"
+
+    def complete_batch(self, tenant_id: str, batch_id: str) -> bool:
+        """Mark a successfully projected claim permanently replay-safe."""
+        key = (tenant_id, batch_id)
+        with self._lock:
+            if self._batches.get(key) != "claimed":
                 return False
-            self._batches.add(key)
+            self._batches[key] = "completed"
+            return True
+
+    def release_batch(self, tenant_id: str, batch_id: str) -> bool:
+        """Release a failed projection claim so the signed receipt can be retried."""
+        key = (tenant_id, batch_id)
+        with self._lock:
+            if self._batches.get(key) != "claimed":
+                return False
+            del self._batches[key]
             return True
 
     def clear(self) -> None:

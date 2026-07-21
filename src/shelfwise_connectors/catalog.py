@@ -32,6 +32,16 @@ class ConnectorCapability:
 _CATALOG = [
     ConnectorCapability(SourceSystem.CSV, "CSV export", "file", 1, True, False, True, "task_only"),
     ConnectorCapability(SourceSystem.ODOO, "Odoo", "poll", 2, True, False, True, "task_only"),
+    ConnectorCapability(
+        SourceSystem.DYNAMICS,
+        "Dynamics 365 Business Central",
+        "poll",
+        2,
+        True,
+        False,
+        True,
+        "task_only",
+    ),
     ConnectorCapability(SourceSystem.SQUARE, "Square", "webhook", 2, True, True, True, "task_only"),
     ConnectorCapability(
         SourceSystem.SAP,
@@ -64,6 +74,7 @@ _CATALOG = [
         True,
         "task_only",
     ),
+    ConnectorCapability(SourceSystem.YOCO, "Yoco", "webhook", 3, True, True, True, "task_only"),
 ]
 
 
@@ -74,11 +85,7 @@ def list_connector_capabilities() -> list[ConnectorCapability]:
 def connector_status_for_policy(policy: dict[str, object]) -> list[dict[str, object]]:
     raw_allowed = policy.get("allowed_systems", [])
     allowed_items = raw_allowed if isinstance(raw_allowed, list) else [raw_allowed]
-    allowed = {
-        str(item).strip().lower()
-        for item in allowed_items
-        if str(item).strip()
-    }
+    allowed = {str(item).strip().lower() for item in allowed_items if str(item).strip()}
     rows: list[dict[str, object]] = []
     for capability in list_connector_capabilities():
         item = capability.to_dict()

@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import app
+from shelfwise_backend.app import app, write_limiter
+
+
+def _delivery_payload() -> dict[str, object]:
+    return {
+        "sku": "milk_2l",
+        "ordered_units": 50,
+        "asn_units": 50,
+        "received_units": 38,
+        "accepted_units": 32,
+        "short_dated_units": 6,
+    }
 
 
 def test_fefo_split_endpoint_exposes_batch_level_numbers() -> None:
@@ -47,14 +58,7 @@ def test_delivery_reconciliation_endpoint_flags_receiving_gap() -> None:
 
     response = client.post(
         "/intelligence/deliveries/reconcile",
-        json={
-            "sku": "milk_2l",
-            "ordered_units": 50,
-            "asn_units": 50,
-            "received_units": 38,
-            "accepted_units": 32,
-            "short_dated_units": 6,
-        },
+        json=_delivery_payload(),
     )
 
     assert response.status_code == 200
@@ -130,3 +134,60 @@ def test_fefo_split_endpoint_rejects_cross_sku_batches() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "all batches must match sku"
+
+
+def test_intelligence_routes_require_the_shared_write_key_when_configured(monkeypatch) -> None:
+    """Calculation endpoints are still write-path resource consumers in JWT deployments."""
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "test-tenant-secret")
+    monkeypatch.setenv("API_KEY", "intelligence-test-key")
+    client = TestClient(app)
+    requests = (
+        ("/intelligence/deliveries/reconcile", _delivery_payload()),
+        (
+            "/intelligence/suppliers/cover-plan",
+            {
+                "sku": "milk_2l",
+                "units_on_hand": 12,
+                "forecast_daily_units": "10",
+                "supplier_lead_time_days": "3",
+            },
+        ),
+        (
+            "/intelligence/outcomes/summarize",
+            {
+                "sku": "milk_2l",
+                "action": "markdown",
+                "predicted_sell_through_units": 10,
+                "actual_sell_through_units": 12,
+                "predicted_waste_units": 2,
+                "actual_waste_units": 1,
+            },
+        ),
+    )
+
+    for path, payload in requests:
+        assert client.post(path, json=payload).status_code == 401
+
+    allowed = client.post(
+        "/intelligence/deliveries/reconcile",
+        json=_delivery_payload(),
+        headers={"x-api-key": "intelligence-test-key"},
+    )
+    assert allowed.status_code == 200
+
+
+def test_intelligence_routes_share_the_write_rate_limit(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "intelligence-test-key")
+    write_limiter.configure(capacity=1, refill_per_s=0.0, max_keys=1024)
+    client = TestClient(app)
+    headers = {"x-api-key": "intelligence-test-key"}
+    try:
+        assert client.post(
+            "/intelligence/deliveries/reconcile", json=_delivery_payload(), headers=headers
+        ).status_code == 200
+        assert client.post(
+            "/intelligence/deliveries/reconcile", json=_delivery_payload(), headers=headers
+        ).status_code == 429
+    finally:
+        write_limiter.configure(capacity=240, refill_per_s=8.0, max_keys=1024)

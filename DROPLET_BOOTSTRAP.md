@@ -53,7 +53,9 @@ The script detects the Quick Start's preinstalled `rocm` vLLM 0.23 container and
 models inside it, avoiding an incompatible duplicate image. It downloads E4B routine and 31B strong
 models into the Hugging Face cache, starts them on `8000` and `8001`, then waits for `/v1/models` to
 prove each model is loaded. It is safe to rerun; it only replaces its named vLLM processes. On a
-non-Quick-Start host it falls back to the official Gemma 4 ROCm vLLM image.
+non-Quick-Start host it falls back to the official Gemma 4 ROCm vLLM image. That fallback uses
+host networking, so the bootstrap installs an ordered `INPUT` allow-then-drop pair for each vLLM
+port; Docker NAT rules alone do not protect a host-networked process.
 
 On the application host, set the printed URLs and the same `VLLM_API_KEY` before starting the
 production Compose stack. Production Compose defaults `SHELFWISE_COOKIE_SECURE=true`; terminate
@@ -66,7 +68,8 @@ From the application repository root, validate the production configuration befo
 
 ```bash
 cp .env.example .env  # only on a new host; keep the file local and ignored
-# Set the production secrets and the two printed LLM_* values in .env.
+# Set the production secrets, the two printed LLM_* endpoint values, and
+# LLM_PROVIDER=vllm_mi300x in .env. AMD identity is explicit; it is never inferred from the IP.
 docker compose -f docker-compose.production.yml config --quiet
 docker compose -f docker-compose.production.yml up --build -d --wait
 python scripts/deployment_shakedown.py \
@@ -91,6 +94,9 @@ sudo iptables -t nat -S DOCKER | grep -- '--dport 8000'
 sudo iptables -t nat -S DOCKER | grep -- '--dport 8001'
 sudo iptables -S DOCKER | grep -- '--dport 8000'
 sudo iptables -S DOCKER | grep -- '--dport 8001'
+# Required too if the bootstrap used the non-Quick-Start host-network fallback.
+sudo iptables -S INPUT | grep -- '--dport 8000'
+sudo iptables -S INPUT | grep -- '--dport 8001'
 ```
 
 From the allowlisted application host, prove authenticated access with a placeholder only:
@@ -109,6 +115,13 @@ curl --connect-timeout 5 --fail \
   http://<mi300x-private-ip>:8000/v1/models
 ```
 
+If the model host name resolves but this check reports **connection refused**, the CIDR firewall
+is not the cause: no vLLM listener is running on that port. Do not broaden the firewall. Connect to
+the MI300X host, inspect `/root/shelfwise-vllm/vllm-8000.log` or `vllm-8001.log`, then rerun
+`bash scripts/bootstrap_mi300x_vllm.sh` after fixing the reported startup cause. A timeout instead
+indicates a network-path or firewall problem and should be investigated without exposing either
+port publicly.
+
 After the public HTTPS terminator is active, verify the browser session response contains
 `Secure`, `HttpOnly`, and `SameSite=Strict` on `shelfwise_session`:
 
@@ -124,11 +137,11 @@ Git, shell history where practical, logs, screenshots, and reports.
 
 Then run:
 
-```powershell
-python scripts/track3_prescreen.py `
-  --base-url https://<public-shelfwise-origin> `
-  --startup-deadline 60 `
-  --request-deadline 29 `
+```bash
+python scripts/track3_prescreen.py \
+  --base-url https://<public-shelfwise-origin> \
+  --startup-deadline 60 \
+  --request-deadline 130 \
   --output reports/track3_prescreen.json
 ```
 

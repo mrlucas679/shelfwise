@@ -42,6 +42,11 @@ class InMemoryWebhookDedupStore:
             self._seen.add(event_id)
             return True
 
+    async def unmark(self, event_id: str) -> None:
+        """Release a failed delivery so the provider's at-least-once retry can run."""
+        with self._lock:
+            self._seen.discard(event_id)
+
     def clear(self) -> None:
         with self._lock:
             self._seen.clear()
@@ -73,10 +78,17 @@ class WebhookReceiver:
             raise PermissionError("invalid webhook signature")
         if not await self._dedup.mark_if_new(event_id):
             return None
-        result = self._build(payload)
-        if isawaitable(result):
-            return await result
-        return result
+        try:
+            result = self._build(payload)
+            if isawaitable(result):
+                return await result
+            return result
+        except BaseException:
+            # Do not turn a temporary mapper/database failure into permanent data loss.
+            # The first caller still receives the error, while the source's retry can claim
+            # and process this delivery again.
+            await self._dedup.unmark(event_id)
+            raise
 
 
 def verify_signature(secret: str, body: bytes, signature: str) -> bool:

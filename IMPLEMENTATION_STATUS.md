@@ -4,19 +4,54 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-17 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **736 passed / 15 env-gated skips** locally;
-**735 passed / 0 failed** against real Postgres + Redis on the **third consecutive run
-against the same never-wiped database** (2026-07-17: the whole suite, harness included, is
-rerun-safe against persistent production-shaped storage, not just CI's fresh containers —
-governed-execution features added later that day are covered by the local suite and CI's
-real-infra job); ruff clean; frontend `tsc --noEmit` clean; capability manifest
-**210 capabilities**, contract-verified.
+Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
+Branch: `developers` · Gates at time of writing: **761 passed / 16 env-gated skips** locally;
+**776 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
+([run 29789599559](https://github.com/mrlucas679/shelfwise/actions/runs/29789599559)); ruff
+clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
+contract-verified.
 
-**Every application feature is fully implemented. Nothing in the software is left
-behind.** Deployment infrastructure still to be purchased (a GPU rental, GPU-hours,
-cameras) is inventoried separately in the final appendix - procurement is not an
-application feature, and classifying it as one misstates both.
+**Every feature enabled by the supported application deployment profiles is implemented and
+covered by the applicable local or CI gate.** The six capability records marked `partial` are
+truthful external-proof boundaries: live provider inference and hardware-backed training/serving
+must be run on the rented GPU environment. Deployment infrastructure still to be purchased (a
+GPU rental, GPU-hours, cameras) is inventoried separately in the final appendix - procurement is
+not an application feature, and classifying it as one misstates both.
+
+## 2026-07-20 readiness verification update
+
+- The full local backend regression suite passed: **761 passed, 16 environment-gated skips**;
+  Ruff, capability-contract comparison, frontend typecheck, and frontend production build passed.
+- All intelligence calculation POST routes now use the shared API-key write guard and bounded
+  write-rate limiter. Edge-observation batch receipts now release failed projection claims, so a
+  valid signed retry cannot be permanently misreported as a duplicate.
+- Scenario mutations now require an ingest-capable tenant role; enabled production multimodal
+  processing requires JWT protection plus the shared write guard/rate limiter; Postgres learning
+  thresholds use a database-level maximum so concurrent approvals cannot regress an exposure.
+- Production Compose defaults its explicit provider identity to `vllm_mi300x`; generic
+  OpenAI-compatible routing remains available only when an operator deliberately selects it
+  outside the AMD production profile.
+- Session-capsule recovery accepts portable gzip archives only and rejects archive links and
+  special-file members before extraction, so a recovery artifact cannot write beyond its target.
+- Every supported Gemma 4 training profile and the active multimodal configuration use an
+  immutable 40-character upstream revision; mutable branch names such as `main` fail validation.
+- The regenerated capability manifest records **214** wired capabilities. Its only six `partial`
+  records are deliberately external-proof boundaries (live Fireworks/MI300X inference and actual
+  training/serving execution), not missing backend routes, workers, or event consumers.
+- GitHub Actions CI on the current `developers` branch passed its real Postgres/Redis, browser E2E, production-topology,
+  deployment-shakedown, and Track 3 gates; the capability-contract workflow also passed.
+- A fresh deterministic fleet-scale run processed **500,000 of 500,000 requested rows** in
+  **22,928 ms** (**21,807.4 rows/s**), produced 41,442 threshold candidates and a bounded top-200
+  queue with zero LLM calls. The reproducibility receipt is
+  [`reports/fleet-scale-shakedown-20260720.json`](reports/fleet-scale-shakedown-20260720.json).
+- A fresh 8-cycle, fault-injected full-system replay completed with **0 failures**: 577 accepted
+  world events, all 63 injected malformed/duplicate/stale/tenant faults rejected, a verified
+  retry-to-dead-letter worker path, 87 unique decisions, 84 learning events, and 26 feature
+  receipts. This is in-process deterministic proof; it is distinct from the live-model gate.
+- The external acceptance still required tomorrow is deliberately not relabeled as local proof:
+  the MI300X bootstrap and public-HTTPS live-model run require the rented droplet, its narrow
+  application-host CIDR, and real credentials. `DROPLET_BOOTSTRAP.md` and
+  `docs/mi300x-recreate-runbook.md` are the authoritative operator sequence.
 
 Legend: ✅ implemented and tested · 🗺️ deliberately sequenced roadmap (recorded decision,
 not an oversight).
@@ -122,11 +157,17 @@ not an oversight).
 
 ## 5. Connectors and integrations — ✅
 
-- ✅ Seven system connectors (Odoo/SAP/SYSPRO polling; Square/Shopify/Lightspeed webhooks; CSV):
-  HMAC webhook verification, durable poll cursors (restart-surviving, real-Postgres verified),
+- ✅ Nine system connectors (Odoo/SAP/SYSPRO/Dynamics Business Central polling;
+  Square/Shopify/Lightspeed/Yoco webhook-style intake; CSV):
+  HMAC webhook verification with retry-safe failure release; durable incremental poll cursors
+  (restart-surviving, real-Postgres verified); completed ERP pagination scans clear their opaque
+  continuation and restart from page one on the next interval,
   scheduled poll loop (`CONNECTOR_POLL_ENABLED`, env-tunable cadence with hot-loop floor),
-  status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked
-  inbound records, money minor-units.
+  status API tested in enabled state, fractional-quantity-safe mappers, provenance-tracked inbound
+  records, money minor-units. Dynamics preserves opaque OData continuation URLs; Yoco requires
+  explicit SKU/quantity/location metadata and an exact minor-unit unit-price split before a
+  succeeded payment can emit a sales event; malformed source timestamps are quarantined without
+  emitting an event.
 - ✅ Edge gateway: HMAC-signed device observations, body-size bounds, twin intake.
 
 ## 6. Digital twin — ✅ (software layer)
@@ -156,6 +197,8 @@ not an oversight).
 
 ## 7. Inference and model operations — ✅
 
+- ✅ Provider identity is explicit at deployment (`LLM_PROVIDER`): arbitrary OpenAI-compatible
+  endpoints are reported as unverified hardware and cannot claim or pass the AMD/MI300X gate.
 - ✅ Two-tier Gemma architecture (routine E4B :8000 / strong 31B :8001), bounded per-call and
   per-cascade deadlines derived from `SHELFWISE_REQUEST_TIMEOUT_SECONDS` (the retired 30s gate
   is structurally gone; sub-budget reclaim/override values are inexpressible), fail-closed
@@ -227,6 +270,6 @@ software already live and its acceptance gate committed. These are purchases, no
    that receives their observations and the topology view that displays them are both
    live software today.
 
-Integrating any retail system beyond the seven implemented connectors is likewise
+Integrating any retail system beyond the nine implemented connectors is likewise
 per-system contract work against that system's real API, undertaken when a real system
 appears - never faked in advance.

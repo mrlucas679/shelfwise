@@ -75,6 +75,8 @@ services:
     environment:
       APP_ENV: production
       SHELFWISE_AUTH_MODE: jwt
+      # Upload/model-invocation routes remain off unless explicitly enabled behind JWT.
+      MULTIMODAL_ENABLED: ${MULTIMODAL_ENABLED:-false}
       SHELFWISE_PUBLIC_DEMO_SESSION: "true"
       SHELFWISE_CHAT_DATA_DOMAIN: ${SHELFWISE_CHAT_DATA_DOMAIN:-world_simulation}
       SHELFWISE_COOKIE_SECURE: ${SHELFWISE_COOKIE_SECURE:-true}
@@ -89,6 +91,10 @@ services:
       SHELFWISE_BUS_BACKEND: redis
       DATABASE_URL: postgresql://shelfwise_app:${POSTGRES_APP_PASSWORD}@postgres:5432/shelfwise
       REDIS_URL: redis://redis:6379/0
+      # Production traffic is an AMD MI300X deployment. A generic OpenAI-compatible
+      # provider is intentionally not the default: agentic and chat routes fail closed
+      # unless the deployment declares the AMD runtime explicitly.
+      LLM_PROVIDER: ${LLM_PROVIDER:-vllm_mi300x}
       LLM_ROUTINE_BASE_URL: ${LLM_ROUTINE_BASE_URL:-http://host.docker.internal:8000}
       LLM_STRONG_BASE_URL: ${LLM_STRONG_BASE_URL:-http://host.docker.internal:8001}
       LLM_ROUTINE_MODEL: ${LLM_ROUTINE_MODEL:-google/gemma-4-E4B-it}

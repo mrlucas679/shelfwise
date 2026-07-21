@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import urllib.error
+from dataclasses import replace
 
 import pytest
 
@@ -167,3 +168,25 @@ def test_happy_path_returns_content_and_records_ok_run(monkeypatch) -> None:
     assert result.input_tokens == 5
     assert result.output_tokens == 2
     assert recorded[0]["status"] == "ok"
+
+
+def test_explicit_provider_is_preserved_for_a_different_tier_endpoint(monkeypatch) -> None:
+    body = b'{"choices": [{"message": {"content": "ready"}}]}'
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout=30: _FakeHttpResponse(body),
+    )
+    config = replace(
+        _config(),
+        provider=ProviderKind.VLLM_MI300X,
+        base_url="https://routine.example/v1",
+        strong_base_url="https://api.fireworks.ai/inference/v1",
+    )
+
+    result = OpenAICompatibleInferenceClient(config).complete(
+        agent="executive",
+        system="s",
+        user="u",
+    )
+
+    assert result.provider == ProviderKind.VLLM_MI300X.value
