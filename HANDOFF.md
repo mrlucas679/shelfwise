@@ -674,11 +674,11 @@ until that receipt exists.
 
 Run it only after the AMD endpoint and production application are live:
 
-```powershell
-python scripts/track3_prescreen.py `
-  --base-url https://<public-app-origin> `
-  --startup-deadline 60 `
-  --request-deadline 130 `
+```bash
+python scripts/track3_prescreen.py \
+  --base-url https://<public-app-origin> \
+  --startup-deadline 60 \
+  --request-deadline 130 \
   --output reports/track3_prescreen_<timestamp>.json
 ```
 

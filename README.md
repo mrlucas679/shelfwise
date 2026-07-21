@@ -1,11 +1,11 @@
 # ShelfWise
 
-> **Working-product branch boundary:** This repository is being continued on `developers` after
-> the hackathon. The working product remains on `main`; keep implementation commits on
-> `developers` and do not merge them to `main` without an explicit release decision.
+> **Working-product branch boundary:** The current working product source is `developers`.
+> `main` is the protected release branch; keep implementation commits on `developers` and do
+> not merge them to `main` without an explicit release decision.
 
-[![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
-[![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=main)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
+[![CI](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml/badge.svg?branch=developers)](https://github.com/mrlucas679/shelfwise/actions/workflows/ci.yml)
+[![Capability contract](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml/badge.svg?branch=developers)](https://github.com/mrlucas679/shelfwise/actions/workflows/capability-diff.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 [![Built on AMD](https://img.shields.io/badge/AMD-Instinct%20MI300X-ED1C24.svg)](#built-on-amd-compute-usage-proof)
