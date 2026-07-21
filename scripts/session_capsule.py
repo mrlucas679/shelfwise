@@ -428,29 +428,28 @@ def _create(args: argparse.Namespace) -> int:
 
 
 def _write_archive(capsule: Path, archive: Path) -> None:
-    """Write gzip or zstd tar archives using the strongest available local tool."""
+    """Write a portable gzip archive that uses the same safe Python restore path."""
     if _path_relation(archive, capsule) in {"equal", "inside"}:
         raise ValueError("archive path must not be inside the capsule directory")
-    archive.parent.mkdir(parents=True, exist_ok=True)
     if archive.name.endswith(".tar.zst"):
-        code, _stdout, stderr = _run(
-            ["tar", "--zstd", "-cf", str(archive), "-C", str(capsule.parent), capsule.name]
-        )
-        if code:
-            raise RuntimeError(f"tar --zstd failed: {stderr}")
-        return
+        raise ValueError("zstd capsules are not supported; use a .tar.gz archive")
+    archive.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "w:gz") as handle:
         handle.add(capsule, arcname=capsule.name)
 
 
 def _safe_extract_tar(archive: Path, target: Path) -> None:
-    """Extract a gzip archive only when every member stays below the target root."""
+    """Extract only regular files and directories that remain below the restore root."""
     with tarfile.open(archive, "r:gz") as handle:
         target_resolved = target.resolve()
         for member in handle.getmembers():
             candidate = (target / member.name).resolve()
             if candidate != target_resolved and target_resolved not in candidate.parents:
                 raise RuntimeError(f"archive path escapes restore target: {member.name}")
+            # A link can make a later, otherwise in-root member write outside ``target``.
+            # Devices/FIFOs also have no legitimate place in a portable diagnostic capsule.
+            if not (member.isfile() or member.isdir()):
+                raise RuntimeError(f"archive member type is not allowed: {member.name}")
         handle.extractall(target)
 
 
@@ -469,12 +468,9 @@ def _restore(args: argparse.Namespace) -> int:
         return 2
     target.mkdir(parents=True, exist_ok=True)
     if archive.name.endswith(".tar.zst"):
-        code, _stdout, stderr = _run(["tar", "--zstd", "-xf", str(archive), "-C", str(target)])
-        if code:
-            print(f"tar --zstd restore failed: {stderr}", file=sys.stderr)
-            return 1
-    else:
-        _safe_extract_tar(archive, target)
+        print("zstd capsules are not supported; use a .tar.gz archive", file=sys.stderr)
+        return 2
+    _safe_extract_tar(archive, target)
     print(json.dumps({"verdict": "PASS", "restored_to": str(target)}, indent=2))
     return 0
 

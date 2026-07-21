@@ -504,7 +504,7 @@ python scripts/session_capsule.py create \
   --repo /workspace/shelfwise \
   --root /workspace/persist \
   --strict \
-  --archive /workspace/persist/capsules/shelfwise-session-$(date -u +%Y%m%dT%H%M%SZ).tar.zst
+  --archive /workspace/persist/capsules/shelfwise-session-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
 ```
 
 The command must exit successfully and print an empty `failures` list. Verify the capsule before
@@ -512,7 +512,7 @@ downloading it:
 
 ```bash
 python scripts/session_capsule.py verify /workspace/persist/capsules/shelfwise-session-<timestamp>
-sha256sum /workspace/persist/capsules/shelfwise-session-<timestamp>.tar.zst
+sha256sum /workspace/persist/capsules/shelfwise-session-<timestamp>.tar.gz
 ```
 
 Only after API/training shutdown, database dumps, Redis persistence, capsule creation, checksum
@@ -520,7 +520,7 @@ verification, download, and local checksum verification have succeeded may the D
 destroyed. Restore into a new MI300X with:
 
 ```bash
-python scripts/session_capsule.py restore shelfwise-session-<timestamp>.tar.zst \
+python scripts/session_capsule.py restore shelfwise-session-<timestamp>.tar.gz \
   --target /workspace/recovery
 ```
 
