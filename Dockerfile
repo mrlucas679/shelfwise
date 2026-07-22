@@ -5,9 +5,12 @@ COPY requirements.txt pyproject.toml ./
 
 RUN pip install --no-cache-dir -r requirements.txt
 
+# data/ ships seeded runtime datasets the image is contractually required to carry
+# (tests/test_infra_config.py::test_backend_image_contains_seeded_runtime_datasets).
+# tests/ is not: it is executed by CI directly against the repo, never inside this
+# image (see .github/workflows/ci.yml), and no backend startup path reads it.
 COPY src ./src
 COPY data ./data
-COPY tests ./tests
 
 ENV PYTHONPATH=/app/src
 ENV PYTHONDONTWRITEBYTECODE=1

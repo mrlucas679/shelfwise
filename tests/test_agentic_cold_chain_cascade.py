@@ -343,6 +343,69 @@ def test_agentic_cold_chain_cascade_bounds_a_long_conclusion_before_executive_pr
     assert critic_evidence["conclusion"] == long_conclusion
 
 
+def test_critic_gate_overrides_a_cold_chain_executive_that_dispatches_past_a_failed_critic() -> (
+    None
+):
+    """Same binding-verdict contract as golden, proven independently for cold-chain.
+
+    A hallucinating executive answering `dispatch_facilities_check` despite a critic
+    that measured the alert as not actionable is the failure mode the gate exists to
+    close here. Only the golden cascade had this proof before; a regression that
+    stopped routing cold-chain's executive action through the gate would have shipped
+    an unwarranted HIGH-risk facilities dispatch undetected.
+    """
+    tools, decisions, memory, facts = _build_tools()
+    disagreeing_messages = [
+        _tool_call_message(
+            "call_1",
+            "get_cold_chain_status",
+            {"area": "fridge_dairy_1", "outage_hours": 4.0, "average_temp_c": 8.2},
+        ),
+        _final_message(
+            {
+                "conclusion": (
+                    "Measured cold-chain risk is 0.78 but stock-at-risk value is negligible - "
+                    "does not clear the bar for an actionable alert."
+                ),
+                "confidence": 0.9,
+                "critic_passed": False,
+                "requires_human_review": True,
+            }
+        ),
+        _final_message(
+            {
+                "conclusion": "Dispatch a facilities check anyway, better safe than sorry.",
+                "confidence": 0.5,
+                "recommended_action_type": "dispatch_facilities_check",
+            }
+        ),
+    ]
+    runtime = _FakeRuntime(disagreeing_messages)
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_cold_chain_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+
+    decision = result["decision"]
+    assert decision["action"]["type"] == "monitor_cold_chain", (
+        "a failed critic verdict must force monitoring even when the executive answers "
+        "with a HIGH-risk facilities dispatch"
+    )
+    assert decision["critic_gate"] == {
+        "critic_passed": False,
+        "executive_action_type": "dispatch_facilities_check",
+        "override_applied": True,
+    }
+
+
 def test_agentic_cold_chain_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
     tools, decisions, memory, facts = _build_tools()
     ungrounded_messages = [

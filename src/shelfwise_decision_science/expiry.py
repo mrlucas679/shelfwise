@@ -18,6 +18,30 @@ class ExpiryRisk:
     method: str
     confidence: Decimal
 
+    def __post_init__(self) -> None:
+        """State the postcondition explicitly instead of trusting `clamp()` silently.
+
+        `score_expiry_risk` already guarantees these bounds by construction today, but
+        a future edit to its weights or a dropped `clamp()`/`max()` call would otherwise
+        surface only as a quietly-wrong risk score feeding a real markdown decision, not
+        a loud failure at the boundary where it actually happened.
+        """
+        if not (Decimal("0") <= self.risk <= Decimal("1")):
+            raise ValueError(f"ExpiryRisk.risk out of [0,1]: {self.risk}")
+        if self.waste_units < 0:
+            raise ValueError(f"ExpiryRisk.waste_units must be >= 0: {self.waste_units}")
+        if self.zar_at_risk.minor_units < 0:
+            raise ValueError(
+                f"ExpiryRisk.zar_at_risk must be >= 0: {self.zar_at_risk.minor_units}"
+            )
+        if self.effective_days_to_expiry < 0:
+            raise ValueError(
+                "ExpiryRisk.effective_days_to_expiry must be >= 0: "
+                f"{self.effective_days_to_expiry}"
+            )
+        if not (Decimal("0") <= self.confidence <= Decimal("1")):
+            raise ValueError(f"ExpiryRisk.confidence out of [0,1]: {self.confidence}")
+
 
 def score_expiry_risk(
     *,

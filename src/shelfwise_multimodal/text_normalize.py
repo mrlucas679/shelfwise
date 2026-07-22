@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 
 _ONES = (
     "zero",
@@ -158,7 +159,17 @@ def _ordinal(day: int) -> str:
 
 
 def _money(match: re.Match[str]) -> str:
-    """Convert South African rand notation into speakable words."""
+    """Convert South African rand notation into speakable words.
+
+    Scales the whole value (not just the integer part) by the k/m multiplier before
+    splitting into rand and cents - "R1.5k" is R1,500, not R1,000. The previous
+    whole-and-fraction split only multiplied the whole part and silently discarded the
+    fraction whenever a multiplier suffix was present, understating any spoken
+    fractional-thousand or fractional-million figure by up to just under 1x the
+    multiplier (e.g. "R2.25m" was spoken as "two million rand" instead of "two million
+    two hundred and fifty thousand rand") - a real error in a voice interface that
+    speaks real monetary figures for retail decisions.
+    """
     body = (
         match.group(0)
         .replace("ZAR", "")
@@ -174,13 +185,10 @@ def _money(match: re.Match[str]) -> str:
     elif body[-1:].lower() == "m":
         multiplier = 1_000_000
         body = body[:-1]
-    if "." in body:
-        whole, fractional = body.split(".", 1)
-        rand = int(whole or "0") * multiplier
-        cents = int((fractional + "00")[:2]) if multiplier == 1 else 0
-    else:
-        rand = int(body) * multiplier
-        cents = 0
+    total_cents = int(
+        (Decimal(body) * multiplier * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    rand, cents = divmod(total_cents, 100)
     words = int_to_words(rand) + " rand"
     if cents:
         words += " and " + int_to_words(cents) + " cents"

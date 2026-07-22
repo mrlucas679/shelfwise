@@ -253,6 +253,63 @@ def test_ingest_self_heals_when_bus_publish_fails_after_event_is_recorded(monkey
     assert calls["n"] == 2
 
 
+def test_ingest_self_heals_when_the_crash_lands_after_publish_but_before_mark_published(
+    monkeypatch,
+) -> None:
+    """The other half of the durable-store-first crash window, not just publish failing.
+
+    `record()` and `mark_published()` are two separate committed transactions
+    (event_store.py), so a crash between "the bus actually got the message" and "we
+    recorded that fact" is possible, not just a crash before publish. On retry the event
+    is recorded-but-unpublished either way, so self-heal reruns observe_event, twin
+    projection, and publish a second time for the same logical event - this is only
+    safe because every one of those side effects is independently idempotent
+    (open_orders' max()-based upsert, the twin's content-hashed deterministic
+    observation id, and the cascade's event-id-derived decision identity with a
+    protected upsert). Prove the whole chain, not just the individual pieces.
+    """
+    client = TestClient(app)
+    original_mark_published = app_module.event_store.mark_published
+    calls = {"n": 0}
+
+    def flaky_mark_published(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("crashed after publish, before recording published=true")
+        return original_mark_published(*args, **kwargs)
+
+    monkeypatch.setattr(app_module.event_store, "mark_published", flaky_mark_published)
+    event = _sale_event("evt_selfheal_crash_after_publish")
+
+    with pytest.raises(RuntimeError, match="crashed after publish"):
+        client.post("/ingest", json=event)
+
+    still_unpublished = app_module.event_store.is_published(
+        event["id"], tenant_id="sa_retail_demo", data_domain="world_simulation"
+    )
+    assert still_unpublished is False, (
+        "the flag must genuinely be unset - this test is only meaningful if the crash was real"
+    )
+
+    retry = client.post("/ingest", json=event)
+
+    assert retry.status_code == 200
+    body = retry.json()
+    assert body["status"] == "accepted"
+    assert calls["n"] == 2
+
+    decision_id = f"dec_sa_retail_demo_world_simulation_{event['id']}"
+    matching_decisions = [
+        decision
+        for decision in app_module.decision_store.list()
+        if decision["id"] == decision_id
+    ]
+    assert len(matching_decisions) == 1, (
+        "the crash-and-retry must leave exactly one decision behind, not a duplicate - "
+        f"found {len(matching_decisions)} for {decision_id}"
+    )
+
+
 def test_ingest_supplier_update_runs_procurement_cascade() -> None:
     client = TestClient(app)
 
@@ -459,3 +516,35 @@ def test_operational_cold_chain_alert_with_bare_temp_fails_closed_not_fabricated
     assert cascade["decision"] is None
     missing = set(cascade["missing_data"])
     assert {"diagnosis", "severity", "predicted_minutes_to_unsafe"} <= missing
+
+
+def test_approving_a_scan_decision_makes_the_next_scan_for_the_same_sku_cite_it() -> None:
+    """Prove the learning-evidence loop is live through the real dispatcher/app singleton,
+    not just reachable at the `run_golden_cascade(learning=...)` unit level.
+    """
+    client = TestClient(app)
+
+    first = client.post("/ingest", json=_scan_event("evt_selfheal_learning_1"))
+    assert first.status_code == 200
+    decision_id = first.json()["cascade"]["decision"]["id"]
+    approved = client.post(f"/decisions/{decision_id}/approve")
+    assert approved.status_code == 200
+    assert approved.json()["decision"]["status"] == "approved"
+
+    second = client.post("/ingest", json=_scan_event("evt_selfheal_learning_2"))
+
+    assert second.status_code == 200
+    evidence = second.json()["cascade"]["evidence"]
+    history = [
+        item
+        for item in evidence
+        if item["agent"] == "opportunity" and "previously proven" in item["conclusion"]
+    ]
+    assert len(history) == 1, (
+        "the second scan for the same SKU must cite the first decision's learned "
+        "high-water mark - if this is empty, the dispatcher isn't passing learning_store "
+        "through to run_golden_cascade in the real app, only in direct unit calls"
+    )
+    assert second.json()["cascade"]["decision"]["action"] == first.json()["cascade"]["decision"][
+        "action"
+    ], "the citation must not change what action gets recommended"

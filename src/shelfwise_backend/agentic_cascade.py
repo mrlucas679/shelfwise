@@ -39,7 +39,9 @@ from .cascade import (
     EXPIRY_REVIEW_MAX_DAYS,
     PRICE_EXCEPTION_TOLERANCE,
     _cause_id,
+    _critic_gate_receipt,
     _decision_id,
+    _enforce_critic_verdict,
     _monitor_action,
 )
 from .cascade import _event_tenant_id as _tenant_id
@@ -456,45 +458,6 @@ def _token_budget(*runs: AgentRunResult) -> dict[str, int]:
         "prompt_tokens": sum(call.input_tokens for call in calls),
         "completion_tokens": sum(call.output_tokens for call in calls),
         "calls": len(calls),
-    }
-
-
-def _enforce_critic_verdict(
-    *,
-    critic_passed: bool,
-    executive_action: RecommendedAction,
-    safe_action: RecommendedAction,
-) -> tuple[RecommendedAction, bool]:
-    """Make the critic's verdict binding on the executive's routing, not advisory.
-
-    The critic's verdict reaches the executive only as prose inside a prompt, and prose
-    is not enforcement: a hallucinating executive can answer with the escalating action
-    even though the critic failed the work. The two guardrail cascades (catalog-price,
-    expiry) already fail closed on such a downgrade; the four routing cascades silently
-    trusted the executive. This gate closes that gap in the deterministic layer where a
-    model cannot argue with it: a failed critic verdict always routes the safe action,
-    and choosing the safe action is always allowed regardless of the critic (an
-    executive may be more conservative than the critic, never less).
-
-    Returns (final_action, override_applied) so callers can put the override on the
-    decision record for auditability instead of hiding the disagreement.
-    """
-    if critic_passed or executive_action.type == safe_action.type:
-        return executive_action, False
-    return safe_action, True
-
-
-def _critic_gate_receipt(
-    *,
-    critic_passed: bool,
-    executive_action_type: str,
-    override_applied: bool,
-) -> dict[str, Any]:
-    """One auditable record of what each agent said and what the gate did about it."""
-    return {
-        "critic_passed": critic_passed,
-        "executive_action_type": executive_action_type,
-        "override_applied": override_applied,
     }
 
 

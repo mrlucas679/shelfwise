@@ -103,6 +103,30 @@ def test_diagnosis_truth_table():
         diagnose(Snapshot(PowerState.MAINS, GeneratorState.OFF, 0.0, 180.0)).diagnosis
         is Diagnosis.NORMAL
     )
+    assert (
+        diagnose(Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.0, 180.0)).diagnosis
+        is Diagnosis.ON_GENERATOR
+    )
+
+
+def test_an_active_warming_trend_is_never_masked_by_a_low_fuel_notice():
+    """A live thermal risk to stock must surface even when the generator is also
+    reporting low fuel - the fuel notice is informational for later, warming is a
+    risk right now. Reproduced live before the fix: this exact snapshot returned
+    "on_generator / low fuel" with zero mention of the active warming trend, and
+    GeneratorState.LOW_FUEL had no test coverage at all before this pair of tests.
+    """
+    warming_and_low_fuel = diagnose(
+        Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.3, 180.0)
+    )
+    assert warming_and_low_fuel.diagnosis is Diagnosis.WARMING
+    assert "rising" in warming_and_low_fuel.headline.lower()
+
+    stable_and_low_fuel = diagnose(
+        Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.0, 180.0)
+    )
+    assert stable_and_low_fuel.diagnosis is Diagnosis.ON_GENERATOR
+    assert "fuel" in stable_and_low_fuel.headline.lower()
 
 
 def test_stock_at_risk_is_money_and_bounded():

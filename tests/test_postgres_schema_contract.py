@@ -294,6 +294,90 @@ def test_concurrent_double_approve_learning_never_500s_and_records_once(
     assert len([e for e in events if e["decision_id"] == decision["id"]]) == 1
 
 
+def test_concurrent_rerun_upsert_cannot_win_a_race_against_a_human_reject(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Race a cascade rerun's upsert() against a human's reject() on the same decision id
+    under real Postgres row-level locking, not just the sequential in-memory proof.
+
+    `upsert()` (`ON CONFLICT ... WHERE status NOT IN ('approved','rejected')`) and
+    `_transition()` (`UPDATE ... WHERE status = 'pending'`) are two independent
+    statements guarded by the same status discriminator, each evaluated against the
+    row's latest committed value at lock-acquisition time. Whichever ordering the
+    scheduler picks, the human's terminal decision must be the one left standing - a
+    self-heal replay or a retried worker delivery racing the same decision id must
+    never be able to reopen it to "pending" with a fresh action payload.
+    """
+    from uuid import uuid4
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"postgres_reject_race_{uuid4().hex[:10]}"
+    decision_id = f"dec_reject_race_{uuid4().hex[:10]}"
+    store = PostgresDecisionStore(_DATABASE_URL)
+
+    def seed() -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.upsert(
+                {
+                    "id": decision_id,
+                    "tenant_id": tenant_id,
+                    "data_domain": "world_simulation",
+                    "status": "pending",
+                    "action": {"type": "apply_markdown", "params": {"sku": "SKU-RACE"}},
+                }
+            )
+        finally:
+            reset_tenant_context(token)
+
+    seed()
+
+    def rerun_upsert() -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.upsert(
+                {
+                    "id": decision_id,
+                    "tenant_id": tenant_id,
+                    "data_domain": "world_simulation",
+                    "status": "pending",
+                    "action": {
+                        "type": "apply_markdown",
+                        "params": {"sku": "SKU-RACE", "rerun": True},
+                    },
+                }
+            )
+        finally:
+            reset_tenant_context(token)
+
+    def human_reject() -> dict[str, object] | None:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.reject(decision_id)
+        finally:
+            reset_tenant_context(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        upsert_future = pool.submit(rerun_upsert)
+        reject_future = pool.submit(human_reject)
+        upsert_future.result()
+        reject_future.result()
+
+    token = bind_tenant_context(tenant_id)
+    try:
+        final = store.get(decision_id)
+    finally:
+        reset_tenant_context(token)
+
+    assert final is not None
+    assert final["status"] == "rejected", (
+        "a concurrent cascade rerun must never leave a human-rejected decision pending"
+    )
+    assert final["action"]["params"].get("rerun") is not True, (
+        "the rerun's action payload must not overwrite the rejected decision's recorded action"
+    )
+
+
 def test_learning_threshold_never_regresses_for_distinct_concurrent_decisions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

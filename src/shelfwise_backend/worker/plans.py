@@ -1,13 +1,19 @@
 """Validated plan model and journal-backed runner for governed multi-step execution.
 
-Wiring status (deliberate, 2026-07-16): plan COMPILATION is live - activating a mined
-skill (`/mlops/skills/mined/{id}/activate`) compiles to the `Plan` shape validated here
-and returns it as a governed recommendation artifact. Plan EXECUTION via `PlanRunner`
-is intentionally not wired to any route or worker yet: the platform's write posture is
-`recommend_only_no_source_mutation` (see the writeback sink's rollback policy), so no
-write capability exists to register. When the governed-write phase lands (real
-connector write-backs behind HITL approval), register capabilities here and wire the
-runner then - do not wire it earlier with stub capabilities.
+Wiring status: both compilation and execution are live. Activating a mined skill
+(`/mlops/skills/mined/{id}/activate`) compiles to the `Plan` shape validated here and
+returns it as a governed recommendation artifact; `POST /mlops/plans/execute`
+(`governed_execution.build_capability_registry`) runs a validated plan through
+`PlanRunner` over a registry whose sole write capability is the platform's genuine
+governed write - the HITL write-back task sink. Source-system mutation stays behind
+real connector credentials exactly as the recommend-only rollback policy records.
+
+A step's `compensation` is validated as required for every write step and journaled
+alongside its output - it is a recorded, auditable rollback instruction, not code
+`PlanRunner` invokes automatically when a later step in the same plan fails. Every
+capability registered so far is exercised only by single-step plans, so there is
+nothing today for an automatic rollback to walk back through; a genuinely multi-step
+write plan would need that execution added before compensation stops being metadata.
 """
 
 from __future__ import annotations

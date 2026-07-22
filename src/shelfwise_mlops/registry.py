@@ -455,6 +455,13 @@ def release_gate(
     *,
     max_regression: Decimal = Decimal("0.02"),
 ) -> dict[str, object]:
+    """Block promotion when a candidate regresses past tolerance on any baseline metric.
+
+    Wiring status: real and tested (`tests/test_mlops.py`), but no application route,
+    worker, or training script currently calls it - see `gate.release_gate`'s docstring
+    for the other unwired gate in this package and which one the live skill-promotion
+    path actually uses instead.
+    """
     regressions: dict[str, str] = {}
     for metric, baseline in baseline_scores.items():
         candidate = candidate_scores.get(metric)

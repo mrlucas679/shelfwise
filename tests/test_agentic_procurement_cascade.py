@@ -254,6 +254,70 @@ def test_agentic_procurement_cascade_hard_fails_when_live_required_sees_offline_
         )
 
 
+def test_critic_gate_overrides_a_procurement_executive_that_escalates_past_a_failed_critic() -> (
+    None
+):
+    """Same binding-verdict contract as golden, proven independently for procurement.
+
+    The critic verdict reaches the executive only as prose in a prompt; a hallucinating
+    executive can answer "reorder" even though the critic failed the reorder-policy or
+    supplier-coverage check. Only the golden cascade had this proof before - procurement
+    shared the same `_enforce_critic_verdict` gate but nothing exercised the disagreement
+    path here, so a regression that silently stopped routing procurement's executive
+    action through the gate would have shipped undetected.
+    """
+    tools, decisions, memory, facts = _build_tools()
+    sku, order_units, supplier_id = _hero_procurement_facts(facts)
+    disagreeing_messages = [
+        _tool_call_message("call_1", "get_reorder_policy", {"sku": sku}),
+        _tool_call_message("call_2", "get_supplier_ranking", {"sku": sku}),
+        _final_message(
+            {
+                "conclusion": (
+                    f"Reorder policy suggests {order_units} units, but supplier coverage "
+                    "does not clear the bar; the reorder is not justified."
+                ),
+                "confidence": 0.9,
+                "critic_passed": False,
+                "supplier_id": supplier_id,
+                "requires_human_review": True,
+            }
+        ),
+        _final_message(
+            {
+                "conclusion": "Reorder anyway, the supplier will probably come through.",
+                "confidence": 0.5,
+                "recommended_action_type": "reorder",
+            }
+        ),
+    ]
+    runtime = _FakeRuntime(disagreeing_messages)
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_procurement_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+
+    decision = result["decision"]
+    assert decision["action"]["type"] == "monitor", (
+        "a failed critic verdict must force the safe action even when the executive "
+        "answers with the escalating one"
+    )
+    assert decision["critic_verdict"] == "rejected"
+    assert decision["critic_gate"] == {
+        "critic_passed": False,
+        "executive_action_type": "reorder",
+        "override_applied": True,
+    }
+
+
 def test_agentic_procurement_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
     tools, decisions, memory, facts = _build_tools()
     sku, _order_units, supplier_id = _hero_procurement_facts(facts)

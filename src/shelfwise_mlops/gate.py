@@ -14,7 +14,17 @@ async def release_gate(
     min_pass: Decimal = Decimal("0.95"),
     per_category_floor: Decimal = Decimal("0.90"),
 ) -> tuple[bool, list[str]]:
-    """Block model or prompt promotion when the golden scorecard drops below floors."""
+    """Block model or prompt promotion when the golden scorecard drops below floors.
+
+    Wiring status: this is a real, independently tested gate (`tests/test_mlops.py`),
+    not a stub - but no application route, worker, or training script currently calls
+    it. The live skill-promotion path (`skill_registry.promote`) gates on a single
+    `measured_pass_rate < manifest.minimum_pass_rate` check instead, which has no
+    per-category floor. `registry.release_gate` is a second, differently-shaped gate
+    (candidate-vs-baseline regression) in this same package, also unwired. Before
+    relying on either as "the" release gate for a real promotion decision, confirm
+    which one (if any) the call site actually needs and wire it explicitly.
+    """
 
     reasons: list[str] = []
     pass_rate = scorecard.get("pass_rate")

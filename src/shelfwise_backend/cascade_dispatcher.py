@@ -30,11 +30,13 @@ class CascadeDispatcher:
         twin_service: Any,
         product_catalog_store: Any,
         inventory_position_store: Any,
+        learning_store: Any | None = None,
     ) -> None:
         self._world_facts = world_facts
         self._twin_service = twin_service
         self._product_catalog_store = product_catalog_store
         self._inventory_position_store = inventory_position_store
+        self._learning_store = learning_store
 
     def run(self, event: Event) -> dict[str, Any] | None:
         """Dispatch one event and preserve its tenant, domain, and causality."""
@@ -97,9 +99,9 @@ class CascadeDispatcher:
             _require_operational_context(event)
         facts = self._facts_for(event)
         if event.type is EventType.SCAN:
-            return run_golden_cascade(event, facts=facts)
+            return run_golden_cascade(event, facts=facts, learning=self._learning_store)
         if event.type is EventType.SUPPLIER_UPDATE:
-            return run_procurement_cascade(event, facts=facts)
+            return run_procurement_cascade(event, facts=facts, learning=self._learning_store)
         if event.type is EventType.SALE:
             return run_sales_cascade(event, facts=facts)
         if event.type is EventType.COLD_CHAIN_ALERT:

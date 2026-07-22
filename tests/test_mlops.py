@@ -153,6 +153,32 @@ def test_decision_economics_reports_recovered_per_inference_cost() -> None:
     assert economics["recovered_per_cost"] == "9450.0"
 
 
+def test_decision_economics_reports_a_real_zero_ratio_not_none() -> None:
+    """`Decimal("0")` is falsy in Python - a decision that cost real tokens and
+    recovered nothing must report the meaningful ratio "0.0", not be conflated with
+    the only genuinely undefined case (zero cost, division impossible).
+    """
+    zero_recovered = decision_economics(
+        rand_recovered=Money.zar(0),
+        total_tokens=10_000,
+        rate_zar_per_1k=Decimal("0.004"),
+    )
+    zero_cost = decision_economics(
+        rand_recovered=None,
+        total_tokens=0,
+        rate_zar_per_1k=Decimal("0.004"),
+    )
+
+    assert zero_recovered["cost"]["minor_units"] > 0
+    assert zero_recovered["recovered_per_cost"] == "0.0", (
+        "real cost with zero recovery must report the ratio, not hide it as null"
+    )
+    assert zero_cost["cost"]["minor_units"] == 0
+    assert zero_cost["recovered_per_cost"] is None, (
+        "zero cost is the only case where the ratio is genuinely undefined"
+    )
+
+
 def test_routing_keeps_critic_and_high_risk_actions_on_strong_model() -> None:
     critic = choose_model_route(agent="critic", routine_model="small", strong_model="strong")
     inventory = choose_model_route(

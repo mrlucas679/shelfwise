@@ -15,6 +15,42 @@ test('chat console loads and the approval queue is reachable', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Approval queue' })).toBeVisible()
 })
 
+test('simulation delivery badge matches the full receiving-exception queue', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Simulation', exact: true }).click()
+
+  const deliveries = page.getByRole('button', { name: 'Deliveries 17 issues', exact: true })
+  await expect(deliveries).toBeVisible()
+  await deliveries.click()
+
+  const deliveriesWorkspace = page.getByRole('main', { name: 'Deliveries workspace' })
+  await expect(deliveriesWorkspace).toBeVisible()
+  await expect(deliveriesWorkspace.getByText('17 issues', { exact: true })).toBeVisible()
+})
+
+test('every populated simulation workspace opens from the navigation rail', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Simulation', exact: true }).click()
+
+  const workspaces = [
+    ['To order 17 products', 'To order workspace'],
+    ['Sell first 12 products', 'Sell first workspace'],
+    ['Deliveries 17 issues', 'Deliveries workspace'],
+    ['Cold chain clear', 'Cold chain workspace'],
+    ['Products search', 'Products workspace'],
+    ["Today's results R0", "Today's results workspace"],
+    ['Store twin state + scenarios', 'Store twin workspace'],
+    [/^Connections \d+ systems$/, 'Connections workspace'],
+    ['Operations simulation', 'Operations workspace'],
+  ] as const
+
+  for (const [navigationName, workspaceName] of workspaces) {
+    await page.getByRole('button', { name: navigationName, exact: typeof navigationName === 'string' }).click()
+    await expect(page.getByRole('main', { name: workspaceName })).toBeVisible()
+  }
+})
+
 test('approving the seeded golden decision clears the queue and logs the outcome', async ({
   page,
 }) => {

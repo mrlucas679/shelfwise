@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from shelfwise_contracts import Money
 from shelfwise_decision_science import (
     ActionCandidate,
+    ColdChainRisk,
+    ExpiryRisk,
     InventoryPolicyInput,
     Relation,
     RelationStore,
@@ -98,6 +102,58 @@ def test_reorder_at_exact_equality_suggests_at_least_one_unit() -> None:
     assert policy.should_reorder is True
     assert policy.units_below_reorder == Decimal("0.00")
     assert policy.suggested_order_units >= Decimal("1")
+
+
+def test_expiry_risk_postcondition_rejects_an_out_of_range_risk_score() -> None:
+    """The dataclass must fail loudly, not silently carry a mathematically-impossible
+    risk score into a real markdown decision - proves the __post_init__ guard actually
+    runs, not just that it exists in source.
+    """
+    with pytest.raises(ValueError, match=r"risk out of \[0,1\]"):
+        ExpiryRisk(
+            sku="SKU-1",
+            risk=Decimal("1.5"),
+            waste_units=Decimal("0"),
+            zar_at_risk=Money.zar(Decimal("0")),
+            effective_days_to_expiry=Decimal("1"),
+            method="test",
+            confidence=Decimal("0.5"),
+        )
+
+
+def test_expiry_risk_postcondition_rejects_negative_waste_units() -> None:
+    with pytest.raises(ValueError, match="waste_units must be >= 0"):
+        ExpiryRisk(
+            sku="SKU-1",
+            risk=Decimal("0.5"),
+            waste_units=Decimal("-1"),
+            zar_at_risk=Money.zar(Decimal("0")),
+            effective_days_to_expiry=Decimal("1"),
+            method="test",
+            confidence=Decimal("0.5"),
+        )
+
+
+def test_cold_chain_risk_postcondition_rejects_an_out_of_range_risk_score() -> None:
+    with pytest.raises(ValueError, match=r"risk out of \[0,1\]"):
+        ColdChainRisk(
+            area="fridge_a",
+            risk=Decimal("-0.1"),
+            penalty_days=Decimal("0"),
+            method="test",
+            confidence=Decimal("0.5"),
+        )
+
+
+def test_cold_chain_risk_postcondition_rejects_negative_penalty_days() -> None:
+    with pytest.raises(ValueError, match="penalty_days must be >= 0"):
+        ColdChainRisk(
+            area="fridge_a",
+            risk=Decimal("0.5"),
+            penalty_days=Decimal("-1"),
+            method="test",
+            confidence=Decimal("0.5"),
+        )
 
 
 def test_score_expiry_risk_weights_sum_to_one_not_over() -> None:

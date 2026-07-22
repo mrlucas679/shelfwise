@@ -223,6 +223,67 @@ def test_agentic_sales_cascade_hard_fails_when_live_required_sees_offline_provid
         )
 
 
+def test_critic_gate_overrides_a_sales_executive_that_records_past_a_failed_critic() -> None:
+    """Same binding-verdict contract as golden, proven independently for sales.
+
+    Sales is the one family where "escalating" means auto-recording a sale instead of
+    routing it for review - a hallucinating executive answering `record_sale` on a
+    priced-mismatch till scan is the exact failure mode the gate exists to close. Only
+    the golden cascade had this proof before; a regression that stopped routing sales's
+    executive action through the gate would have shipped a bad price straight to
+    write-back undetected.
+    """
+    tools, decisions, memory, facts = _build_tools()
+    sku, observed, catalog, delta = _hero_price_facts(facts)
+    disagreeing_messages = [
+        _tool_call_message(
+            "call_1", "check_price_integrity", {"sku": sku, "observed_unit_price": float(observed)}
+        ),
+        _final_message(
+            {
+                "conclusion": (
+                    f"Observed price {observed} differs from catalogue price {catalog} by "
+                    f"a delta of {delta}, so this must be routed for manager review."
+                ),
+                "confidence": 0.83,
+                "critic_passed": False,
+                "requires_human_review": True,
+            }
+        ),
+        _final_message(
+            {
+                "conclusion": "Record the sale, the delta is probably a rounding error.",
+                "confidence": 0.5,
+                "recommended_action_type": "record_sale",
+            }
+        ),
+    ]
+    runtime = _FakeRuntime(disagreeing_messages)
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    result = run_sales_cascade_via_agents(
+        event=None,
+        execution_mode=ExecutionMode.OFFLINE_TEST,
+        decisions=decisions,
+        memory=memory,
+        facts=facts,
+        orchestrator_factory=factory,
+    )
+
+    decision = result["decision"]
+    assert decision["action"]["type"] == "review_price_exception", (
+        "a failed price-integrity critic must never be waved through as a clean "
+        "recorded sale, even when the executive answers record_sale"
+    )
+    assert decision["critic_gate"] == {
+        "critic_passed": False,
+        "executive_action_type": "record_sale",
+        "override_applied": True,
+    }
+
+
 def test_agentic_sales_cascade_rejects_a_conclusion_that_cites_no_real_numbers() -> None:
     tools, decisions, memory, facts = _build_tools()
     sku, observed, _catalog, _delta = _hero_price_facts(facts)

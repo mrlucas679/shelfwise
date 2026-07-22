@@ -89,6 +89,7 @@ cascade_dispatcher = CascadeDispatcher(
     twin_service=twin_service,
     product_catalog_store=product_catalog_store,
     inventory_position_store=inventory_position_store,
+    learning_store=learning_store,
 )
 cascade_worker = CascadeWorker(
     bus=event_bus,
