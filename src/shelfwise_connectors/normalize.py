@@ -57,6 +57,11 @@ def record_to_event(record: InboundRecord) -> Event | None:
             # A malformed canonical payload must not turn connector intake into a 500.
             # The inbound record remains traceable, but no unsafe sale event is emitted.
             return None
+    if record.canonical_type == "expiry_entry":
+        try:
+            return _expiry_to_event(record)
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            return None
     return None
 
 
@@ -99,6 +104,31 @@ def _sales_line_to_event(record: InboundRecord) -> Event:
             "unit_price_currency": unit_price.currency,
             "order_id": str(payload.get("order_id") or record.source_object_id),
             "line_id": str(payload.get("line_id") or record.source_object_id),
+            "source_object_id": record.source_object_id,
+            "raw_payload_hash": record.payload_hash,
+        },
+    )
+
+
+def _expiry_to_event(record: InboundRecord) -> Event:
+    payload = record.canonical_payload
+    location_id = str(payload.get("location_id") or "")
+    return Event(
+        id=_event_id(record),
+        type=EventType.EXPIRY_ENTRY,
+        ts=record.event_time
+        if record.event_time.tzinfo
+        else record.event_time.replace(tzinfo=UTC),
+        actor=location_id or record.source_system.value,
+        source=_EVENT_SOURCE_BY_SYSTEM.get(record.source_system, EventSource.API),
+        tenant_id=record.tenant_id,
+        correlation_id=record.correlation_id,
+        payload={
+            "sku": str(payload["sku"]),
+            "location": location_id,
+            "location_id": location_id,
+            "on_hand": _quantity_value(payload.get("quantity")),
+            "expiry_date": str(payload["expiry_date"]),
             "source_object_id": record.source_object_id,
             "raw_payload_hash": record.payload_hash,
         },

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from .canonical import InventoryState, ProductMaster, SalesLine
+from .canonical import ExpiryEntry, InventoryState, ProductMaster, SalesLine
 from .provenance import ValidationResult
 
 
@@ -29,6 +29,19 @@ def validate_product(item: ProductMaster) -> ValidationResult:
         result = result.fail("product has no resolvable identifier")
     if not item.name:
         result = result.warn("product missing name")
+    return result
+
+
+def validate_expiry(item: ExpiryEntry) -> ValidationResult:
+    result = ValidationResult()
+    if not item.tenant_id:
+        result = result.fail("expiry entry missing tenant_id")
+    if not item.sku:
+        result = result.fail("expiry entry missing sku")
+    if not item.location_id:
+        result = result.fail("expiry entry missing location_id")
+    if Decimal(item.quantity) < 0:
+        result = result.fail("expiry entry quantity cannot be negative")
     return result
 
 

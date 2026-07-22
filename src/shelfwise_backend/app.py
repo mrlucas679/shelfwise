@@ -24,11 +24,19 @@ from shelfwise_catalog import (
     ProductVariant,
 )
 from shelfwise_connectors import (
+    CsvIntakeError,
     SourceSystem,
     connector_status_for_policy,
     list_connector_capabilities,
     map_for,
+    quarantine_intake,
     record_to_event,
+)
+from shelfwise_connectors import (
+    build_records as build_csv_intake_records,
+)
+from shelfwise_connectors import (
+    preview_csv as preview_csv_file,
 )
 from shelfwise_contracts import Event, EventSource, EventType, Money
 from shelfwise_inference import (
@@ -564,6 +572,15 @@ class ConnectorIntakeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CsvIntakeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["products", "stock", "expiry", "sales"]
+    csv_text: str = Field(min_length=1, max_length=5 * 1024 * 1024)
+    mapping: dict[str, str] | None = None
+    location_id: str | None = Field(default=None, max_length=100)
 
 
 class ScanCandidateConfirmationBody(BaseModel):
@@ -1806,6 +1823,172 @@ def _process_inbound_record(record: Any) -> dict[str, Any]:
         "event": pipeline["event"],
         "pipeline": pipeline,
     }
+
+
+MAX_CSV_COMMIT_ROWS = 1_000
+
+
+@app.post(
+    "/intake/csv/preview",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def preview_csv_intake(
+    body: CsvIntakeBody,
+    ctx: TenantContext = INGEST_AUTH_DEP,
+) -> dict[str, object]:
+    """Dry-run a client CSV: infer the column mapping and validate every row, no writes.
+
+    This is the onboarding safety valve: the operator previews until the mapping is right
+    and the error list is understood, then commits the same payload. Preview and commit
+    share one parser and one validator, so a clean preview is a true guarantee about commit.
+    """
+    text = _quarantined_csv_text(body)
+    try:
+        preview = preview_csv_file(
+            body.kind,
+            text,
+            tenant_id=ctx.tenant_id,
+            mapping=body.mapping,
+            default_location=body.location_id,
+        )
+    except CsvIntakeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return preview.to_dict()
+
+
+@app.post(
+    "/intake/csv/commit",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def commit_csv_intake(
+    body: CsvIntakeBody,
+    ctx: TenantContext = INGEST_AUTH_DEP,
+) -> dict[str, object]:
+    """Commit a previewed client CSV through the same pipeline the live connectors use.
+
+    Every data row becomes an inbound record (invalid rows quarantine with provenance,
+    valid stock/expiry/sales rows become pipeline events, valid product rows upsert the
+    catalog). Re-committing the same file is idempotent: rows dedup in the inbound store.
+    """
+    text = _quarantined_csv_text(body)
+    try:
+        records = build_csv_intake_records(
+            body.kind,
+            text,
+            tenant_id=ctx.tenant_id,
+            mapping=body.mapping,
+            default_location=body.location_id,
+        )
+    except CsvIntakeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if len(records) > MAX_CSV_COMMIT_ROWS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"commit is capped at {MAX_CSV_COMMIT_ROWS} rows per request; "
+                "split the file and import it in parts (preview has no such cap)"
+            ),
+        )
+
+    if body.kind == "products":
+        outcomes = [_commit_product_record(record) for record in records]
+    else:
+        outcomes = [_process_inbound_record(record) for record in records]
+    summary: dict[str, int] = {}
+    for outcome in outcomes:
+        status = str(outcome.get("status"))
+        summary[status] = summary.get(status, 0) + 1
+    return {
+        "kind": body.kind,
+        "rows": len(outcomes),
+        "summary": summary,
+        "records": outcomes,
+    }
+
+
+def _quarantined_csv_text(body: CsvIntakeBody) -> str:
+    verdict = quarantine_intake(body.csv_text.encode("utf-8"), claimed_mime="text/csv")
+    if not verdict.accepted:
+        raise HTTPException(status_code=422, detail=f"CSV rejected: {verdict.reason}")
+    return verdict.text or ""
+
+
+def _commit_product_record(record: Any) -> dict[str, Any]:
+    """Record provenance like any inbound row, then upsert the validated product catalog rows.
+
+    Identity is deterministic so re-imports converge instead of duplicating: the product
+    family id derives from the (tenant, name) pair and the variant id from the row's
+    primary identifier. A code already mapped to a DIFFERENT variant surfaces as an
+    identifier conflict for human review — never a silent overwrite.
+    """
+    outcome = _process_inbound_record(record)
+    if outcome["status"] != "recorded":
+        return outcome
+
+    canonical = record.canonical_payload
+    name = str(canonical.get("name") or "")
+    primary_code = str(canonical.get("source_product_id") or "")
+    product_id = "prod_" + _catalog_hash(record.tenant_id, name.lower())
+    # The variant hash includes the product family: the same source code arriving under a
+    # DIFFERENT product name must mint a different variant id so the identifier upsert
+    # raises a conflict for review instead of silently re-pointing the code.
+    variant_id = "var_" + _catalog_hash(record.tenant_id, f"{primary_code}|{product_id}")
+    try:
+        product = Product(
+            tenant_id=record.tenant_id,
+            product_id=product_id,
+            name=name,
+            category=canonical.get("category"),
+            brand=canonical.get("brand"),
+        )
+        variant = ProductVariant(
+            tenant_id=record.tenant_id,
+            variant_id=variant_id,
+            product_id=product_id,
+            pack_size=canonical.get("pack_size"),
+            unit_of_measure=canonical.get("unit_of_measure"),
+        )
+    except ValueError as exc:
+        return {**outcome, "status": "invalid", "detail": str(exc)}
+    product_catalog_store.upsert_product(product)
+    product_catalog_store.upsert_variant(variant)
+
+    identifiers: list[dict[str, str]] = []
+    conflicts: list[dict[str, str]] = []
+    for identifier_kind in ("sku", "barcode", "gtin"):
+        value = canonical.get(identifier_kind)
+        if not value:
+            continue
+        try:
+            product_catalog_store.upsert_identifier(
+                ProductIdentifier(
+                    tenant_id=record.tenant_id,
+                    variant_id=variant_id,
+                    kind=identifier_kind,
+                    value=str(value),
+                    source_system=SourceSystem.CSV.value,
+                )
+            )
+        except ConflictingIdentifierError as exc:
+            conflicts.append(
+                {"kind": identifier_kind, "value": str(value), "detail": str(exc)}
+            )
+        else:
+            identifiers.append({"kind": identifier_kind, "value": str(value)})
+    return {
+        **outcome,
+        "status": "identifier_conflict" if conflicts else "cataloged",
+        "catalog": {
+            "product_id": product_id,
+            "variant_id": variant_id,
+            "identifiers": identifiers,
+            "conflicts": conflicts,
+        },
+    }
+
+
+def _catalog_hash(tenant_id: str, value: str) -> str:
+    return hashlib.sha256(f"{tenant_id}:{value}".encode()).hexdigest()[:16]
 
 
 connector_poll_service = ConnectorPollService(

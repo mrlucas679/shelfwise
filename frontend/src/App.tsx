@@ -589,6 +589,12 @@ function asObject(value: unknown): JsonObject {
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
+function deliveryIssueCount(deliveries: DeliveryException[], fallbackMissingUnits: unknown): number {
+  if (deliveries.length) {
+    return deliveries.filter((delivery) => Number(delivery.missing_units ?? 0) > 0).length
+  }
+  return Number(fallbackMissingUnits ?? 0) > 0 ? 1 : 0
+}
 function fieldText(row: JsonObject | undefined, key: string, fallback = '-'): string {
   const value = row?.[key]
   if (value === null || value === undefined || value === '') return fallback
@@ -1233,6 +1239,8 @@ const GATED_ENDPOINTS = [
   { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
   { label: 'Chat', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
+  { label: 'CSV import preview', method: 'POST', path: '/intake/csv/preview', group: 'connections', detail: 'Dry-run a client CSV: inferred column mapping and per-row validation, no writes.' },
+  { label: 'CSV import commit', method: 'POST', path: '/intake/csv/commit', group: 'connections', detail: 'Idempotent CSV import through the connector pipeline; invalid rows quarantine with provenance.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
   { label: 'Twin observation ingest', method: 'POST', path: '/twin/observations', group: 'connections', detail: 'Tenant-bound derived observation intake; raw media is rejected.' },
   { label: 'Twin onboarding', method: 'POST', path: '/twin/onboarding', group: 'connections', detail: 'Binds one named shop and seeds its tenant-scoped topology.' },
@@ -1485,8 +1493,10 @@ function Sidebar({
   const orderCount = apiToOrderCount || (cover?.transfer_units_recommended ? 1 : 0)
   const sellFirstUnits = Number(intel?.batch_split?.priority_sell_units ?? 0)
   const sellFirstProducts = apiSellFirstCount || (intel?.batch_split && sellFirstUnits > 0 ? 1 : 0)
-  const deliveryShortUnits = Number(intel?.delivery_reconciliation?.missing_units ?? 0)
-  const deliveryIssues = deliveryShortUnits > 0 ? 1 : 0
+  const deliveryIssues = deliveryIssueCount(
+    asArray<DeliveryException>(ops.productAttention.deliveries),
+    intel?.delivery_reconciliation?.missing_units,
+  )
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true
   const coldChainValue = data?.scenario === 'cold_chain' || ops.coldChainEvents.length ? 'review' : coldRunning ? 'live' : coldEnabled ? 'armed' : 'clear'
@@ -2118,11 +2128,7 @@ function WorkspaceScreen({
   // Every individual delivery exception (matches the real per-tenant receiving records), not
   // just the one hero-SKU reconciliation - falls back to that single line only when empty.
   const apiDeliveries = asArray<DeliveryException>(ops.productAttention.deliveries)
-  const deliveryIssues = apiDeliveries.length
-    ? apiDeliveries.filter((item) => Number(item.missing_units ?? 0) > 0).length
-    : Number(delivery?.missing_units ?? 0) > 0
-      ? 1
-      : 0
+  const deliveryIssues = deliveryIssueCount(apiDeliveries, delivery?.missing_units)
   const selectedDelivery = apiDeliveries.find((item) => item.sku === selectedDeliverySku) ?? null
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true

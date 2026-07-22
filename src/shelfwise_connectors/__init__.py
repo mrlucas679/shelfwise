@@ -1,4 +1,11 @@
-from .canonical import InventoryState, ProductMaster, SalesLine, SourceSystem, StockState
+from .canonical import (
+    ExpiryEntry,
+    InventoryState,
+    ProductMaster,
+    SalesLine,
+    SourceSystem,
+    StockState,
+)
 from .catalog import (
     ConnectorCapability,
     connector_status_for_policy,
@@ -34,6 +41,13 @@ from .connectors.systems import (
     map_syspro_inventory,
     map_yoco_checkout,
 )
+from .csv_intake import (
+    CSV_INTAKE_KINDS,
+    CsvIntakeError,
+    CsvPreview,
+    build_records,
+    preview_csv,
+)
 from .gateway import (
     MAX_WEBHOOK_BYTES,
     QuarantineVerdict,
@@ -50,14 +64,18 @@ from .inbound_store import (
 )
 from .normalize import inventory_to_event, record_to_event
 from .provenance import InboundRecord, ValidationResult, raw_payload_hash
-from .validation import validate_inventory, validate_product, validate_sales
+from .validation import validate_expiry, validate_inventory, validate_product, validate_sales
 from .writeback import PostgresTaskWriteBackSink, TaskWriteBackSink, create_writeback_sink
 
 __all__ = [
+    "CSV_INTAKE_KINDS",
     "MAX_WEBHOOK_BYTES",
     "ConnectorCapability",
+    "CsvIntakeError",
+    "CsvPreview",
     "CursorStore",
     "DynamicsBusinessCentralInventoryConnector",
+    "ExpiryEntry",
     "IdentityMap",
     "InMemoryCursorStore",
     "InMemoryInboundRecordStore",
@@ -84,6 +102,7 @@ __all__ = [
     "ValidationResult",
     "WebhookReceiver",
     "YocoCheckoutWebhookReceiver",
+    "build_records",
     "connector_status_for_policy",
     "create_cursor_store",
     "create_inbound_record_store",
@@ -102,10 +121,12 @@ __all__ = [
     "neutralise_formula",
     "neutralise_formula_text",
     "parse_gs1",
+    "preview_csv",
     "quarantine_intake",
     "quarantine_webhook_body",
     "raw_payload_hash",
     "record_to_event",
+    "validate_expiry",
     "validate_inventory",
     "validate_product",
     "validate_sales",

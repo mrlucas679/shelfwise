@@ -82,3 +82,4 @@ reports/*.stderr.log
 reports/*.out.log
 reports/*.err.log
 reports/inference_architecture_eval_*/
+.playwright-cli/
