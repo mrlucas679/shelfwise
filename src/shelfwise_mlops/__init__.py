@@ -6,19 +6,21 @@ from .facts import (
     create_tenant_fact_store,
 )
 from .finetune import export_preference_jsonl, export_sft_jsonl
-from .gate import release_gate as scorecard_release_gate
 from .memory_consolidation import OutcomeRecord, TenantFact, consolidate_outcomes
 from .registry import (
+    EvaluationRecord,
+    InMemoryEvaluationRegistry,
     InMemoryModelRunRegistry,
     InMemoryPromptRegistry,
     ModelRun,
+    PostgresEvaluationRegistry,
     PostgresModelRunRegistry,
     PostgresPromptRegistry,
     PromptVersion,
+    create_evaluation_registry,
     create_model_run_registry,
     create_prompt_registry,
     prompt_sha,
-    release_gate,
 )
 from .routing import ModelRoute, choose_model_route
 from .skills import Skill, SkillStats, activate, draft_skills, to_plan, tombstone_skill
@@ -26,12 +28,15 @@ from .skills import Skill, SkillStats, activate, draft_skills, to_plan, tombston
 __all__ = [
     "AccountabilityReport",
     "CostEstimate",
+    "EvaluationRecord",
+    "InMemoryEvaluationRegistry",
     "InMemoryModelRunRegistry",
     "InMemoryPromptRegistry",
     "InMemoryTenantFactStore",
     "ModelRoute",
     "ModelRun",
     "OutcomeRecord",
+    "PostgresEvaluationRegistry",
     "PostgresModelRunRegistry",
     "PostgresPromptRegistry",
     "PostgresTenantFactStore",
@@ -44,6 +49,7 @@ __all__ = [
     "build_accountability_report",
     "choose_model_route",
     "consolidate_outcomes",
+    "create_evaluation_registry",
     "create_model_run_registry",
     "create_prompt_registry",
     "create_tenant_fact_store",
@@ -54,8 +60,6 @@ __all__ = [
     "export_sft_jsonl",
     "inference_cost",
     "prompt_sha",
-    "release_gate",
-    "scorecard_release_gate",
     "to_plan",
     "tombstone_skill",
 ]

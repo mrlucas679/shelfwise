@@ -8,11 +8,19 @@ shared `twin_service` singleton (`state.py`) and the tenant/write-path dependenc
 from __future__ import annotations
 
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from pydantic import BaseModel
 
 from shelfwise_contracts import Event
-from shelfwise_edge import EdgeObservationBatch, edge_device_registry, verify_signed_body
+from shelfwise_edge import (
+    EdgeDevice,
+    EdgeDeviceRegistrationError,
+    EdgeObservationBatch,
+    edge_device_registry,
+    verify_signed_body,
+)
 from shelfwise_runtime.provenance import DataDomain
 from shelfwise_twin import (
     CalibrationRequest,
@@ -21,7 +29,13 @@ from shelfwise_twin import (
     TwinOnboardingManifest,
 )
 
-from .deps import CURRENT_TENANT_DEP, INGEST_AUTH_DEP, WRITE_LIMIT_DEP, write_path_guard
+from .deps import (
+    CURRENT_TENANT_DEP,
+    INGEST_AUTH_DEP,
+    OWNER_AUTH_DEP,
+    WRITE_LIMIT_DEP,
+    write_path_guard,
+)
 from .state import event_store, scenario_engine, twin_service
 from .tenant import TenantContext
 
@@ -60,6 +74,85 @@ def list_twin_devices(
 ) -> dict[str, object]:
     """Expose device health metadata without exposing signing secrets."""
     return {"devices": edge_device_registry.list_devices(ctx.tenant_id, store_id)}
+
+
+class RegisterEdgeDeviceBody(BaseModel):
+    device_id: str | None = None
+
+
+class SelfServiceOnboardingBody(BaseModel):
+    """Browser-safe store setup body; tenant identity comes from the signed-in owner."""
+
+    model_config = {"extra": "forbid"}
+    store_id: str
+    display_name: str
+    timezone: str = "Africa/Johannesburg"
+    entities: list[dict[str, object]] = []
+
+
+@router.post(
+    "/twin/stores/{store_id}/devices",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def register_twin_device(
+    store_id: str,
+    body: RegisterEdgeDeviceBody,
+    ctx: TenantContext = OWNER_AUTH_DEP,
+) -> dict[str, object]:
+    """Provision a camera/sensor edge device credential for this store.
+
+    The real self-serve entry point for "connect a camera": a camera/sensor system that
+    can push structured, derived events to a webhook (most commercial retail camera/
+    people-counting systems do - this is not a raw-video pipeline) authenticates its
+    HMAC-signed batches against the `device_id`/`hmac_secret` pair returned here. The
+    secret is returned exactly once, in this response only - it is stored encrypted and
+    is never retrievable again, matching the connector-credential pattern.
+    """
+    device_id = (body.device_id or f"edge_{secrets.token_urlsafe(12)}").strip()
+    hmac_secret = secrets.token_bytes(32)
+    try:
+        edge_device_registry.provision(
+            EdgeDevice(
+                device_id=device_id,
+                tenant_id=ctx.tenant_id,
+                store_id=store_id,
+                hmac_secret=hmac_secret,
+            )
+        )
+    except EdgeDeviceRegistrationError as exc:
+        _LOG.error("edge_device_provisioning_unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Device provisioning is not configured",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "device_id": device_id,
+        "store_id": store_id,
+        "hmac_secret": hmac_secret.hex(),
+        "warning": "This secret is shown once and cannot be retrieved again - store it now.",
+    }
+
+
+@router.post(
+    "/twin/stores/{store_id}/devices/{device_id}/revoke",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def revoke_twin_device(
+    store_id: str,
+    device_id: str,
+    ctx: TenantContext = OWNER_AUTH_DEP,
+) -> dict[str, object]:
+    """Disable a device's edge credential without deleting its audit identity."""
+    revoked = edge_device_registry.revoke(
+        device_id,
+        tenant_id=ctx.tenant_id,
+        store_id=store_id,
+    )
+    if not revoked:
+        raise HTTPException(status_code=404, detail="Device not found for this store")
+    return {"device_id": device_id, "active": False}
 
 
 @router.post(
@@ -106,6 +199,28 @@ def onboard_twin(
         raise HTTPException(status_code=403, detail="Onboarding tenant does not match token")
     try:
         return twin_service.onboard(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/twin/onboarding/self-service",
+    dependencies=[Depends(write_path_guard), WRITE_LIMIT_DEP],
+)
+def onboard_twin_self_service(
+    body: SelfServiceOnboardingBody,
+    ctx: TenantContext = OWNER_AUTH_DEP,
+) -> dict[str, object]:
+    """Create a store topology without asking an owner to know the tenant identifier."""
+    try:
+        manifest = TwinOnboardingManifest(
+            tenant_id=ctx.tenant_id,
+            store_id=body.store_id,
+            display_name=body.display_name,
+            timezone=body.timezone,
+            entities=body.entities,
+        )
+        return twin_service.onboard(manifest)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -276,11 +391,16 @@ async def ingest_edge_observations(
 
 
 def _parse_events(rows: list[dict[str, object]]) -> list[Event]:
-    """Parse stored canonical rows while ignoring one malformed historical row safely."""
+    """Parse stored canonical rows while making skipped recovery data observable."""
     events: list[Event] = []
     for row in rows:
         try:
             events.append(Event.parse_wire(row))
-        except ValueError:
+        except ValueError as exc:
+            # Do not log the raw payload: historical records can contain retail or
+            # operational data. The bounded identifier and parse reason are enough to
+            # reconcile an incomplete bootstrap without leaking the record itself.
+            event_id = str(row.get("id") or "unknown")[:100]
+            _LOG.warning("skipping malformed twin bootstrap event id=%s: %s", event_id, exc)
             continue
     return events

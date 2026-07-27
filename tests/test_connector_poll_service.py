@@ -12,6 +12,7 @@ from shelfwise_backend.connector_poll_service import (
 )
 from shelfwise_connectors import (
     InboundRecord,
+    InMemoryConnectorCredentialStore,
     InMemoryCursorStore,
     PollingConnector,
     SourceSystem,
@@ -85,6 +86,57 @@ def test_no_connectors_are_built_when_no_credentials_are_configured(
     connectors = build_configured_connectors(cursors=InMemoryCursorStore(), tenant_id="t1")
 
     assert connectors == []
+
+
+def test_tenant_stored_credentials_take_priority_over_env_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tenant that configures its own Odoo credentials via the credential store must get
+    a connector built from ITS credentials, not the shared env-var default - the real
+    end-to-end proof that per-tenant credential storage actually changes poll behavior,
+    not just that `resolve_connector_credentials` is correct in isolation."""
+    monkeypatch.setenv("SHELFWISE_CREDENTIAL_ENCRYPTION_KEY", "poll-service-test-key")
+    for key, value in _ODOO_VARS.items():
+        monkeypatch.setenv(key, value)
+
+    credential_store = InMemoryConnectorCredentialStore()
+    credential_store.upsert(
+        tenant_id="tenant_with_own_creds",
+        system=SourceSystem.ODOO,
+        fields={
+            "base_url": "https://tenant-own-odoo.example.com",
+            "database": "tenant_db",
+            "uid": "99",
+            "api_key": "tenant-own-secret",
+        },
+    )
+
+    connectors = build_configured_connectors(
+        cursors=InMemoryCursorStore(),
+        tenant_id="tenant_with_own_creds",
+        credential_store=credential_store,
+    )
+
+    assert len(connectors) == 1
+    odoo_connector = connectors[0]
+    assert odoo_connector._base_url == "https://tenant-own-odoo.example.com"
+
+
+def test_tenant_without_stored_credentials_falls_back_to_env_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_CREDENTIAL_ENCRYPTION_KEY", "poll-service-test-key")
+    for key, value in _ODOO_VARS.items():
+        monkeypatch.setenv(key, value)
+
+    connectors = build_configured_connectors(
+        cursors=InMemoryCursorStore(),
+        tenant_id="tenant_without_stored_creds",
+        credential_store=InMemoryConnectorCredentialStore(),
+    )
+
+    assert len(connectors) == 1
+    assert connectors[0]._base_url == _ODOO_VARS["SHELFWISE_CONNECTOR_ODOO_BASE_URL"]
 
 
 def test_a_system_is_only_polled_when_every_one_of_its_env_vars_is_set(

@@ -87,3 +87,69 @@ test('chat answers a direct question using live tools, grounded in real data', a
     timeout: 20_000,
   })
 })
+
+test('a store owner can self-serve connect an ERP system through the real credential API', async ({
+  page,
+}) => {
+  // Drives the actual self-serve "Connect your systems" panel end to end against the
+  // real backend (POST /connectors/{system}/credentials) - the concrete answer to "can a
+  // shop owner just type their API key into the frontend" this panel was built to give.
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Connections/ }).click()
+
+  const panel = page.locator('.workspace-section', { hasText: 'Connect your systems' })
+  await expect(panel).toBeVisible()
+
+  await panel.getByRole('button', { name: /^Odoo/ }).click()
+  await panel.getByLabel('Base URL').fill('https://e2e-shop.odoo.com')
+  await panel.getByLabel('Database').fill('e2e_prod')
+  await panel.getByLabel('User ID').fill('7')
+  await panel.getByLabel('API key').fill('sk_e2e_test_key')
+  await panel.getByRole('button', { name: 'Connect', exact: true }).click()
+
+  await expect(panel.getByRole('button', { name: /^Odoo/ })).toContainText('Connected')
+
+  // The stored value is never echoed back anywhere in the DOM - not on this page, and
+  // not after a reload that re-fetches status from the server.
+  await expect(page.locator('body')).not.toContainText('sk_e2e_test_key')
+  await page.reload()
+  await page.getByRole('button', { name: /^Connections/ }).click()
+  const panelAfterReload = page.locator('.workspace-section', { hasText: 'Connect your systems' })
+  await expect(panelAfterReload.getByRole('button', { name: /^Odoo/ })).toContainText('Connected')
+
+  // Clean up: disconnect so this test is repeatable against a persistent backend.
+  await panelAfterReload.getByRole('button', { name: /^Odoo/ }).click()
+  await panelAfterReload.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(panelAfterReload.getByRole('button', { name: /^Odoo/ })).toContainText('Not connected')
+})
+
+test('a store owner can self-serve register a camera/sensor device credential', async ({
+  page,
+}) => {
+  // Drives the actual self-serve "Connect a camera or sensor" panel end to end against
+  // the real backend (POST /twin/stores/{store_id}/devices) - the concrete answer to "how
+  // do they connect their cameras": a device credential the shop's own camera/sensor
+  // integration signs structured events with, never a raw-video pipeline.
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Store twin/ }).click()
+
+  const panel = page.locator('.workspace-section', { hasText: 'Connect a camera or sensor' })
+  await expect(panel).toBeVisible()
+
+  await panel.getByRole('button', { name: 'Register a new device' }).click()
+
+  const deviceIdField = panel.getByLabel('Device ID')
+  await expect(deviceIdField).toBeVisible()
+  const deviceId = await deviceIdField.inputValue()
+  expect(deviceId.length).toBeGreaterThan(0)
+  const secretField = panel.getByLabel('HMAC secret')
+  expect((await secretField.inputValue()).length).toBeGreaterThan(0)
+
+  await panel.getByRole('button', { name: 'Done' }).click()
+  await expect(panel.getByText(deviceId, { exact: true })).toBeVisible()
+  await expect(panel.getByText('Active', { exact: true })).toBeVisible()
+
+  // Clean up: revoke so this test is repeatable against a persistent backend.
+  await panel.getByRole('button', { name: 'Revoke' }).click()
+  await expect(panel.getByText('Revoked', { exact: true })).toBeVisible()
+})

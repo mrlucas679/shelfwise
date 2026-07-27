@@ -5,11 +5,14 @@ ingestion pipeline every webhook/CSV/manual intake route already uses (injected 
 `process_record`, so this module has no dependency on `app.py`), on an interval, for the
 single tenant this deployment is configured for.
 
-Per-tenant credential storage for real multi-tenant ERP connections is a deliberate,
-explicit non-goal here - see `.env.example`. This deployment is single-tenant
-(`SHELFWISE_TENANT_ID`), matching how `LLM_ROUTINE_BASE_URL` etc. are already configured,
-so credentials are read from environment variables per system rather than a new
-credentials table. A system is polled only when its env vars are completely set; a
+Per-tenant *credential storage* is real now - see `shelfwise_connectors.credentials`
+(encrypted, RLS-scoped). What remains a deliberate, explicit non-goal here is turning this
+single background loop into a per-tenant polling loop: this deployment still polls one
+tenant's connectors per process (`SHELFWISE_TENANT_ID`), and `resolve_connector_credentials`
+lets that one tenant's stored credentials take priority over the env-var fallback - a real
+step toward multi-tenancy, not the full architecture change (N tenants, N poll schedules,
+per-tenant backpressure/failure isolation) that a truly concurrent multi-tenant poll loop
+would need. A system is polled only when its resolved credentials are completely set; a
 partially-configured system is treated as not configured, never as a broken poll.
 """
 
@@ -28,7 +31,9 @@ from shelfwise_connectors import (
     OdooProductConnector,
     PollingConnector,
     SapS4InventoryConnector,
+    SourceSystem,
     SysproInventoryConnector,
+    resolve_connector_credentials,
 )
 
 _LOG = logging.getLogger("shelfwise.connector_poll")
@@ -40,57 +45,124 @@ def connector_poll_enabled() -> bool:
     return os.getenv("CONNECTOR_POLL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def build_configured_connectors(*, cursors: CursorStore, tenant_id: str) -> list[PollingConnector]:
-    """Construct one connector per polling system that has complete env credentials."""
+def _resolved_fields(
+    *,
+    credential_store: Any,
+    tenant_id: str,
+    system: SourceSystem,
+    env_fallback: dict[str, str],
+) -> dict[str, str]:
+    """Resolve one system's credential fields, tenant-stored first, env-var fallback second.
+
+    A field present in `env_fallback` with an empty value is dropped before resolution, so
+    a tenant's stored credentials are used in full even when the env-var fallback is only
+    partially configured (or not configured at all) for that field.
+    """
+    non_blank_fallback = {key: value for key, value in env_fallback.items() if value}
+    if credential_store is None:
+        return non_blank_fallback
+    return resolve_connector_credentials(
+        credential_store,
+        tenant_id=tenant_id,
+        system=system,
+        env_fallback=non_blank_fallback,
+    )
+
+
+def build_configured_connectors(
+    *,
+    cursors: CursorStore,
+    tenant_id: str,
+    credential_store: Any = None,
+) -> list[PollingConnector]:
+    """Construct one connector per polling system with complete resolved credentials.
+
+    `credential_store` is optional and defaults to `None` (env-vars only, the original
+    single-tenant behavior, unchanged) - passing a real store lets this tenant's own stored
+    credentials take priority over the shared env-var defaults, per system.
+    """
     connectors: list[PollingConnector] = []
 
-    odoo_base = os.getenv("SHELFWISE_CONNECTOR_ODOO_BASE_URL", "").strip()
-    odoo_database = os.getenv("SHELFWISE_CONNECTOR_ODOO_DATABASE", "").strip()
-    odoo_uid = os.getenv("SHELFWISE_CONNECTOR_ODOO_UID", "").strip()
-    odoo_api_key = os.getenv("SHELFWISE_CONNECTOR_ODOO_API_KEY", "").strip()
-    if odoo_base and odoo_database and odoo_uid and odoo_api_key:
+    odoo = _resolved_fields(
+        credential_store=credential_store,
+        tenant_id=tenant_id,
+        system=SourceSystem.ODOO,
+        env_fallback={
+            "base_url": os.getenv("SHELFWISE_CONNECTOR_ODOO_BASE_URL", "").strip(),
+            "database": os.getenv("SHELFWISE_CONNECTOR_ODOO_DATABASE", "").strip(),
+            "uid": os.getenv("SHELFWISE_CONNECTOR_ODOO_UID", "").strip(),
+            "api_key": os.getenv("SHELFWISE_CONNECTOR_ODOO_API_KEY", "").strip(),
+        },
+    )
+    if {"base_url", "database", "uid", "api_key"} <= odoo.keys():
         try:
             connectors.append(
                 OdooProductConnector(
                     cursors,
-                    base_url=odoo_base,
-                    database=odoo_database,
-                    uid=int(odoo_uid),
-                    api_key=odoo_api_key,
+                    base_url=odoo["base_url"],
+                    database=odoo["database"],
+                    uid=int(odoo["uid"]),
+                    api_key=odoo["api_key"],
                     tenant_id=tenant_id,
                 )
             )
         except ValueError:
-            _LOG.warning("SHELFWISE_CONNECTOR_ODOO_UID is not an integer - Odoo poll disabled")
+            _LOG.warning("Odoo credential 'uid' is not an integer - Odoo poll disabled")
 
-    sap_base = os.getenv("SHELFWISE_CONNECTOR_SAP_BASE_URL", "").strip()
-    sap_token = os.getenv("SHELFWISE_CONNECTOR_SAP_TOKEN", "").strip()
-    if sap_base and sap_token:
+    sap = _resolved_fields(
+        credential_store=credential_store,
+        tenant_id=tenant_id,
+        system=SourceSystem.SAP,
+        env_fallback={
+            "base_url": os.getenv("SHELFWISE_CONNECTOR_SAP_BASE_URL", "").strip(),
+            "token": os.getenv("SHELFWISE_CONNECTOR_SAP_TOKEN", "").strip(),
+        },
+    )
+    if {"base_url", "token"} <= sap.keys():
         connectors.append(
             SapS4InventoryConnector(
-                cursors, base_url=sap_base, token=sap_token, tenant_id=tenant_id
+                cursors, base_url=sap["base_url"], token=sap["token"], tenant_id=tenant_id
             )
         )
 
-    syspro_base = os.getenv("SHELFWISE_CONNECTOR_SYSPRO_BASE_URL", "").strip()
-    syspro_token = os.getenv("SHELFWISE_CONNECTOR_SYSPRO_TOKEN", "").strip()
-    if syspro_base and syspro_token:
+    syspro = _resolved_fields(
+        credential_store=credential_store,
+        tenant_id=tenant_id,
+        system=SourceSystem.SYSPRO,
+        env_fallback={
+            "base_url": os.getenv("SHELFWISE_CONNECTOR_SYSPRO_BASE_URL", "").strip(),
+            "token": os.getenv("SHELFWISE_CONNECTOR_SYSPRO_TOKEN", "").strip(),
+        },
+    )
+    if {"base_url", "token"} <= syspro.keys():
         connectors.append(
             SysproInventoryConnector(
-                cursors, base_url=syspro_base, token=syspro_token, tenant_id=tenant_id
+                cursors,
+                base_url=syspro["base_url"],
+                token=syspro["token"],
+                tenant_id=tenant_id,
             )
         )
 
-    dynamics_base = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_BASE_URL", "").strip()
-    dynamics_token = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_TOKEN", "").strip()
-    dynamics_location = os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_LOCATION_ID", "").strip()
-    if dynamics_base and dynamics_token and dynamics_location:
+    dynamics = _resolved_fields(
+        credential_store=credential_store,
+        tenant_id=tenant_id,
+        system=SourceSystem.DYNAMICS,
+        env_fallback={
+            "base_url": os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_BASE_URL", "").strip(),
+            "token": os.getenv("SHELFWISE_CONNECTOR_DYNAMICS_TOKEN", "").strip(),
+            "location_id": os.getenv(
+                "SHELFWISE_CONNECTOR_DYNAMICS_LOCATION_ID", ""
+            ).strip(),
+        },
+    )
+    if {"base_url", "token", "location_id"} <= dynamics.keys():
         connectors.append(
             DynamicsBusinessCentralInventoryConnector(
                 cursors,
-                base_url=dynamics_base,
-                token=dynamics_token,
-                location_id=dynamics_location,
+                base_url=dynamics["base_url"],
+                token=dynamics["token"],
+                location_id=dynamics["location_id"],
                 tenant_id=tenant_id,
             )
         )
@@ -109,6 +181,7 @@ class ConnectorPollService:
         tenant_id: str,
         interval_s: float | None = None,
         connector_factory: Callable[[], list[PollingConnector]] | None = None,
+        credential_store: Any = None,
     ) -> None:
         self._process_record = process_record
         self._tenant_id = tenant_id
@@ -122,7 +195,9 @@ class ConnectorPollService:
         )
         self._interval_s = max(5.0, resolved_interval)
         self._connector_factory = connector_factory or (
-            lambda: build_configured_connectors(cursors=cursors, tenant_id=tenant_id)
+            lambda: build_configured_connectors(
+                cursors=cursors, tenant_id=tenant_id, credential_store=credential_store
+            )
         )
         self._task: asyncio.Task | None = None
         self._runs = 0
@@ -168,9 +243,11 @@ class ConnectorPollService:
                 await self.run_once()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception:
                 self._last_status = "crashed"
-                self._last_error = str(exc)[:200]
+                # Connector status is a public diagnostic route. Do not return an
+                # upstream URL, credential-adjacent message, or implementation detail.
+                self._last_error = "poll_failed"
                 _LOG.exception("connector poll run crashed")
             await asyncio.sleep(self._interval_s)
 

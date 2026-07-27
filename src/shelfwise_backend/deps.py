@@ -14,7 +14,9 @@ import os
 
 from fastapi import Depends, Header, HTTPException, Request
 
-from .security.gateway import TokenBucket, rate_limit
+from shelfwise_inference import ProviderKind, load_inference_config
+
+from .security.gateway import TokenBucket, _rate_limit_identity, rate_limit
 from .tenant import Role, TenantContext, default_tenant_context, verify_bearer_token
 
 _INSECURE_APP_ENV_NAMES = {"production", "prod", "staging", "stage"}
@@ -51,6 +53,38 @@ def _env_positive_float(name: str, default: float) -> float:
 def _is_production_deployment() -> bool:
     """Identify named deployments where live AMD inference is mandatory."""
     return os.getenv("APP_ENV", "local").strip().lower() in _PRODUCTION_APP_ENV_NAMES
+
+
+def _chat_data_domain() -> str:
+    """Choose live twin grounding in production while preserving local demo defaults."""
+    configured = os.getenv("SHELFWISE_CHAT_DATA_DOMAIN", "").strip().lower()
+    if configured:
+        if configured not in {"operational_twin", "world_simulation"}:
+            raise RuntimeError(
+                "SHELFWISE_CHAT_DATA_DOMAIN must be operational_twin or world_simulation"
+            )
+        return configured
+    return "operational_twin" if _is_production_deployment() else "world_simulation"
+
+
+def _require_amd_inference() -> None:
+    """Reject non-AMD providers in named deployments before any model request."""
+    if (
+        _is_production_deployment()
+        and load_inference_config().provider is not ProviderKind.VLLM_MI300X
+    ):
+        raise HTTPException(status_code=503, detail="AMD inference is not configured")
+
+
+def _request_timeout_seconds() -> float:
+    """Return the configurable request deadline for real application operation."""
+    ceiling = 900.0
+    raw = os.getenv("SHELFWISE_REQUEST_TIMEOUT_SECONDS", "120")
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 120.0
+    return min(max(value, 1.0), ceiling)
 
 
 def _cookie_secure_setting() -> bool:
@@ -149,10 +183,27 @@ APPROVAL_AUTH_DEP = Depends(APPROVAL_AUTH)
 WORKER_AUTH_DEP = Depends(WORKER_AUTH)
 OWNER_AUTH_DEP = Depends(OWNER_AUTH)
 
+def _write_rate_limit_identity(request: Request) -> str:
+    """Key the write-rate limiter on the verified tenant when one is available.
+
+    The generic `_rate_limit_identity` keys on the shared write API key or the caller's IP -
+    both are shared across every tenant in `jwt` mode (one API key, and tenants can share an
+    egress IP/gateway), so a tenant-blind bucket lets one tenant exhaust another's write
+    budget. `_tenant_id_from_request` already does real JWT verification (falling back to
+    the `__unauthenticated__` sentinel on a bad/missing token, never a real tenant), so a
+    verified tenant gets its own bucket; deployments without `jwt` auth fall back to the
+    original identity (every request already shares one `default_tenant_context` there, so
+    there is no tenant to separate).
+    """
+    if _auth_mode() != "jwt":
+        return _rate_limit_identity(request)
+    return f"tenant:{_tenant_id_from_request(request)}"
+
+
 # Operator knob: unattended harness/soak runs legitimately push write rates far past
 # interactive-use defaults. Defaults stay identical when the env vars are unset.
 write_limiter = TokenBucket(
     capacity=_env_positive_int("SHELFWISE_WRITE_RATE_CAPACITY", 240),
     refill_per_s=_env_positive_float("SHELFWISE_WRITE_RATE_REFILL_PER_S", 8.0),
 )
-WRITE_LIMIT_DEP = Depends(rate_limit(write_limiter))
+WRITE_LIMIT_DEP = Depends(rate_limit(write_limiter, identity=_write_rate_limit_identity))

@@ -243,6 +243,34 @@ def test_expired_lot_is_blocked_instead_of_counted_as_sell_first() -> None:
     assert "blocked" in item["attention_reasons"]
 
 
+def test_malformed_lot_does_not_break_product_attention_or_claim_complete_evidence() -> None:
+    item = _product_item(
+        {
+            "sku": "SKU-LOTS",
+            "name": "Milk",
+            "category": "Dairy",
+            "supplier": "Supplier",
+            "unit_price": 20,
+            "unit_cost": 10,
+        },
+        {
+            "sku": "SKU-LOTS",
+            "on_hand": 12,
+            "reorder_point": 4,
+            "expiry_date": "2026-07-15",
+            "batches": [
+                {"lot_id": "LOT-BAD", "on_hand": 7, "expiry_date": "not-a-date"},
+                {"lot_id": "LOT-GOOD", "on_hand": 5, "expiry_date": "2026-07-14"},
+            ],
+        },
+        as_of=date(2026, 7, 13),
+    )
+
+    assert [batch["lot_id"] for batch in item["batches"]] == ["LOT-GOOD"]
+    assert item["has_batch_evidence"] is False
+    assert "missing_batch_expiry" in item["attention_reasons"]
+
+
 def test_product_item_exposes_operational_signals_and_policy_expiry_window() -> None:
     item = _product_item(
         {

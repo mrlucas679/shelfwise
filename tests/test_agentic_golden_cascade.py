@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from shelfwise_action import create_decision_store
 from shelfwise_backend import agentic_cascade as agentic_cascade_module
 from shelfwise_backend.agentic_cascade import (
     AgenticCascadeError,
+    ExecutionContext,
     _bounded_conclusion,
     run_golden_cascade_via_agents,
 )
@@ -134,7 +136,10 @@ def _scripted_messages(sku: str, on_hand: str, profit: str) -> list[dict[str, An
         ),
         _final_message(
             {
-                "conclusion": "Route the markdown to the store manager for approval.",
+                "conclusion": (
+                    f"Routing to the store manager: {on_hand} units on hand and the "
+                    f"simulated incremental profit of R{profit} support the markdown."
+                ),
                 "confidence": 0.85,
                 "recommended_action_type": "apply_markdown",
             }
@@ -273,6 +278,52 @@ def test_agentic_golden_cascade_rejects_a_conclusion_that_cites_no_real_numbers(
         )
 
 
+def test_agentic_golden_cascade_rejects_an_agreeing_executives_ungrounded_conclusion() -> None:
+    """When the critic actually passes, the executive's word is what gets trusted forward
+    (no override applies) - so an executive that agrees with `apply_markdown` but never
+    cites the critic's real computed figures must be rejected, not silently accepted just
+    because the routed action happens to match what the critic recommended.
+    """
+    tools, decisions, memory, facts = _build_tools()
+    sku, on_hand, profit = _hero_markdown_profit(facts)
+    messages = [
+        _tool_call_message("call_1", "get_stock", {"sku": sku}),
+        _tool_call_message("call_2", "simulate_markdown", {"sku": sku, "discount_pct": 0.2}),
+        _final_message(
+            {
+                "conclusion": (
+                    f"{on_hand} units on hand and a simulated incremental profit of "
+                    f"R{profit} support a markdown."
+                ),
+                "confidence": 0.87,
+                "critic_passed": True,
+                "requires_human_review": True,
+            }
+        ),
+        _final_message(
+            {
+                "conclusion": "Looks fine, approving it.",
+                "confidence": 0.85,
+                "recommended_action_type": "apply_markdown",
+            }
+        ),
+    ]
+    runtime = _FakeRuntime(messages)
+
+    def factory() -> AgentOrchestrator:
+        return AgentOrchestrator(tools=tools, model_runtime=runtime)
+
+    with pytest.raises(AgenticCascadeError, match="get_stock"):
+        run_golden_cascade_via_agents(
+            event=None,
+            execution_mode=ExecutionMode.OFFLINE_TEST,
+            decisions=decisions,
+            memory=memory,
+            facts=facts,
+            orchestrator_factory=factory,
+        )
+
+
 def test_agentic_golden_cascade_caps_max_tokens_and_reports_a_token_budget_receipt() -> None:
     """SLO-fit finding (2026-07-14 forensic audit): golden's prior 800-token verdict default
     made it arithmetically unable to finish inside the 30s hackathon ceiling at the measured
@@ -333,7 +384,10 @@ def test_agentic_golden_cascade_bounds_a_long_critic_conclusion_before_the_execu
         ),
         _final_message(
             {
-                "conclusion": "Route the markdown to the store manager for approval.",
+                "conclusion": (
+                    f"Routing to the store manager: {on_hand} units on hand and the "
+                    f"simulated incremental profit of R{profit} support the markdown."
+                ),
                 "confidence": 0.85,
                 "recommended_action_type": "apply_markdown",
             }
@@ -415,7 +469,7 @@ def test_agentic_golden_decision_economics_shows_real_recovered_value_not_zero()
     real economics-attachment function against a real agentic result and checked its
     output (found 2026-07-15 by distrusting a run that reported 0 failures).
     """
-    from shelfwise_backend.app import _attach_decision_governance
+    from shelfwise_backend.decision_governance import attach_decision_governance
 
     tools, decisions, memory, facts = _build_tools()
     sku, on_hand, profit = _hero_markdown_profit(facts)
@@ -433,7 +487,7 @@ def test_agentic_golden_decision_economics_shows_real_recovered_value_not_zero()
         orchestrator_factory=factory,
     )
 
-    _attach_decision_governance(result)
+    attach_decision_governance(result)
 
     economics = result["decision"]["economics"]
     assert economics["recovered"]["minor_units"] > 0, (
@@ -479,7 +533,7 @@ def test_agentic_golden_cascade_threads_the_caller_audit_log_into_its_tools(
         memory=memory,
         facts=facts,
         orchestrator_factory=factory,
-        audit=shared_audit,
+        execution=ExecutionContext(audit=shared_audit),
     )
 
     assert captured["audit"] is shared_audit
@@ -572,3 +626,24 @@ def test_critic_gate_lets_an_agreeing_executive_route_forward_untouched() -> Non
         "executive_action_type": "apply_markdown",
         "override_applied": False,
     }
+
+
+def test_server_evidence_overrides_a_critic_that_approves_a_loss() -> None:
+    """A grounded conclusion alone cannot authorize a loss-making markdown."""
+    from shelfwise_backend.agentic_cascade import (
+        _markdown_evidence_supports_action,
+        _server_verified_critic_passed,
+    )
+
+    tool_calls = (
+        SimpleNamespace(
+            name="simulate_markdown",
+            result={"incremental_profit": {"minor_units": -5000}},
+        ),
+    )
+
+    assert _markdown_evidence_supports_action(tool_calls) is False
+    assert _server_verified_critic_passed(
+        reported=True,
+        evidence_supports_action=_markdown_evidence_supports_action(tool_calls),
+    ) is False

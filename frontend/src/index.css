@@ -77,6 +77,82 @@ input {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Login: shown only for real jwt-mode deployments with no session cookie  */
+/* yet - see LoginScreen in App.tsx.                                       */
+/* ---------------------------------------------------------------------- */
+.login-screen {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 28px;
+}
+
+.login-mark {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 20px;
+  text-align: center;
+}
+
+.login-card .muted {
+  text-align: center;
+  margin: 0 0 8px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--mute);
+}
+
+.login-field input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.login-field input:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
+.login-error {
+  margin: 0;
+  color: var(--risk);
+  font-size: 12.5px;
+}
+
+.login-card .btn {
+  margin-top: 4px;
+  width: 100%;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------------- */
 /* App shell: persistent sidebar + main column (chat). Desktop puts them   */
 /* side by side; mobile makes the sidebar a full overlay (see @media).     */
 /* ---------------------------------------------------------------------- */
@@ -602,6 +678,34 @@ input {
 
 .workspace-list {
   border-top: 1px solid var(--border);
+}
+
+.connector-credential-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.connector-credential-row:last-child {
+  border-bottom: none;
+}
+
+.connector-credential-row .workspace-row {
+  border-bottom: none;
+}
+
+.connector-credential-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 16px;
+}
+
+.connector-credential-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.connector-credential-actions .btn {
+  width: auto;
 }
 
 .workspace-row {

@@ -42,7 +42,30 @@ def test_scenario_isolated_from_reported_state() -> None:
     assert result["reported_state_untouched"] is True
     properties = service.store.list_properties("t", store_id="s")
     assert any(item.lane is StateLane.REPORTED and item.value == 10 for item in properties)
-    assert any(item.lane is StateLane.PREDICTED and item.value == 30 for item in properties)
+    # PREDICTED rows are excluded from the default read - they must not silently contaminate
+    # operational reads (get_store/fidelity/snapshot) - only visible via include_predicted=True.
+    assert not any(item.lane is StateLane.PREDICTED for item in properties)
+    all_properties = service.store.list_properties("t", store_id="s", include_predicted=True)
+    assert any(item.lane is StateLane.PREDICTED and item.value == 30 for item in all_properties)
+
+
+def test_get_store_and_fidelity_are_not_contaminated_by_scenario_predictions() -> None:
+    """`get_store`/`fidelity` are served as the tenant's real operational readout - a
+    scenario what-if run for this store must never change what they report, or the
+    digital-twin dashboard and the fidelity score used for governance gating would be
+    silently computed over a mix of real reported facts and hypothetical values."""
+    service = _service()
+    before = service.get_store("t", "s")
+    ScenarioEngine(service).create("t", "s", ScenarioRequest(
+        branch_id="replenish", deltas=[ScenarioDelta(
+            twin_id="urn:shelfwise:t:s:product:milk", property_name="inventory.stock", value=30,
+        )],
+    ))
+    after = service.get_store("t", "s")
+
+    assert after["properties"] == before["properties"]
+    assert after["fidelity"] == before["fidelity"]
+    assert not any(item["lane"] == StateLane.PREDICTED.value for item in after["properties"])
 
 
 def test_scenario_rejects_unknown_entity() -> None:

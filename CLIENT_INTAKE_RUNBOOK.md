@@ -45,7 +45,12 @@ this runbook shrinking.
    idempotent migrations; verify `/health` and `/readiness` report every lifespan
    service green.
 
-## 2. Load the client's data (CSV intake)
+## 2. Load the client's data (browser-led CSV intake)
+
+The normal client path is now the **Connections** workspace: choose Products, Stock, Expiry,
+or Sales; select the CSV file; preview the inferred mapping and validation result; then import
+the approved file. Owners do not need curl, a database login, or an environment-file edit. The
+API details below remain the recovery/automation contract, not the required client workflow.
 
 The API is the product path: `POST /intake/csv/preview` then `POST /intake/csv/commit`
 (ingest-role key or owner JWT). Order matters — products first so identity resolution
@@ -78,13 +83,25 @@ Notes that matter:
 
 ## 3. Onboard the physical store (twin)
 
+The normal client path is now the **Store Twin → Set up your store** form. It asks only for the
+store name and store ID, derives the tenant from the signed-in owner, and creates the initial
+store record without exposing an internal tenant identifier. The API form below remains useful
+for automated or advanced topology imports.
+
 1. `POST /twin/onboarding` with the store's fixtures: fridges, freezers, shelves,
    backroom (type + label is enough to start).
 2. Verify the operations workspace renders the topology and the fidelity receipt.
-3. If the client is on Yoco/Square/Shopify/Lightspeed, configure the connector
-   credentials (`SHELFWISE_CONNECTOR_*`) and enable the poll loop
-   (`CONNECTOR_POLL_ENABLED=1`) so ongoing sales flow without CSVs; CSV remains the
-   backfill and fallback path.
+3. If the client is on Odoo/SAP/SYSPRO/Dynamics Business Central (poll-based ERP), the
+   *client's own owner login* can now self-serve connect it: sign in, open Connections,
+   click the system, enter its credentials. Stored encrypted (`shelfwise_connectors.
+   credentials`, requires `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` set on the stack), no
+   operator involvement needed. The `SHELFWISE_CONNECTOR_*` env vars remain a shared
+   fallback default if you'd rather configure it yourself instead. Either way, enable the
+   poll loop (`CONNECTOR_POLL_ENABLED=1`).
+   If the client is on Yoco/Square/Shopify/Lightspeed (webhook-based POS), those still
+   need operator-side setup - they authenticate inbound webhooks via a shared secret you
+   configure for them, not a credential the owner enters themselves.
+   CSV remains the backfill and fallback path either way.
 
 ## 4. Acceptance before the client touches it
 

@@ -125,6 +125,8 @@ class InMemoryCandidateStore:
             updated = deepcopy(record)
             updated["decision_id"] = decision_id
             updated["status"] = "pending"
+            updated["suppression_reason"] = None
+            updated["suppressed_until"] = None
             updated["updated_at"] = _timestamp(None)
             self._records[(tenant_id, candidate_key)] = updated
             self._history.record(updated, reason="linked_decision")
@@ -181,13 +183,18 @@ class PostgresCandidateStore:
     def upsert(self, candidate: FleetCandidate, *, now: datetime | None = None) -> dict[str, Any]:
         """Insert or refresh a candidate while preserving lifecycle state."""
         timestamp = _timestamp(now)
-        existing = self.get(candidate.tenant_id, candidate.candidate_key)
-        record = _base_record(candidate, timestamp)
-        reason = "observed"
-        if existing is not None:
-            record = _merge_observation(existing, record, timestamp)
-            reason = None if existing["status"] == record["status"] else "status_changed"
         with self._connect(candidate.tenant_id) as conn:
+            _lock_candidate(conn, candidate.tenant_id, candidate.candidate_key)
+            row = conn.execute(
+                "select * from shelfwise_candidates where tenant_id = %s and candidate_key = %s",
+                (candidate.tenant_id, candidate.candidate_key),
+            ).fetchone()
+            existing = _record_from_row(row) if row else None
+            record = _base_record(candidate, timestamp)
+            reason = "observed"
+            if existing is not None:
+                record = _merge_observation(existing, record, timestamp)
+                reason = None if existing["status"] == record["status"] else "status_changed"
             conn.execute(
                 """
                 insert into shelfwise_candidates
@@ -254,22 +261,31 @@ class PostgresCandidateStore:
         """Persist a time-bounded suppression without reopening terminal records."""
         if not reason.strip():
             raise ValueError("suppression reason is required")
-        current = self.get(tenant_id, candidate_key)
-        if (
-            current is None
-            or current["status"] in TERMINAL_CANDIDATE_STATUSES
-            or current.get("decision_id")
-        ):
-            return current
-        current.update(
-            {
-                "status": "suppressed",
-                "suppression_reason": reason.strip(),
-                "suppressed_until": _timestamp(until),
-                "updated_at": _timestamp(None),
-            }
-        )
-        return self._save(current, reason="suppressed")
+        with self._connect(tenant_id) as conn:
+            _lock_candidate(conn, tenant_id, candidate_key)
+            row = conn.execute(
+                "select * from shelfwise_candidates where tenant_id = %s and candidate_key = %s",
+                (tenant_id, candidate_key),
+            ).fetchone()
+            current = _record_from_row(row) if row else None
+            if (
+                current is None
+                or current["status"] in TERMINAL_CANDIDATE_STATUSES
+                or current.get("decision_id")
+            ):
+                return current
+            current.update(
+                {
+                    "status": "suppressed",
+                    "suppression_reason": reason.strip(),
+                    "suppressed_until": _timestamp(until),
+                    "updated_at": _timestamp(None),
+                }
+            )
+            _update_candidate_row(conn, current)
+            conn.commit()
+        self._history.record(current, reason="suppressed")
+        return current
 
     def link_decision(
         self, tenant_id: str, candidate_key: str, decision_id: str
@@ -277,17 +293,30 @@ class PostgresCandidateStore:
         """Link a candidate to an existing decision without duplicating it."""
         if not decision_id.strip():
             raise ValueError("decision_id is required")
-        current = self.get(tenant_id, candidate_key)
-        if current is None:
-            return None
-        if current["status"] in TERMINAL_CANDIDATE_STATUSES:
-            return current
-        if current.get("decision_id"):
-            return current
-        current.update(
-            {"decision_id": decision_id, "status": "pending", "updated_at": _timestamp(None)}
-        )
-        return self._save(current, reason="linked_decision")
+        with self._connect(tenant_id) as conn:
+            _lock_candidate(conn, tenant_id, candidate_key)
+            row = conn.execute(
+                "select * from shelfwise_candidates where tenant_id = %s and candidate_key = %s",
+                (tenant_id, candidate_key),
+            ).fetchone()
+            current = _record_from_row(row) if row else None
+            if current is None or current["status"] in TERMINAL_CANDIDATE_STATUSES:
+                return current
+            if current.get("decision_id"):
+                return current
+            current.update(
+                {
+                    "decision_id": decision_id,
+                    "status": "pending",
+                    "suppression_reason": None,
+                    "suppressed_until": None,
+                    "updated_at": _timestamp(None),
+                }
+            )
+            _update_candidate_row(conn, current)
+            conn.commit()
+        self._history.record(current, reason="linked_decision")
+        return current
 
     def list(
         self,
@@ -324,30 +353,6 @@ class PostgresCandidateStore:
             conn.execute("delete from shelfwise_candidates")
             conn.commit()
         self._history.clear()
-
-    def _save(self, record: dict[str, Any], *, reason: str) -> dict[str, Any]:
-        with self._connect(record["tenant_id"]) as conn:
-            conn.execute(
-                """
-                update shelfwise_candidates
-                set status = %s, evidence = %s, updated_at = %s,
-                    suppression_reason = %s, suppressed_until = %s, decision_id = %s
-                where tenant_id = %s and candidate_key = %s
-                """,
-                (
-                    record["status"],
-                    jsonb(record["evidence"]),
-                    record["updated_at"],
-                    record["suppression_reason"],
-                    record["suppressed_until"],
-                    record["decision_id"],
-                    record["tenant_id"],
-                    record["candidate_key"],
-                ),
-            )
-            conn.commit()
-        self._history.record(record, reason=reason)
-        return record
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -413,6 +418,36 @@ def _timestamp(value: datetime | None) -> str:
 def _validate_status(status: str | None) -> None:
     if status is not None and status not in CANDIDATE_STATUSES:
         raise ValueError(f"unsupported candidate status: {status}")
+
+
+def _lock_candidate(conn: Any, tenant_id: str, candidate_key: str) -> None:
+    """Serialize one candidate's state transitions across application replicas."""
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"{tenant_id}\x1f{candidate_key}",),
+    )
+
+
+def _update_candidate_row(conn: Any, record: dict[str, Any]) -> None:
+    """Persist one transition while the caller holds that candidate's transaction lock."""
+    conn.execute(
+        """
+        update shelfwise_candidates
+        set status = %s, evidence = %s, updated_at = %s,
+            suppression_reason = %s, suppressed_until = %s, decision_id = %s
+        where tenant_id = %s and candidate_key = %s
+        """,
+        (
+            record["status"],
+            jsonb(record["evidence"]),
+            record["updated_at"],
+            record["suppression_reason"],
+            record["suppressed_until"],
+            record["decision_id"],
+            record["tenant_id"],
+            record["candidate_key"],
+        ),
+    )
 
 
 def _row_values(record: dict[str, Any]) -> tuple[Any, ...]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from collections.abc import Callable
 from difflib import SequenceMatcher
@@ -9,6 +10,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from shelfwise_mlops import EvaluationRecord, create_evaluation_registry
 from shelfwise_runtime import durable_dir
 
 from .collator import apply_chat_template, messages_for_prompt
@@ -18,6 +20,31 @@ from .dataset import TrainingRow, load_training_rows
 from .runtime import timestamped_run_dir, write_json
 
 AnswerGenerator = Callable[[list[dict[str, str]]], str]
+
+
+_STOPWORDS = {
+    "a", "an", "the", "to", "of", "in", "on", "for", "and", "or", "is", "are",
+    "be", "with", "at", "by", "from", "this", "that", "it", "as",
+}
+
+
+def _contains_word(lower: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\b", lower) is not None
+
+
+def _phrase_covered(lower: str, phrase: str, threshold: float = 0.6) -> bool:
+    """Whether `phrase`'s content words are substantially present, as whole words, in `lower`.
+
+    Replaces a prior first-two-tokens-only substring check that let a generated answer
+    satisfy an entire reference action/finding by containing just its first two (often
+    generic) words. Requires a majority of the phrase's non-stopword tokens to actually
+    appear as whole words, so a partial or generic overlap no longer counts as a match.
+    """
+    tokens = [token for token in phrase.split() if token not in _STOPWORDS]
+    if not tokens:
+        return True
+    hits = sum(1 for token in tokens if _contains_word(lower, token))
+    return (hits / len(tokens)) >= threshold
 
 
 def _score(row: TrainingRow, generated: str) -> dict[str, Any]:
@@ -31,26 +58,26 @@ def _score(row: TrainingRow, generated: str) -> dict[str, Any]:
         item.description.lower().split(" ")[0] for item in row.evidence if item.description
     ]
     missing_detected = not missing or "missing" in lower or any(
-        any(part in lower for part in item.split()[:2]) for item in missing
+        _phrase_covered(lower, item) for item in missing
     )
     return {
-        "risk_classification": "pass" if risk in lower else "review",
+        "risk_classification": "pass" if _contains_word(lower, risk) else "review",
         "missing_info_detection": "pass" if missing_detected else "review",
         "hallucination_check": "review"
         if "guarantee" in lower or "certain" in lower
         else "pass",
         "actionability_score": round(
-            sum(1 for action in actions if any(part in lower for part in action.split()[:2]))
+            sum(1 for action in actions if _phrase_covered(lower, action))
             / max(len(actions), 1),
             2,
         ),
         "evidence_grounding_score": round(
-            sum(1 for term in grounded_terms if term and term in lower)
+            sum(1 for term in grounded_terms if term and _contains_word(lower, term))
             / max(len(grounded_terms), 1),
             2,
         ),
         "finding_recall": round(
-            sum(1 for finding in findings if any(part in lower for part in finding.split()[:2]))
+            sum(1 for finding in findings if _phrase_covered(lower, finding))
             / max(len(findings), 1),
             2,
         ),
@@ -287,6 +314,16 @@ def run_evaluation(
         inference_performed=inference_performed,
         generation_source=generation_source,
     )
+    tenant_id = os.getenv("SHELFWISE_TENANT_ID", "local").strip() or "local"
+    evaluation = create_evaluation_registry().record(
+        EvaluationRecord(
+            id=f"evaluation:{run_dir.name}",
+            tenant_id=tenant_id,
+            pass_rate=summary["risk_accuracy"],
+            gate_passed=bool(summary["gate"]["passed"]),
+        )
+    )
+    summary["evaluation"] = evaluation.to_dict()
     write_json(run_dir / "eval_summary.json", summary)
     lines = [
         "# ShelfWise Gemma 4 Multimodal Eval",

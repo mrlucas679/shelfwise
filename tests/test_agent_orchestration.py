@@ -673,3 +673,22 @@ def test_tool_choice_is_none_when_no_tools_registered() -> None:
     )
 
     assert runtime.requests[0]["tool_choice"] is None
+
+
+def test_agent_rejects_an_overflowing_context_before_model_transport() -> None:
+    runtime = _FakeRuntime([{"role": "assistant", "content": '{"risk":"low","action":"noop"}'}])
+    orchestrator = AgentOrchestrator(tools=[], model_runtime=runtime)
+
+    with pytest.raises(AgentOrchestrationError, match="context exceeds"):
+        asyncio.run(
+            orchestrator.run(
+                role="inventory",
+                system="x" * 4_000,
+                user="y" * 4_000,
+                final_schema=_schema(),
+                max_tokens=100,
+                max_context_tokens=100,
+            )
+        )
+
+    assert runtime.requests == []

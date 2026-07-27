@@ -9,10 +9,12 @@ from shelfwise_edge import edge_device_registry
 os.environ["SHELFWISE_TENANT_ID"] = "sa_retail_demo"
 
 from shelfwise_backend.app import (
+    account_store,
     candidate_store,
     chat_store,
     cold_chain_feed,
     decision_store,
+    evaluation_registry,
     event_bus,
     event_store,
     inbound_record_store,
@@ -58,9 +60,11 @@ def _reset_demo_stores() -> None:
     edge_device_registry.clear()
     tool_audit.clear()
     model_run_registry.clear()
+    evaluation_registry.clear()
     prompt_registry.clear()
     tenant_fact_store.clear()
     tenant_profile_store.clear()
+    account_store.clear()
     writeback_sink.clear()
     worldgen_run_store.clear()
     cold_chain_feed.clear()

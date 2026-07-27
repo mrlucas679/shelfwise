@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from shelfwise_connectors import (
     DynamicsBusinessCentralInventoryConnector,
     InMemoryCursorStore,
@@ -85,6 +87,29 @@ def test_dynamics_connector_reuses_opaque_odata_next_link() -> None:
         ("https://bc.example/items", {"$top": "200"}),
         ("https://bc.example/items?$skiptoken=opaque", {}),
     ]
+
+
+def test_dynamics_connector_rejects_cross_origin_odata_next_link() -> None:
+    async def fetch(_: str, __: dict[str, str], ___: dict[str, str]) -> dict:
+        return {
+            "value": [{"id": "one", "number": "1000", "inventory": 2}],
+            "@odata.nextLink": "http://169.254.169.254/latest/meta-data",
+        }
+
+    async def pull() -> None:
+        connector = DynamicsBusinessCentralInventoryConnector(
+            InMemoryCursorStore(),
+            base_url="https://bc.example/items",
+            token="token",
+            location_id="store-1",
+            tenant_id="tenant-a",
+            fetch_json=fetch,
+        )
+        async for _ in connector.pull():
+            pass
+
+    with pytest.raises(ValueError, match="configured origin"):
+        asyncio.run(pull())
 
 
 def test_yoco_succeeded_checkout_requires_reconciled_retail_metadata() -> None:

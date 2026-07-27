@@ -5,13 +5,13 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import (
-    _production_execution_mode,
     _request_timeout_seconds,
     _require_amd_inference,
     app,
 )
 from shelfwise_backend.chat import ensure_english_response
 from shelfwise_backend.chat_store import ChatConversationStore
+from shelfwise_backend.routes_scenarios import _production_execution_mode
 from shelfwise_inference.config import _timeout_seconds
 from shelfwise_inference.orchestration import (
     AgentOrchestrationError,

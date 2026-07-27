@@ -270,10 +270,14 @@ def _product_item(
     recent_daily_units: Iterable[Any] = (),
     source: str = "generated_world",
 ) -> dict[str, Any]:
-    batches = _batch_items(stock, as_of=as_of)
+    batches, has_complete_batch_evidence = _batch_items(stock, as_of=as_of)
     policy = resolve_product_policy(product.get("category"), product.get("physics"))
     expiry_date = min((item["expiry_date"] for item in batches), default=stock["expiry_date"])
-    days_to_expiry = min((item["days_to_expiry"] for item in batches), default=0)
+    stock_expiry = date.fromisoformat(str(stock["expiry_date"]))
+    days_to_expiry = min(
+        (item["days_to_expiry"] for item in batches),
+        default=(stock_expiry - as_of).days,
+    )
     on_hand = int(stock["on_hand"])
     reorder_point = int(stock["reorder_point"])
     low_stock = on_hand <= reorder_point
@@ -292,50 +296,25 @@ def _product_item(
         and on_hand / average_daily_units >= 30
         and on_hand > reorder_point
     )
-    missing_batch_expiry = not (
-        isinstance(stock.get("batches"), list) and stock.get("batches")
+    missing_batch_expiry = not has_complete_batch_evidence
+    blocked_units, sell_first_units, normal_units = _inventory_classification(batches, on_hand)
+    reasons = _attention_reasons(
+        sell_first_units=sell_first_units,
+        expiring=expiring,
+        blocked_units=blocked_units,
+        low_stock=low_stock,
+        supplier_delay=supplier_delay,
+        slow_mover=slow_mover,
+        overstock=overstock,
+        missing_batch_expiry=missing_batch_expiry,
     )
-    blocked_units = sum(
-        int(item["on_hand"]) for item in batches if int(item["days_to_expiry"]) < 0
+    attention_summary = _attention_summary(
+        days_to_expiry=days_to_expiry,
+        sell_first_units=sell_first_units,
+        blocked_units=blocked_units,
+        on_hand=on_hand,
+        reorder_point=reorder_point,
     )
-    sell_first_units = sum(
-        int(item["on_hand"])
-        for item in batches
-        if 0 <= int(item["days_to_expiry"]) <= 3
-    )
-    normal_units = max(on_hand - sell_first_units - blocked_units, 0)
-
-    reasons: list[str] = []
-    if sell_first_units > 0:
-        reasons.append("sell_first")
-    if expiring:
-        reasons.append("expiring")
-    if blocked_units > 0:
-        reasons.append("blocked")
-    if low_stock:
-        reasons.append("low_stock")
-    if supplier_delay:
-        reasons.append("supplier_delay")
-    if slow_mover:
-        reasons.append("slow_mover")
-    elif overstock:
-        reasons.append("overstock")
-    if missing_batch_expiry:
-        reasons.append("missing_batch_expiry")
-
-    detail_parts = []
-    if days_to_expiry < 0:
-        detail_parts.append(f"expired {abs(days_to_expiry)} days ago")
-    elif days_to_expiry == 0:
-        detail_parts.append("expires today")
-    else:
-        detail_parts.append(f"{days_to_expiry} days to expiry")
-    if sell_first_units > 0:
-        detail_parts.append(f"{sell_first_units} sell-first units")
-    if blocked_units > 0:
-        detail_parts.append(f"{blocked_units} blocked units")
-    detail_parts.append(f"{on_hand} on hand")
-    detail_parts.append(f"reorder at {reorder_point}")
 
     return {
         "sku": product["sku"],
@@ -348,7 +327,7 @@ def _product_item(
         "supplier_recent_delay": supplier_delay,
         "supplier_lead_time_days": (supplier or {}).get("lead_time_days"),
         "supplier_available_units": int((supplier or {}).get("available_units") or 0),
-        "has_batch_evidence": not missing_batch_expiry,
+        "has_batch_evidence": has_complete_batch_evidence,
         "policy": {
             "id": policy.policy_id,
             "expiry_review_days": policy.expiry_review_days,
@@ -369,7 +348,7 @@ def _product_item(
         "days_to_expiry": days_to_expiry,
         "requires_attention": bool(reasons),
         "attention_reasons": reasons,
-        "attention_summary": " · ".join(detail_parts),
+        "attention_summary": attention_summary,
         "sell_first_units": sell_first_units,
         "normal_units": normal_units,
         "blocked_units": blocked_units,
@@ -379,9 +358,81 @@ def _product_item(
     }
 
 
-def _batch_items(stock: dict[str, Any], *, as_of: date) -> list[dict[str, Any]]:
-    """Return bounded lot-level evidence, with a compatibility row for old snapshots."""
+def _inventory_classification(
+    batches: Iterable[dict[str, Any]], on_hand: int
+) -> tuple[int, int, int]:
+    """Split stock into expired, sell-first, and normal units from lot evidence."""
+    blocked_units = sum(
+        int(item["on_hand"]) for item in batches if int(item["days_to_expiry"]) < 0
+    )
+    sell_first_units = sum(
+        int(item["on_hand"])
+        for item in batches
+        if 0 <= int(item["days_to_expiry"]) <= 3
+    )
+    return blocked_units, sell_first_units, max(on_hand - sell_first_units - blocked_units, 0)
+
+
+def _attention_reasons(
+    *,
+    sell_first_units: int,
+    expiring: bool,
+    blocked_units: int,
+    low_stock: bool,
+    supplier_delay: bool,
+    slow_mover: bool,
+    overstock: bool,
+    missing_batch_expiry: bool,
+) -> list[str]:
+    """Return attention reasons in stable operational-priority order."""
+    reasons: list[str] = []
+    if sell_first_units > 0:
+        reasons.append("sell_first")
+    if expiring:
+        reasons.append("expiring")
+    if blocked_units > 0:
+        reasons.append("blocked")
+    if low_stock:
+        reasons.append("low_stock")
+    if supplier_delay:
+        reasons.append("supplier_delay")
+    if slow_mover:
+        reasons.append("slow_mover")
+    elif overstock:
+        reasons.append("overstock")
+    if missing_batch_expiry:
+        reasons.append("missing_batch_expiry")
+    return reasons
+
+
+def _attention_summary(
+    *,
+    days_to_expiry: int,
+    sell_first_units: int,
+    blocked_units: int,
+    on_hand: int,
+    reorder_point: int,
+) -> str:
+    """Create the concise, human-readable inventory attention explanation."""
+    if days_to_expiry < 0:
+        expiry_detail = f"expired {abs(days_to_expiry)} days ago"
+    elif days_to_expiry == 0:
+        expiry_detail = "expires today"
+    else:
+        expiry_detail = f"{days_to_expiry} days to expiry"
+    detail_parts = [expiry_detail]
+    if sell_first_units > 0:
+        detail_parts.append(f"{sell_first_units} sell-first units")
+    if blocked_units > 0:
+        detail_parts.append(f"{blocked_units} blocked units")
+    detail_parts.extend((f"{on_hand} on hand", f"reorder at {reorder_point}"))
+    return " · ".join(detail_parts)
+
+
+def _batch_items(stock: dict[str, Any], *, as_of: date) -> tuple[list[dict[str, Any]], bool]:
+    """Return valid lot evidence and whether the source supplied a complete lot list."""
     raw_batches = stock.get("batches")
+    has_complete_batch_evidence = isinstance(raw_batches, list) and bool(raw_batches)
     if not isinstance(raw_batches, list) or not raw_batches:
         raw_batches = [
             {
@@ -394,18 +445,27 @@ def _batch_items(stock: dict[str, Any], *, as_of: date) -> list[dict[str, Any]]:
     batches: list[dict[str, Any]] = []
     for raw in raw_batches:
         if not isinstance(raw, dict):
+            has_complete_batch_evidence = False
             continue
-        expiry = date.fromisoformat(str(raw["expiry_date"]))
+        try:
+            expiry = date.fromisoformat(str(raw["expiry_date"]))
+            quantity = int(raw.get("on_hand") or 0)
+        except (KeyError, TypeError, ValueError):
+            has_complete_batch_evidence = False
+            continue
+        if quantity < 0:
+            has_complete_batch_evidence = False
+            continue
         batches.append(
             {
                 "lot_id": str(raw.get("lot_id") or raw.get("lot") or "unknown"),
-                "on_hand": int(raw.get("on_hand") or 0),
+                "on_hand": quantity,
                 "expiry_date": expiry.isoformat(),
                 "received_date": raw.get("received_date"),
                 "days_to_expiry": (expiry - as_of).days,
             }
         )
-    return batches
+    return batches, has_complete_batch_evidence
 
 
 def _attention_sort(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

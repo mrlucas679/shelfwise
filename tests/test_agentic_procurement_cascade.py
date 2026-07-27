@@ -196,7 +196,7 @@ def test_approving_an_agentic_reorder_produces_real_learning_and_economics() -> 
     procurement, one of the store positions the product is required to cover for real, not
     as a demo slice (found 2026-07-15 by distrusting a run that reported 0 failures).
     """
-    from shelfwise_backend.app import _attach_decision_governance
+    from shelfwise_backend.decision_governance import attach_decision_governance
 
     tools, decisions, memory, facts = _build_tools()
     sku, order_units, supplier_id = _hero_procurement_facts(facts)
@@ -225,7 +225,7 @@ def test_approving_an_agentic_reorder_produces_real_learning_and_economics() -> 
         "record zero exposure because procurement had no learning-metric route at all"
     )
 
-    _attach_decision_governance(result)
+    attach_decision_governance(result)
     economics = result["decision"]["economics"]
     assert economics["recovered"]["minor_units"] > 0
 

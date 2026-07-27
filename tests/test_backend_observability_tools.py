@@ -5,13 +5,13 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import (
-    _demo_event,
     app,
     decision_store,
     learning_store,
     tool_audit,
     world_facts,
 )
+from shelfwise_backend.routes_scenarios import _demo_event
 from shelfwise_backend.tenant import default_tenant_context
 from shelfwise_backend.tools.mcp_surface import (
     PlatformTool,

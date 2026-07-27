@@ -45,6 +45,23 @@ def test_cold_chain_feed_service_starts_records_and_cancels(monkeypatch) -> None
     assert service.status()["running"] is False
 
 
+def test_cold_chain_feed_service_records_and_logs_runner_failure(monkeypatch, caplog) -> None:
+    async def runner(*args, **kwargs):
+        raise RuntimeError("upstream sensor unavailable")
+
+    async def run() -> ColdChainFeedService:
+        service = ColdChainFeedService(feed_runner=runner)
+        monkeypatch.setenv("COLD_CHAIN_FEED_ENABLED", "true")
+        await service.start()
+        await asyncio.sleep(0)
+        return service
+
+    service = asyncio.run(run())
+
+    assert service.status()["last_error"] == "feed_failed"
+    assert "cold-chain feed stopped unexpectedly" in caplog.text
+
+
 def test_cold_chain_feed_endpoint_exposes_buffered_messages() -> None:
     client = TestClient(app)
 

@@ -1,4 +1,9 @@
-"""Canonical open-order state derived from shipment observations."""
+"""Shipment-backed inbound-order reconciliation ledger.
+
+This module records observed supplier shipments and receiving progress. It intentionally
+does not create, approve, or transmit purchase orders; callers use its remaining-quantity
+coverage only to avoid duplicate replenishment recommendations.
+"""
 
 from __future__ import annotations
 
@@ -15,14 +20,14 @@ from shelfwise_storage.rls import apply_tenant_rls
 
 
 class InMemoryOpenOrderStore:
-    """Tenant-scoped open-order ledger for the memory runtime."""
+    """Tenant-scoped inbound-shipment reconciliation ledger for the memory runtime."""
 
     def __init__(self) -> None:
         self._lock = Lock()
         self._orders: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     def observe_event(self, event: Event) -> dict[str, Any] | None:
-        """Upsert a shipment observation and return its canonical order state."""
+        """Upsert a shipment observation and return its derived receiving state."""
         payload = _shipment_payload(event)
         if payload is None:
             return None
@@ -82,7 +87,7 @@ class InMemoryOpenOrderStore:
 
 
 class PostgresOpenOrderStore:
-    """Durable shipment/order ledger protected by tenant RLS."""
+    """Durable shipment-receiving ledger protected by tenant RLS."""
 
     def __init__(self, database_url: str) -> None:
         if not database_url:
@@ -117,6 +122,8 @@ class PostgresOpenOrderStore:
                     source_event_id = excluded.source_event_id,
                     updated_at = excluded.updated_at,
                     payload = excluded.payload
+                where shelfwise_open_orders.updated_at <= excluded.updated_at
+                returning payload
                 """,
                 (
                     record["tenant_id"],
@@ -134,8 +141,15 @@ class PostgresOpenOrderStore:
                     jsonb(record),
                 ),
             )
+            row = conn.execute(
+                """
+                select payload from shelfwise_open_orders
+                where tenant_id = %s and data_domain = %s and order_id = %s
+                """,
+                (event.tenant_id, event.data_domain.value, payload["order_id"]),
+            ).fetchone()
             conn.commit()
-        return record
+        return deepcopy(row["payload"]) if row else record
 
     def list(
         self, tenant_id: str, *, data_domain: str | None = None, limit: int = 500
@@ -211,7 +225,7 @@ class PostgresOpenOrderStore:
 
 
 def create_open_order_store() -> InMemoryOpenOrderStore | PostgresOpenOrderStore:
-    """Create the order ledger using the existing storage backend switch."""
+    """Create the inbound-shipment ledger using the configured storage backend."""
     backend = os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower()
     if backend == "memory":
         return InMemoryOpenOrderStore()

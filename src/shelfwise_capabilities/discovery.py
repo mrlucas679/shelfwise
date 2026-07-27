@@ -183,11 +183,19 @@ def _discover_workflows(root: Path) -> list[WorkflowCapability]:
 
 
 def _discover_openapi_routes(root: Path) -> list[OpenAPIRouteCapability]:
-    """Discover route decorators and router prefixes as OpenAPI pairs."""
+    """Discover route decorators and router prefixes as OpenAPI pairs.
+
+    Every `APIRouter` split out of `app.py` (see `routes_twin.py`'s and
+    `routes_catalog.py`'s own docstrings for that ongoing extraction) must be
+    scannable here or its routes silently vanish from the capability manifest
+    while still working at runtime - exactly the trap a hardcoded file list sets
+    for the next extraction. Glob `routes_*.py` instead of naming each one, so a
+    future `routes_foo.py` is picked up automatically.
+    """
     paths = (
         root / "src/shelfwise_backend/app.py",
         root / "src/shelfwise_backend/intelligence_api.py",
-        root / "src/shelfwise_backend/routes_twin.py",
+        *sorted((root / "src/shelfwise_backend").glob("routes_*.py")),
         root / "src/shelfwise_multimodal/router.py",
     )
     feature_by_path = {

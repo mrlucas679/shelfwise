@@ -84,7 +84,9 @@ class ScenarioEngine:
         }
         predicted = [
             item
-            for item in self.service.store.list_properties(tenant_id, store_id=store_id)
+            for item in self.service.store.list_properties(
+                tenant_id, store_id=store_id, include_predicted=True
+            )
             if item.lane is StateLane.PREDICTED and item.scenario_branch_id == branch_id
         ]
         rows = []

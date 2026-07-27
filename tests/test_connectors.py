@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -191,6 +193,20 @@ def test_quarantine_neutralises_spreadsheet_formula_injection() -> None:
     assert "'+SUM" in verdict.text
     assert neutralise_formula("@cmd") == "'@cmd"
     assert neutralise_formula("plain") == "plain"
+
+
+def test_quarantine_preserves_quoted_fields_containing_commas() -> None:
+    """A naive `line.split(",")` would corrupt this quoted field before the real CSV
+    parser downstream ever sees it - it must come through as one cell, not two."""
+    verdict = quarantine_intake(
+        b'sku,note\n4011,"Smith, John"\n',
+        claimed_mime="text/csv",
+    )
+
+    assert verdict.accepted is True
+    assert verdict.text is not None
+    rows = list(csv.reader(io.StringIO(verdict.text)))
+    assert rows[1] == ["4011", "Smith, John"]
 
 
 def test_quarantine_caps_webhook_bodies() -> None:

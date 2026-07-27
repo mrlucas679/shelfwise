@@ -318,6 +318,7 @@ class AgentOrchestrator:
         require_tool_call_first: bool = False,
         required_tool_names: Sequence[str] = (),
         deadline: float | None = None,
+        max_context_tokens: int | None = None,
     ) -> AgentRunResult:
         """Run from a system/user prompt and return one validated agent answer.
 
@@ -360,6 +361,7 @@ class AgentOrchestrator:
             require_tool_call_first=require_tool_call_first,
             required_tool_names=required_tool_names,
             deadline=deadline,
+            max_context_tokens=max_context_tokens,
         )
 
     async def run_messages(
@@ -376,6 +378,7 @@ class AgentOrchestrator:
         require_tool_call_first: bool = False,
         required_tool_names: Sequence[str] = (),
         deadline: float | None = None,
+        max_context_tokens: int | None = None,
     ) -> AgentRunResult:
         """Run a bounded tool loop from pre-built OpenAI-compatible messages.
 
@@ -387,6 +390,8 @@ class AgentOrchestrator:
         `deadline` is a `time.monotonic()` timestamp. See `CascadeDeadlineExceeded`.
         """
         normalized_role = _normalized_role(role)
+        if max_context_tokens is not None and max_context_tokens < 1:
+            raise ValueError("max_context_tokens must be positive")
         effective_correlation_id = correlation_id or f"agent_{uuid4().hex[:16]}"
         schema_name = final_schema_name or f"{normalized_role}_answer"
         answer_response_format = _final_response_format(
@@ -456,6 +461,13 @@ class AgentOrchestrator:
             forcing_tool_call = tool_choice == "required" or isinstance(tool_choice, dict)
             turn_response_format = (
                 _TEXT_RESPONSE_FORMAT if forcing_tool_call else answer_response_format
+            )
+            _enforce_context_budget(
+                messages=conversation,
+                tools=openai_tools,
+                response_format=turn_response_format,
+                max_tokens=max_tokens,
+                max_context_tokens=max_context_tokens,
             )
             result = self._runtime.complete(
                 role=normalized_role,
@@ -653,6 +665,29 @@ def _deepcopy_json(value: Any) -> Any:
     if isinstance(value, list):
         return [_deepcopy_json(item) for item in value]
     return value
+
+
+def _enforce_context_budget(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    tools: Sequence[Mapping[str, Any]],
+    response_format: Mapping[str, Any],
+    max_tokens: int,
+    max_context_tokens: int | None,
+) -> None:
+    """Reject an agent turn before transport when its full request exceeds the model window."""
+    if max_context_tokens is None:
+        return
+    payload = {
+        "messages": list(messages),
+        "tools": list(tools),
+        "response_format": dict(response_format),
+    }
+    estimated_input = max(1, (len(json.dumps(payload, default=str)) + 3) // 4)
+    if estimated_input + max_tokens > max_context_tokens:
+        raise AgentOrchestrationError(
+            "agent context exceeds the configured model window before inference"
+        )
 
 
 def _normalized_role(role: str) -> str:

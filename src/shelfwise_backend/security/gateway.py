@@ -96,16 +96,6 @@ class TokenBucket:
         return len(self._buckets)
 
 
-def rate_limit(bucket: TokenBucket):
-    """Build a FastAPI dependency that throttles write-path callers."""
-
-    async def dependency(request: Request) -> None:
-        if not bucket.allow(_rate_limit_identity(request)):
-            raise HTTPException(status_code=429, detail="rate limit exceeded; slow down")
-
-    return dependency
-
-
 def _rate_limit_identity(request: Request) -> str:
     """Key the limiter on a verified identity, never an unverified client-supplied header.
 
@@ -119,3 +109,19 @@ def _rate_limit_identity(request: Request) -> str:
     if expected and supplied == expected:
         return f"key:{supplied}"
     return f"ip:{request.client.host if request.client else 'anon'}"
+
+
+def rate_limit(bucket: TokenBucket, *, identity=_rate_limit_identity):
+    """Build a FastAPI dependency that throttles write-path callers.
+
+    `identity` defaults to the shared-secret/IP resolver above, but callers with a verified
+    per-tenant identity (see `deps.py`'s `WRITE_LIMIT_DEP`) should pass a tenant-aware
+    resolver instead - keying every tenant on the same shared write API key or a shared
+    egress IP lets one tenant exhaust another's write budget.
+    """
+
+    async def dependency(request: Request) -> None:
+        if not bucket.allow(identity(request)):
+            raise HTTPException(status_code=429, detail="rate limit exceeded; slow down")
+
+    return dependency

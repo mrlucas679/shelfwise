@@ -138,27 +138,27 @@ class PostgresProductCatalogStore:
         return payload
 
     def upsert_identifier(self, identifier: ProductIdentifier) -> dict[str, Any]:
+        """Insert/update an identifier mapping, rejecting a conflicting one atomically.
+
+        A prior version checked for a conflict with a `select` and only then ran the
+        `insert ... on conflict do update` - a classic check-then-act race: a concurrent
+        writer could insert a different `variant_id` for the same key between the select
+        and the insert, and the unconditional `do update` would silently overwrite it,
+        defeating the exact guard `ConflictingIdentifierError` exists to enforce. The `where`
+        clause on `do update` makes the write itself a no-op whenever the existing row maps
+        to a different variant, so the database - not a race-prone two-step check in Python -
+        is what decides whether the write happens.
+        """
         with self._connect(identifier.tenant_id) as conn:
-            existing = conn.execute(
-                """
-                select variant_id from shelfwise_product_identifiers
-                where tenant_id = %s and kind = %s and value = %s
-                """,
-                (identifier.tenant_id, identifier.kind, identifier.value),
-            ).fetchone()
-            if existing is not None and existing["variant_id"] != identifier.variant_id:
-                raise ConflictingIdentifierError(
-                    f"{identifier.kind}={identifier.value!r} is already mapped to variant "
-                    f"{existing['variant_id']!r}, not {identifier.variant_id!r} - resolve the "
-                    "conflict explicitly (human review) instead of silently overwriting it"
-                )
-            conn.execute(
+            row = conn.execute(
                 """
                 insert into shelfwise_product_identifiers
                     (tenant_id, kind, value, variant_id, source_system)
                 values (%s, %s, %s, %s, %s)
                 on conflict (tenant_id, kind, value) do update
                 set variant_id = excluded.variant_id, source_system = excluded.source_system
+                where shelfwise_product_identifiers.variant_id = excluded.variant_id
+                returning variant_id
                 """,
                 (
                     identifier.tenant_id,
@@ -167,7 +167,22 @@ class PostgresProductCatalogStore:
                     identifier.variant_id,
                     identifier.source_system,
                 ),
-            )
+            ).fetchone()
+            if row is None:
+                existing = conn.execute(
+                    """
+                    select variant_id from shelfwise_product_identifiers
+                    where tenant_id = %s and kind = %s and value = %s
+                    """,
+                    (identifier.tenant_id, identifier.kind, identifier.value),
+                ).fetchone()
+                conn.commit()
+                existing_variant_id = existing["variant_id"] if existing else None
+                raise ConflictingIdentifierError(
+                    f"{identifier.kind}={identifier.value!r} is already mapped to variant "
+                    f"{existing_variant_id!r}, not {identifier.variant_id!r} - resolve the "
+                    "conflict explicitly (human review) instead of silently overwriting it"
+                )
             conn.commit()
         return identifier.to_dict()
 

@@ -199,7 +199,7 @@ def test_agentic_cold_chain_decision_economics_shows_real_recovered_value_not_ze
     movement was fixed, because nothing had ever run the real economics-attachment
     function against a real agentic result and checked its output.
     """
-    from shelfwise_backend.app import _attach_decision_governance
+    from shelfwise_backend.decision_governance import attach_decision_governance
 
     tools, decisions, memory, facts = _build_tools()
     runtime = _FakeRuntime(_scripted_messages())
@@ -216,7 +216,7 @@ def test_agentic_cold_chain_decision_economics_shows_real_recovered_value_not_ze
         orchestrator_factory=factory,
     )
 
-    _attach_decision_governance(result)
+    attach_decision_governance(result)
 
     economics = result["decision"]["economics"]
     assert economics["recovered"]["minor_units"] > 0

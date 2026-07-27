@@ -9,7 +9,7 @@ from shelfwise_resilience.feed import ColdChainFeed
 from shelfwise_resilience.ingest import MONNIT_MAP, normalize
 from shelfwise_resilience.simulate import SIM_START, FridgeSpec, PowerScenario, simulate_site
 from shelfwise_resilience.telemetry import GeneratorState, PowerState, SignalKind, Transport
-from shelfwise_resilience.thermal import PROFILES, predict_time_to_unsafe
+from shelfwise_resilience.thermal import PROFILES, ColdChainProfile, predict_time_to_unsafe
 from shelfwise_resilience.valuation import spoilage_probability, stock_at_risk
 
 CHILLED = PROFILES["chilled"]
@@ -72,6 +72,18 @@ def test_predictor_forecasts_unsafe_before_it_happens():
     assert prediction.slope_c_per_min > 0
     assert 0 < prediction.minutes_to_unsafe < 30
     assert predict_time_to_unsafe(_readings_from_minute(OK, minute=10)[:6], profile=CHILLED) is None
+
+
+def test_cold_chain_profile_rejects_an_inverted_safety_threshold():
+    """`safe_max_c` must be strictly below `unsafe_above_c` - an inverted profile lets a
+    reading `_status` still classifies "safe" produce a self-contradictory prediction
+    (`minutes_to_unsafe` already at/past zero) from `predict_time_to_unsafe`."""
+    import pytest
+
+    with pytest.raises(ValueError, match="safe_max_c"):
+        ColdChainProfile(name="broken", safe_max_c=10.0, unsafe_above_c=5.0)
+    with pytest.raises(ValueError, match="safe_max_c"):
+        ColdChainProfile(name="degenerate", safe_max_c=5.0, unsafe_above_c=5.0)
 
 
 def test_diagnosis_truth_table():

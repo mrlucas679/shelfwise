@@ -17,6 +17,7 @@ Closes two previously-sequenced phases with REAL capabilities, not stubs:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import suppress
 from typing import Any
@@ -24,6 +25,7 @@ from typing import Any
 from .worker.plans import Capability, CapabilityRegistry, Plan, PlanRunner, PlanStep
 
 _FIDELITY_TASK_THRESHOLD = 60.0
+_LOG = logging.getLogger("shelfwise.fidelity_revalidation")
 
 
 def build_capability_registry(*, writeback_sink: Any, twin_service: Any) -> CapabilityRegistry:
@@ -248,7 +250,8 @@ class FidelityRevalidationService:
                 await asyncio.sleep(self._poll_s)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception:
                 self._last_status = "crashed"
-                self._last_error = str(exc)[:200]
+                self._last_error = "fidelity_revalidation_failed"
+                _LOG.exception("fidelity revalidation service crashed")
                 await asyncio.sleep(self._poll_s)

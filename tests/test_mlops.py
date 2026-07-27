@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from decimal import Decimal
 
@@ -9,6 +8,8 @@ from fastapi.testclient import TestClient
 from shelfwise_backend.app import app, decision_store, learning_store, tenant_fact_store
 from shelfwise_contracts import Money
 from shelfwise_mlops import (
+    EvaluationRecord,
+    InMemoryEvaluationRegistry,
     InMemoryModelRunRegistry,
     InMemoryPromptRegistry,
     InMemoryTenantFactStore,
@@ -28,8 +29,6 @@ from shelfwise_mlops import (
     export_sft_jsonl,
     inference_cost,
     prompt_sha,
-    release_gate,
-    scorecard_release_gate,
     to_plan,
     tombstone_skill,
 )
@@ -58,6 +57,16 @@ def test_model_run_registry_records_runs_per_tenant() -> None:
     assert registry.list(data_domain="world_simulation") == [run]
     assert registry.list(data_domain="operational_twin") == []
     assert registry.list()[0].to_dict()["created_at"]
+
+
+def test_evaluation_registry_is_tenant_scoped_and_immutable() -> None:
+    registry = InMemoryEvaluationRegistry()
+    stored = registry.record(
+        EvaluationRecord("eval_1", "tenant_1", pass_rate=0.9, gate_passed=True)
+    )
+
+    assert registry.get("eval_1", tenant_id="tenant_1") == stored
+    assert registry.get("eval_1", tenant_id="other") is None
 
 
 def test_prompt_registry_records_hash_backed_versions_per_agent() -> None:
@@ -192,46 +201,6 @@ def test_routing_keeps_critic_and_high_risk_actions_on_strong_model() -> None:
     assert critic.model == "strong"
     assert inventory.model == "strong"
     assert demand.model == "small"
-
-
-def test_release_gate_blocks_missing_or_regressed_metrics() -> None:
-    passed = release_gate(
-        {"golden_pass_rate": Decimal("0.98")},
-        {"golden_pass_rate": Decimal("0.99")},
-    )
-    failed = release_gate(
-        {"golden_pass_rate": Decimal("0.90")},
-        {"golden_pass_rate": Decimal("0.99"), "critic_rejection_rate": Decimal("1.0")},
-    )
-
-    assert passed["passed"] is True
-    assert failed["passed"] is False
-    assert "golden_pass_rate" in failed["regressions"]
-    assert failed["regressions"]["critic_rejection_rate"] == "missing"
-
-
-def test_scorecard_release_gate_blocks_category_regression() -> None:
-    failed, reasons = asyncio.run(
-        scorecard_release_gate(
-            {
-                "pass_rate": Decimal("0.97"),
-                "by_category": {"expiry": Decimal("0.95"), "stockout": Decimal("0.85")},
-            }
-        )
-    )
-    passed, passed_reasons = asyncio.run(
-        scorecard_release_gate(
-            {
-                "pass_rate": Decimal("0.98"),
-                "by_category": {"expiry": Decimal("0.97"), "stockout": Decimal("0.96")},
-            }
-        )
-    )
-
-    assert failed is False
-    assert any("stockout" in reason for reason in reasons)
-    assert passed is True
-    assert passed_reasons == []
 
 
 def test_export_sft_and_preference_jsonl_are_labeled_synthetic(tmp_path) -> None:

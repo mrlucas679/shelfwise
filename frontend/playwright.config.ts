@@ -50,6 +50,11 @@ export default defineConfig({
       env: {
         SHELFWISE_STORE_BACKEND: 'memory',
         SHELFWISE_TENANT_ID: 'sa_retail_demo',
+        // Required to store/read connector credentials (shelfwise_connectors.credentials
+        // fails closed with no default) - the E2E connector-credentials test exercises
+        // that real write path, so this must be set for it to run at all, matching what a
+        // real deployment's own SHELFWISE_CREDENTIAL_ENCRYPTION_KEY would provide.
+        SHELFWISE_CREDENTIAL_ENCRYPTION_KEY: 'e2e-test-only-key-not-for-production',
       },
       timeout: 60_000,
     },

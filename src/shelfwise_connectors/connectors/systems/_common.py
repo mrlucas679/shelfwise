@@ -104,7 +104,8 @@ async def http_get_json(
 ) -> dict[str, Any]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S) as client:
+    # Poll credentials must never follow a redirect to a different origin.
+    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S, follow_redirects=False) as client:
         response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         body = response.json()
@@ -118,7 +119,8 @@ async def http_post_json(
 ) -> dict[str, Any]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S) as client:
+    # JSON-RPC credentials are in the body, so keep redirects disabled here too.
+    async with httpx.AsyncClient(timeout=_DEFAULT_HTTP_TIMEOUT_S, follow_redirects=False) as client:
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         body = response.json()

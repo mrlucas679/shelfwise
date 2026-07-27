@@ -160,12 +160,12 @@
       "relationships": [],
       "sources": [
         {
-          "line": 374,
+          "line": 409,
           "path": "src/shelfwise_backend/agentic_cascade.py",
           "symbol": "AgentOrchestrator"
         },
         {
-          "line": 606,
+          "line": 668,
           "path": "src/shelfwise_backend/chat.py",
           "symbol": "AgentOrchestrator"
         },
@@ -957,7 +957,7 @@
       ],
       "sources": [
         {
-          "line": 3578,
+          "line": 1,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "_record_pipeline_event"
         }
@@ -982,7 +982,7 @@
       ],
       "sources": [
         {
-          "line": 3578,
+          "line": 1,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "_record_pipeline_event"
         }
@@ -1211,7 +1211,7 @@
       ],
       "sources": [
         {
-          "line": 1076,
+          "line": 1091,
           "path": "frontend/src/App.tsx",
           "symbol": "ApprovalPanel"
         }
@@ -1236,7 +1236,7 @@
       ],
       "sources": [
         {
-          "line": 3126,
+          "line": 3486,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -1261,7 +1261,7 @@
       ],
       "sources": [
         {
-          "line": 1165,
+          "line": 1180,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1286,7 +1286,7 @@
       ],
       "sources": [
         {
-          "line": 1166,
+          "line": 1181,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1311,7 +1311,7 @@
       ],
       "sources": [
         {
-          "line": 1164,
+          "line": 1179,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1340,13 +1340,33 @@
       ],
       "sources": [
         {
-          "line": 1167,
+          "line": 1183,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
       ],
       "status": "verified",
       "surface": "operations",
+      "verification_nodeids": [
+        "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
+        "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
+      ]
+    },
+    {
+      "id": "frontend_surface:people",
+      "kind": "frontend_surface",
+      "name": "People",
+      "note": null,
+      "relationships": [],
+      "sources": [
+        {
+          "line": 1182,
+          "path": "frontend/src/App.tsx",
+          "symbol": "WorkspaceSurface"
+        }
+      ],
+      "status": "verified",
+      "surface": "people",
       "verification_nodeids": [
         "tests/test_frontend_attention_contracts.py::test_sidebar_is_attention_entrypoint_not_catalogue_browser",
         "tests/test_frontend_route_coverage.py::test_frontend_route_registries_only_reference_backend_schema_methods"
@@ -1369,7 +1389,7 @@
       ],
       "sources": [
         {
-          "line": 1160,
+          "line": 1175,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1398,7 +1418,7 @@
       ],
       "sources": [
         {
-          "line": 1168,
+          "line": 1184,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1423,7 +1443,7 @@
       ],
       "sources": [
         {
-          "line": 1163,
+          "line": 1178,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1448,7 +1468,7 @@
       ],
       "sources": [
         {
-          "line": 1158,
+          "line": 1173,
           "path": "frontend/src/App.tsx",
           "symbol": "SidebarPage"
         }
@@ -1473,7 +1493,7 @@
       ],
       "sources": [
         {
-          "line": 1162,
+          "line": 1177,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1493,7 +1513,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1161,
+          "line": 1176,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1586,6 +1606,28 @@
       ]
     },
     {
+      "id": "openapi_route:get:/accounts",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /accounts",
+      "note": null,
+      "operation_id": "list_work_accounts",
+      "path": "/accounts",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 435,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "list_work_accounts"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
       "id": "openapi_route:get:/candidates/{candidate_key}/history",
       "kind": "openapi_route",
       "method": "GET",
@@ -1596,7 +1638,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1046,
+          "line": 1064,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "candidate_history"
         }
@@ -1618,8 +1660,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1665,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 73,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "list_products"
         }
       ],
@@ -1640,8 +1682,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1670,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 78,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "get_product"
         }
       ],
@@ -1662,8 +1704,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1701,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 109,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "list_product_variants"
         }
       ],
@@ -1684,8 +1726,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1734,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 142,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "resolve_product_identifier"
         }
       ],
@@ -1706,7 +1748,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1156,
+          "line": 1174,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_chat_conversations"
         }
@@ -1728,7 +1770,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1177,
+          "line": 1195,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_chat_conversation"
         }
@@ -1750,7 +1792,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1545,
+          "line": 1579,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_cold_chain_feed"
         }
@@ -1772,8 +1814,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1638,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 45,
+          "path": "src/shelfwise_backend/routes_connectors.py",
           "symbol": "list_inbound_records"
         }
       ],
@@ -1794,8 +1836,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1625,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 32,
+          "path": "src/shelfwise_backend/routes_connectors.py",
           "symbol": "list_tenant_connectors"
         }
       ],
@@ -1816,7 +1858,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2003,
+          "line": 1868,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "connector_poll_status"
         }
@@ -1838,9 +1880,31 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1620,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 27,
+          "path": "src/shelfwise_backend/routes_connectors.py",
           "symbol": "list_connector_systems"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:get:/connectors/{system}/credentials",
+      "kind": "openapi_route",
+      "method": "GET",
+      "name": "GET /connectors/{system}/credentials",
+      "note": null,
+      "operation_id": "list_connector_credential_status",
+      "path": "/connectors/{system}/credentials",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 30,
+          "path": "src/shelfwise_backend/routes_connector_credentials.py",
+          "symbol": "list_connector_credential_status"
         }
       ],
       "status": "verified",
@@ -1860,7 +1924,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 853,
+          "line": 871,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "seed_summary"
         }
@@ -1882,7 +1946,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3085,
+          "line": 1916,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_decisions"
         }
@@ -1904,7 +1968,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3265,
+          "line": 2096,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_decision"
         }
@@ -1926,7 +1990,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1138,
+          "line": 1156,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "detective_root_cause_sql"
         }
@@ -1948,7 +2012,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1117,
+          "line": 1135,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "detective_root_cause"
         }
@@ -1970,7 +2034,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1026,
+          "line": 1044,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_events"
         }
@@ -1992,7 +2056,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1064,
+          "line": 1082,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_bus_events"
         }
@@ -2014,7 +2078,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 666,
+          "line": 684,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "health"
         }
@@ -2036,7 +2100,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 730,
+          "line": 748,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_config"
         }
@@ -2058,7 +2122,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 780,
+          "line": 798,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_readiness"
         }
@@ -2080,7 +2144,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 807,
+          "line": 825,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "inference_smoke"
         }
@@ -2102,7 +2166,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3132,
+          "line": 1963,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_inventory_positions"
         }
@@ -2124,7 +2188,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3097,
+          "line": 1928,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "learning_summary"
         }
@@ -2146,8 +2210,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2016,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 92,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "accountability_report"
         }
       ],
@@ -2168,8 +2232,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1570,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 68,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "list_model_runs"
         }
       ],
@@ -2190,8 +2254,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2042,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 118,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "observability_snapshot"
         }
       ],
@@ -2212,8 +2276,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2009,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 85,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "list_prompt_versions"
         }
       ],
@@ -2234,8 +2298,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2264,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 391,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "list_skill_manifests"
         }
       ],
@@ -2256,8 +2320,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2209,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 336,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "list_mined_skills"
         }
       ],
@@ -2278,8 +2342,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2115,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 191,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "list_tenant_facts"
         }
       ],
@@ -2300,7 +2364,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 879,
+          "line": 897,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "product_attention"
         }
@@ -2322,7 +2386,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 906,
+          "line": 924,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "product_search"
         }
@@ -2344,7 +2408,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 676,
+          "line": 694,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "readiness"
         }
@@ -2366,8 +2430,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2986,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 899,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain_get"
         }
       ],
@@ -2388,8 +2452,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2952,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 862,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_critic_rejection_get"
         }
       ],
@@ -2410,8 +2474,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2698,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 592,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden_get"
         }
       ],
@@ -2432,8 +2496,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2964,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 875,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement_get"
         }
       ],
@@ -2454,8 +2518,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2974,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 886,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales_get"
         }
       ],
@@ -2476,8 +2540,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1550,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 492,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "list_worldgen_runs"
         }
       ],
@@ -2498,8 +2562,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1562,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 504,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "get_worldgen_run"
         }
       ],
@@ -2520,8 +2584,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2991,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 904,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_worldgen_drill"
         }
       ],
@@ -2542,7 +2606,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 785,
+          "line": 803,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "submission_readiness"
         }
@@ -2564,7 +2628,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1587,
+          "line": 1584,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_tenant_profile"
         }
@@ -2586,7 +2650,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1504,
+          "line": 1538,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_platform_tools"
         }
@@ -2608,7 +2672,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1530,
+          "line": 1564,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_platform_tool_audit"
         }
@@ -2630,7 +2694,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1086,
+          "line": 1104,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "get_trace"
         }
@@ -2652,7 +2716,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1102,
+          "line": 1120,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_traces"
         }
@@ -2674,7 +2738,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 160,
+          "line": 275,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_entity"
         }
@@ -2696,7 +2760,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 208,
+          "line": 323,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_fidelity"
         }
@@ -2718,7 +2782,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 172,
+          "line": 287,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "list_twin_observations"
         }
@@ -2740,7 +2804,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 113,
+          "line": 228,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_store_twin"
         }
@@ -2762,7 +2826,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 56,
+          "line": 70,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "list_twin_devices"
         }
@@ -2784,7 +2848,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 83,
+          "line": 176,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "compare_twin_scenario"
         }
@@ -2806,7 +2870,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 126,
+          "line": 241,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "get_twin_snapshot"
         }
@@ -2828,7 +2892,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2363,
+          "line": 1883,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_worker_runs"
         }
@@ -2850,7 +2914,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2354,
+          "line": 1874,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_schedules"
         }
@@ -2872,7 +2936,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2379,
+          "line": 1899,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "worker_status"
         }
@@ -2894,9 +2958,97 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3116,
+          "line": 1947,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "list_writeback_tasks"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/accounts",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /accounts",
+      "note": null,
+      "operation_id": "create_work_account",
+      "path": "/accounts",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 441,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "create_work_account"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/accounts/{account_id}/deactivate",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /accounts/{account_id}/deactivate",
+      "note": null,
+      "operation_id": "deactivate_work_account",
+      "path": "/accounts/{account_id}/deactivate",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 469,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "deactivate_work_account"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/accounts/{account_id}/reactivate",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /accounts/{account_id}/reactivate",
+      "note": null,
+      "operation_id": "reactivate_work_account",
+      "path": "/accounts/{account_id}/reactivate",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 481,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "reactivate_work_account"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/accounts/{account_id}/role",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /accounts/{account_id}/role",
+      "note": null,
+      "operation_id": "change_work_account_role",
+      "path": "/accounts/{account_id}/role",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 493,
+          "path": "src/shelfwise_backend/app.py",
+          "symbol": "change_work_account_role"
         }
       ],
       "status": "verified",
@@ -2916,7 +3068,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 426,
+          "line": 372,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "company_login"
         }
@@ -2938,7 +3090,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 499,
+          "line": 544,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "create_public_demo_session"
         }
@@ -2960,8 +3112,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1710,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 118,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "upsert_product_identifier"
         }
       ],
@@ -2982,8 +3134,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1650,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 58,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "upsert_product"
         }
       ],
@@ -3004,8 +3156,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1681,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 89,
+          "path": "src/shelfwise_backend/routes_catalog.py",
           "symbol": "upsert_product_variant"
         }
       ],
@@ -3026,7 +3178,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1243,
+          "line": 1292,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "chat"
         }
@@ -3048,9 +3200,53 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1192,
+          "line": 1237,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "chat_stream"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/connectors/{system}/credentials",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /connectors/{system}/credentials",
+      "note": null,
+      "operation_id": "upsert_connector_credentials",
+      "path": "/connectors/{system}/credentials",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 46,
+          "path": "src/shelfwise_backend/routes_connector_credentials.py",
+          "symbol": "upsert_connector_credentials"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/connectors/{system}/credentials/delete",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /connectors/{system}/credentials/delete",
+      "note": null,
+      "operation_id": "delete_connector_credentials",
+      "path": "/connectors/{system}/credentials/delete",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 68,
+          "path": "src/shelfwise_backend/routes_connector_credentials.py",
+          "symbol": "delete_connector_credentials"
         }
       ],
       "status": "verified",
@@ -3070,7 +3266,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1753,
+          "line": 1617,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "intake_connector_payload"
         }
@@ -3092,7 +3288,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3473,
+          "line": 2252,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "approve_decision"
         }
@@ -3114,7 +3310,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3549,
+          "line": 2316,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "reject_decision"
         }
@@ -3136,7 +3332,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 929,
+          "line": 947,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "ingest_event"
         }
@@ -3158,7 +3354,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1859,
+          "line": 1723,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "commit_csv_intake"
         }
@@ -3180,7 +3376,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1831,
+          "line": 1695,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "preview_csv_intake"
         }
@@ -3290,7 +3486,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3145,
+          "line": 1976,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_inventory_position"
         }
@@ -3312,8 +3508,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2134,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 261,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "consolidate_memory"
         }
       ],
@@ -3334,8 +3530,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2324,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 452,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "execute_plan"
         }
       ],
@@ -3356,8 +3552,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2224,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 351,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "activate_mined_skill"
         }
       ],
@@ -3378,8 +3574,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2280,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 407,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "promote_skill"
         }
       ],
@@ -3400,8 +3596,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2308,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 436,
+          "path": "src/shelfwise_backend/routes_mlops.py",
           "symbol": "retire_skill"
         }
       ],
@@ -3444,7 +3640,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 969,
+          "line": 987,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "confirm_scan_candidate"
         }
@@ -3515,8 +3711,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2832,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 735,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_catalog_price_agentic"
         }
       ],
@@ -3537,8 +3733,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2979,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 891,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain"
         }
       ],
@@ -3559,8 +3755,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2903,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 810,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain_agentic"
         }
       ],
@@ -3581,8 +3777,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2945,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 855,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_critic_rejection"
         }
       ],
@@ -3603,8 +3799,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2868,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 773,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_expiry_risk_agentic"
         }
       ],
@@ -3625,8 +3821,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2621,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 512,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden"
         }
       ],
@@ -3647,8 +3843,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2703,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 597,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden_agentic"
         }
       ],
@@ -3669,8 +3865,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2661,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 554,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_inventory_exception"
         }
       ],
@@ -3691,8 +3887,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2957,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 867,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement"
         }
       ],
@@ -3713,8 +3909,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2747,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 644,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement_agentic"
         }
       ],
@@ -3735,8 +3931,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2626,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 518,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_recall"
         }
       ],
@@ -3757,8 +3953,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2969,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 880,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales"
         }
       ],
@@ -3779,8 +3975,8 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2790,
-          "path": "src/shelfwise_backend/app.py",
+          "line": 690,
+          "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales_agentic"
         }
       ],
@@ -3801,7 +3997,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1595,
+          "line": 1592,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "upsert_tenant_profile"
         }
@@ -3823,7 +4019,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 219,
+          "line": 334,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "ingest_edge_observations"
         }
@@ -3845,7 +4041,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 190,
+          "line": 305,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "ingest_twin_observation"
         }
@@ -3867,9 +4063,31 @@
       "relationships": [],
       "sources": [
         {
-          "line": 96,
+          "line": 189,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "onboard_twin"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/twin/onboarding/self-service",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /twin/onboarding/self-service",
+      "note": null,
+      "operation_id": "onboard_twin_self_service",
+      "path": "/twin/onboarding/self-service",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 206,
+          "path": "src/shelfwise_backend/routes_twin.py",
+          "symbol": "onboard_twin_self_service"
         }
       ],
       "status": "verified",
@@ -3889,7 +4107,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 135,
+          "line": 250,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "bootstrap_twin_from_events"
         }
@@ -3911,9 +4129,53 @@
       "relationships": [],
       "sources": [
         {
-          "line": 32,
+          "line": 46,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "calibrate_twin_device"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/twin/stores/{store_id}/devices",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /twin/stores/{store_id}/devices",
+      "note": null,
+      "operation_id": "register_twin_device",
+      "path": "/twin/stores/{store_id}/devices",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 93,
+          "path": "src/shelfwise_backend/routes_twin.py",
+          "symbol": "register_twin_device"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/twin/stores/{store_id}/devices/{device_id}/revoke",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /twin/stores/{store_id}/devices/{device_id}/revoke",
+      "note": null,
+      "operation_id": "revoke_twin_device",
+      "path": "/twin/stores/{store_id}/devices/{device_id}/revoke",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 138,
+          "path": "src/shelfwise_backend/routes_twin.py",
+          "symbol": "revoke_twin_device"
         }
       ],
       "status": "verified",
@@ -3933,7 +4195,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 65,
+          "line": 158,
           "path": "src/shelfwise_backend/routes_twin.py",
           "symbol": "create_twin_scenario"
         }
@@ -4009,7 +4271,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 2384,
+          "line": 1904,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "process_one_worker_event"
         }
@@ -4031,7 +4293,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 3160,
+          "line": 1991,
           "path": "src/shelfwise_backend/app.py",
           "symbol": "complete_writeback_task"
         }
@@ -4045,12 +4307,16 @@
     {
       "backend": "memory",
       "factories": [
+        "create_account_store",
         "create_calibration_registry",
         "create_candidate_store",
         "create_chat_store",
+        "create_connector_credential_store",
         "create_conversation_memory_store",
         "create_cursor_store",
         "create_decision_store",
+        "create_edge_device_registry",
+        "create_evaluation_registry",
         "create_event_store",
         "create_inbound_record_store",
         "create_inventory_position_store",
@@ -4082,7 +4348,7 @@
           "symbol": "create_decision_store"
         },
         {
-          "line": 365,
+          "line": 370,
           "path": "src/shelfwise_backend/candidate_store.py",
           "symbol": "create_candidate_store"
         },
@@ -4102,7 +4368,7 @@
           "symbol": "create_event_store"
         },
         {
-          "line": 216,
+          "line": 230,
           "path": "src/shelfwise_backend/open_orders.py",
           "symbol": "create_open_order_store"
         },
@@ -4112,7 +4378,7 @@
           "symbol": "create_journal"
         },
         {
-          "line": 309,
+          "line": 324,
           "path": "src/shelfwise_catalog/store.py",
           "symbol": "create_product_catalog_store"
         },
@@ -4120,6 +4386,11 @@
           "line": 124,
           "path": "src/shelfwise_connectors/connectors/poll.py",
           "symbol": "create_cursor_store"
+        },
+        {
+          "line": 221,
+          "path": "src/shelfwise_connectors/credentials.py",
+          "symbol": "create_connector_credential_store"
         },
         {
           "line": 260,
@@ -4130,6 +4401,11 @@
           "line": 281,
           "path": "src/shelfwise_connectors/writeback.py",
           "symbol": "create_writeback_sink"
+        },
+        {
+          "line": 334,
+          "path": "src/shelfwise_edge/registry.py",
+          "symbol": "create_edge_device_registry"
         },
         {
           "line": 103,
@@ -4147,19 +4423,29 @@
           "symbol": "create_tenant_fact_store"
         },
         {
-          "line": 436,
+          "line": 549,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_model_run_registry"
         },
         {
-          "line": 445,
+          "line": 559,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_evaluation_registry"
+        },
+        {
+          "line": 568,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_prompt_registry"
         },
         {
-          "line": 284,
+          "line": 322,
           "path": "src/shelfwise_mlops/skill_registry.py",
           "symbol": "create_skill_registry"
+        },
+        {
+          "line": 165,
+          "path": "src/shelfwise_storage/accounts.py",
+          "symbol": "create_account_store"
         },
         {
           "line": 126,
@@ -4182,7 +4468,7 @@
           "symbol": "create_scenario_branch_store"
         },
         {
-          "line": 580,
+          "line": 636,
           "path": "src/shelfwise_twin/store.py",
           "symbol": "create_twin_store"
         },
@@ -4206,12 +4492,16 @@
     {
       "backend": "postgres",
       "factories": [
+        "create_account_store",
         "create_calibration_registry",
         "create_candidate_store",
         "create_chat_store",
+        "create_connector_credential_store",
         "create_conversation_memory_store",
         "create_cursor_store",
         "create_decision_store",
+        "create_edge_device_registry",
+        "create_evaluation_registry",
         "create_event_store",
         "create_inbound_record_store",
         "create_inventory_position_store",
@@ -4243,7 +4533,7 @@
           "symbol": "create_decision_store"
         },
         {
-          "line": 367,
+          "line": 372,
           "path": "src/shelfwise_backend/candidate_store.py",
           "symbol": "create_candidate_store"
         },
@@ -4263,7 +4553,7 @@
           "symbol": "create_event_store"
         },
         {
-          "line": 218,
+          "line": 232,
           "path": "src/shelfwise_backend/open_orders.py",
           "symbol": "create_open_order_store"
         },
@@ -4273,7 +4563,7 @@
           "symbol": "create_journal"
         },
         {
-          "line": 311,
+          "line": 326,
           "path": "src/shelfwise_catalog/store.py",
           "symbol": "create_product_catalog_store"
         },
@@ -4281,6 +4571,11 @@
           "line": 126,
           "path": "src/shelfwise_connectors/connectors/poll.py",
           "symbol": "create_cursor_store"
+        },
+        {
+          "line": 223,
+          "path": "src/shelfwise_connectors/credentials.py",
+          "symbol": "create_connector_credential_store"
         },
         {
           "line": 262,
@@ -4291,6 +4586,11 @@
           "line": 283,
           "path": "src/shelfwise_connectors/writeback.py",
           "symbol": "create_writeback_sink"
+        },
+        {
+          "line": 336,
+          "path": "src/shelfwise_edge/registry.py",
+          "symbol": "create_edge_device_registry"
         },
         {
           "line": 105,
@@ -4308,19 +4608,29 @@
           "symbol": "create_tenant_fact_store"
         },
         {
-          "line": 438,
+          "line": 551,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_model_run_registry"
         },
         {
-          "line": 447,
+          "line": 561,
+          "path": "src/shelfwise_mlops/registry.py",
+          "symbol": "create_evaluation_registry"
+        },
+        {
+          "line": 570,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_prompt_registry"
         },
         {
-          "line": 286,
+          "line": 324,
           "path": "src/shelfwise_mlops/skill_registry.py",
           "symbol": "create_skill_registry"
+        },
+        {
+          "line": 167,
+          "path": "src/shelfwise_storage/accounts.py",
+          "symbol": "create_account_store"
         },
         {
           "line": 128,
@@ -4343,7 +4653,7 @@
           "symbol": "create_scenario_branch_store"
         },
         {
-          "line": 582,
+          "line": 638,
           "path": "src/shelfwise_twin/store.py",
           "symbol": "create_twin_store"
         },
@@ -4829,7 +5139,7 @@
       "runtime_verified": false,
       "sources": [
         {
-          "line": 224,
+          "line": 251,
           "path": "src/shelfwise/training/evaluate.py",
           "symbol": "run_evaluation"
         }
@@ -4986,7 +5296,7 @@
       ],
       "sources": [
         {
-          "line": 14,
+          "line": 17,
           "path": "src/shelfwise_backend/worker/service.py",
           "symbol": "WorkerLoopService"
         }
@@ -5335,7 +5645,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:325d522bae3bdb2f4c4c193f36bf3b92b0ca48d81c8bdbad42c63e7af2382dee",
+  "fingerprint": "sha256:e6c26aa1e4aa417af2dac5d9e6f06a2a103cd8e959d583e18e2e62766271684c",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

@@ -244,7 +244,7 @@ def test_worker_loop_service_processes_queue_when_enabled(monkeypatch) -> None:
     assert runs[0]["status"] == "done"
 
 
-def test_worker_loop_service_reports_reclaim_counts_and_errors(monkeypatch) -> None:
+def test_worker_loop_service_reports_reclaim_counts_and_errors(monkeypatch, caplog) -> None:
     async def run() -> dict:
         monkeypatch.setenv("WORKER_ENABLED", "true")
         worker = CascadeWorker(
@@ -271,7 +271,10 @@ def test_worker_loop_service_reports_reclaim_counts_and_errors(monkeypatch) -> N
         )
         await service.start()
         try:
-            await asyncio.sleep(0.05)
+            for _ in range(100):
+                if service.status()["reclaimed"] >= 2:
+                    break
+                await asyncio.sleep(0.01)
         finally:
             await service.stop()
         return service.status()
@@ -280,7 +283,8 @@ def test_worker_loop_service_reports_reclaim_counts_and_errors(monkeypatch) -> N
 
     assert status["reclaimed"] >= 2
     assert status["reclaim_errors"] >= 1
-    assert status["last_reclaim_error"] == "redis unavailable"
+    assert status["last_reclaim_error"] == "reclaim_failed"
+    assert "cascade worker stale-message reclaim failed" in caplog.text
 
 
 def _registry() -> CapabilityRegistry:

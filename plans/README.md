@@ -101,3 +101,8 @@ README/HANDOFF/runbook drift, recent churn, and final run artifacts.
 
 Not exhaustively audited: every decision-science formula, all 3,429 lines of frontend behavior,
 notebook cell outputs, third-party Python advisories, and every Postgres query plan.
+# Productization direction (next)
+
+| Plan | Status | Priority | Depends on | Summary |
+|---|---|---:|---|---|
+| [012](012-productize-client-onboarding-and-workforce-accounts.md) | IN PROGRESS | P1 | none | Browser-led client onboarding, workforce accounts, and bounded adaptive evidence planning. |

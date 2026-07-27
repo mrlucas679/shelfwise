@@ -6,8 +6,10 @@ Date: 2026-07-23 · Branch: `developers` · Author basis: repo audit (`IMPLEMENT
 
 ## The honest starting position
 
-The engineering is not the gap anymore. The application inventory shows 214 contract-verified
-capabilities, ~761 tests green against real Postgres/Redis, nine connectors, RLS tenancy, HITL
+The engineering is not the gap anymore. The application inventory shows 219 contract-verified
+capabilities, 852 tests green against real Postgres/Redis (verified 2026-07-23 against the
+project's own `.venv`, not just an ambient interpreter - see IMPLEMENTATION_STATUS.md), nine
+connectors, RLS tenancy, HITL
 governance, deterministic decision math, and a fleet-scale run at ~21k rows/s. What has **never
 happened** is the thing that makes a product real:
 

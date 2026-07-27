@@ -78,6 +78,26 @@ def test_suppress_and_link_decision_each_append_one_ordered_entry() -> None:
     assert entries[0].decision_id == "dec-1"
 
 
+def test_linking_a_decision_clears_an_earlier_suppression() -> None:
+    store = InMemoryCandidateStore()
+    candidate = _candidate()
+    now = datetime(2026, 7, 13, tzinfo=UTC)
+    store.upsert(candidate, now=now)
+    store.suppress(
+        "tenant-a",
+        candidate.candidate_key,
+        reason="covered by open order",
+        until=now + timedelta(days=1),
+    )
+
+    linked = store.link_decision("tenant-a", candidate.candidate_key, "dec-1")
+
+    assert linked is not None
+    assert linked["status"] == "pending"
+    assert linked["suppression_reason"] is None
+    assert linked["suppressed_until"] is None
+
+
 def test_history_is_tenant_isolated() -> None:
     store = InMemoryCandidateStore()
     candidate_a = _candidate("tenant-a")

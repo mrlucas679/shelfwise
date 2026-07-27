@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlsplit
 
 from ...canonical import InventoryState, SourceSystem
 from ...provenance import InboundRecord, ValidationResult
@@ -101,10 +102,12 @@ class DynamicsBusinessCentralInventoryConnector(PollingConnector):
         self,
         cursor: str | None,
     ) -> tuple[list[InboundRecord], str | None]:
-        # Business Central returns a fully qualified @odata.nextLink.  Reuse it as-is;
-        # rebuilding its query would drop opaque server paging state.
-        url = cursor if cursor and cursor.startswith(("https://", "http://")) else self._base_url
-        params = {} if cursor and cursor.startswith(("https://", "http://")) else {"$top": "200"}
+        # Business Central returns a fully qualified @odata.nextLink. Reuse its opaque
+        # query, but never let an upstream response change the credentialed poller's
+        # origin (for example to an internal metadata service).
+        use_cursor_url = cursor is not None
+        url = _continuation_url(cursor, self._base_url) if use_cursor_url else self._base_url
+        params = {} if use_cursor_url else {"$top": "200"}
         body = await self._fetch_json(
             url,
             params,
@@ -140,3 +143,17 @@ def _invalid_record(
         validation=ValidationResult().fail(error),
         raw=row,
     )
+
+
+def _continuation_url(cursor: str, base_url: str) -> str:
+    """Return an OData continuation only when it stays on the configured origin."""
+    continuation = urlsplit(cursor)
+    configured = urlsplit(base_url)
+    if (
+        continuation.scheme not in {"http", "https"}
+        or not continuation.netloc
+        or (continuation.scheme, continuation.netloc)
+        != (configured.scheme, configured.netloc)
+    ):
+        raise ValueError("dynamics continuation URL must use the configured origin")
+    return cursor

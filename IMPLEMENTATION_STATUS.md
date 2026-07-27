@@ -4,12 +4,55 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **761 passed / 16 env-gated skips** locally;
-**776 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
-([run 29789599559](https://github.com/mrlucas679/shelfwise/actions/runs/29789599559)); ruff
-clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
-contract-verified.
+Date: 2026-07-23 (supersedes the 2026-07-21 update below; that entry is kept as history)
+Branch: `developers` · Gates at time of writing, verified against the project's own
+`.venv/Scripts/python.exe` (see HANDOFF.md's "Client-readiness verification pass" entry for
+why that distinction matters - a stray unrelated tool venv on this machine's shell `PATH`
+had been silently masking the real deployment interpreter): **852 passed / 20 env-gated
+skips** locally; ruff clean; frontend `tsc --noEmit` clean; frontend production build
+clean; capability manifest **219 capabilities**, contract-verified
+(`sha256:126ef28c...`); both `shelfwise-backend` and `shelfwise-web` boot and connect for
+real - verified live via the Browser pane, not just inferred from passing tests: `/health`
+responds correctly, the frontend loads and renders live backend state, and all 20 API calls
+its initial load makes return 200 OK.
+
+## 2026-07-23 technical-debt and readiness campaign
+
+A day-long, book-grounded technical-debt and correctness campaign (see `HANDOFF.md` for the
+full, dated record of every individual fix) closed real bugs across nine domains:
+decision-science math, multi-tenant isolation/auth, agentic guardrails, inventory/procurement,
+connectors, MLOps governance, the digital twin, chat streaming, and dependency/environment
+integrity. Highlights, not exhaustive (see HANDOFF.md for the complete list with file:line
+references and regression tests for each):
+
+- **MLOps skill promotion now genuinely gates on a recorded evaluation result** (a real
+  `EvaluationRecord` registry), not a client-supplied, unverified `measured_pass_rate` float -
+  this was the single highest-severity finding of the whole campaign, since it meant any
+  approver-role caller could previously promote any draft skill by asserting a perfect score
+  with zero evaluation ever run.
+- **Multi-tenant encrypted connector credentials** - a real subsystem (Fernet encryption,
+  RLS-scoped Postgres storage, owner-only CRUD API) closing the "single-tenant only" gap the
+  2026-07-14 connector-poll work had explicitly scoped out.
+- **Twin scenario (what-if) predictions no longer contaminate operational reads** - running a
+  scenario used to silently leak `PREDICTED`-lane values into `get_store()`/`fidelity()`'s
+  reported "real" state.
+- **Executive-conclusion grounding** across all 6 agentic cascades, correctly conditional so
+  the existing adversarial critic-override tests still hold.
+- **`/chat/stream` genuinely delivers incremental content** now, with the safety tradeoffs of
+  true live-token capture explained and deliberately avoided rather than built unsafely.
+- Three real, narrowly-scoped bugs fixed and regression-tested: a training eval gate using
+  naive substring matching, a tenant-blind write-rate limiter (real cross-tenant DoS vector),
+  and a CSV formula-neutralization routine that corrupted quoted fields containing commas.
+- **This session's own dependency-drift bug** (see above) - `cryptography`/`psycopg-pool`
+  present in `pyproject.toml` but never installed into the actual deployment `.venv`, caught
+  only because this pass insisted on booting the real server rather than trusting test output
+  alone.
+
+**Two large, honestly-scoped items remain genuinely open**, not fixed and not fabricated as
+fixed: the "open order" store's naming still implies a full PO create/approve/send lifecycle
+it doesn't have (it's a shipment-receiving ledger); and there is no live POS/cashier
+stock-decrement path anywhere in the codebase (confirmed absent by a full-tree search, not
+assumed) - both documented precisely in HANDOFF.md for whoever picks them up next.
 
 **Every feature enabled by the supported application deployment profiles is implemented and
 covered by the applicable local or CI gate.** The six capability records marked `partial` are

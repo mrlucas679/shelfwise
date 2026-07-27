@@ -11,6 +11,7 @@ TENANT_SCOPED_TABLES = {
     "cascade_runs": "tenant_id",
     "cascade_steps": "tenant_id",
     "shelfwise_model_runs": "tenant_id",
+    "shelfwise_evaluations": "tenant_id",
     "shelfwise_prompt_versions": "tenant_id",
     "shelfwise_writeback_tasks": "tenant_id",
     "shelfwise_worldgen_runs": "tenant_id",
@@ -28,6 +29,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_candidates": "tenant_id",
     "shelfwise_candidate_history": "tenant_id",
     "shelfwise_connector_cursors": "tenant_id",
+    "shelfwise_connector_credentials": "tenant_id",
     "shelfwise_open_orders": "tenant_id",
     "shelfwise_twin_entities": "tenant_id",
     "shelfwise_twin_relationships": "tenant_id",
@@ -36,6 +38,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_twin_calibrations": "tenant_id",
     "shelfwise_twin_scenario_branches": "tenant_id",
     "shelfwise_twin_onboarding_manifests": "tenant_id",
+    "shelfwise_work_accounts": "tenant_id",
 }
 
 

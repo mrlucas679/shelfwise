@@ -20,6 +20,8 @@ def test_dry_run_is_fixture_only_and_cannot_pass(tmp_path: Path, monkeypatch) ->
     assert summary["generation_source"] == "fixture_only"
     assert summary["inference_performed"] is False
     assert summary["gate"]["passed"] is False
+    assert summary["evaluation"]["gate_passed"] is False
+    assert summary["evaluation"]["tenant_id"] == "sa_retail_demo"
     assert "no generated model inference" in summary["gate"]["failure_reasons"][0]
 
 

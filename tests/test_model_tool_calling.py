@@ -278,7 +278,7 @@ def test_generic_client_submits_messages_tools_and_preserves_recorder(monkeypatc
         captured["timeout"] = timeout
         return _FakeHttpResponse(body)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("shelfwise_inference.client._open_inference_request", fake_urlopen)
     recorded: list[dict[str, Any]] = []
     client = OpenAICompatibleInferenceClient(_config(), recorder=recorded.append)
     tools = PlatformToolRegistry([_read_tool()]).openai_tools()

@@ -1,6 +1,7 @@
 import {
   Component,
   type CSSProperties,
+  type FormEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -385,6 +386,20 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
 }
 async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
   await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
+}
+// Real client deployments run SHELFWISE_AUTH_MODE=jwt with public demo sessions correctly
+// disabled - /auth/session then answers 401 for a browser with no session cookie yet, and
+// there is no other identity to fall back to. Distinguishing this from a generic load
+// failure is what lets the app show a real login form instead of a dead error screen.
+function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof Error && /\b401\b/.test(error.message)
+}
+async function postLogin(email: string, password: string, signal: AbortSignal): Promise<void> {
+  await fetchJson<JsonObject>(
+    '/auth/login',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) },
+    signal,
+  )
 }
 const fetchScenario = (path: string, signal: AbortSignal) => fetchJson<GoldenScenario>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
@@ -1164,6 +1179,7 @@ type WorkspaceSurface =
   | 'deliveries'
   | 'cold-chain'
   | 'connections'
+  | 'people'
   | 'operations'
   | 'results'
 type Recent = { id: string; title: string; active?: boolean }
@@ -1235,18 +1251,29 @@ const OPERATION_READ_ENDPOINTS = [
 
 const GATED_ENDPOINTS = [
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
-  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/answer/done; deltas only from a live provider).' },
+  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/delta*/answer/done); the validated answer is delivered incrementally, not as live provider tokens.' },
   { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
+  { label: 'List work accounts', method: 'GET', path: '/accounts', group: 'operations', detail: 'Owner-only: list store work accounts without password data.' },
+  { label: 'Create work account', method: 'POST', path: '/accounts', group: 'operations', detail: 'Owner-only: create a named staff account with a work role and position.' },
+  { label: 'Change work-account role', method: 'POST', path: '/accounts/{account_id}/role', group: 'operations', detail: 'Owner-only: change a staff member’s operational role without duplicating their account.' },
+  { label: 'Deactivate work account', method: 'POST', path: '/accounts/{account_id}/deactivate', group: 'operations', detail: 'Owner-only: remove a staff account’s ability to sign in while retaining its audit identity.' },
+  { label: 'Reactivate work account', method: 'POST', path: '/accounts/{account_id}/reactivate', group: 'operations', detail: 'Owner-only: restore a previously deactivated staff account.' },
   { label: 'Chat', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
+  { label: 'Connector credential status', method: 'GET', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Whether this tenant has stored credentials for a system - never returns the values.' },
+  { label: 'Connector credential store', method: 'POST', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Owner-only: store this tenant\'s own encrypted ERP credentials, used in place of the shared env-var default.' },
+  { label: 'Connector credential delete', method: 'POST', path: '/connectors/{system}/credentials/delete', group: 'connections', detail: 'Owner-only: remove this tenant\'s stored credentials, reverting that system to the shared env-var default.' },
   { label: 'CSV import preview', method: 'POST', path: '/intake/csv/preview', group: 'connections', detail: 'Dry-run a client CSV: inferred column mapping and per-row validation, no writes.' },
   { label: 'CSV import commit', method: 'POST', path: '/intake/csv/commit', group: 'connections', detail: 'Idempotent CSV import through the connector pipeline; invalid rows quarantine with provenance.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
   { label: 'Twin observation ingest', method: 'POST', path: '/twin/observations', group: 'connections', detail: 'Tenant-bound derived observation intake; raw media is rejected.' },
   { label: 'Twin onboarding', method: 'POST', path: '/twin/onboarding', group: 'connections', detail: 'Binds one named shop and seeds its tenant-scoped topology.' },
+  { label: 'Self-service store setup', method: 'POST', path: '/twin/onboarding/self-service', group: 'connections', detail: 'Owner-only: create a store without exposing an internal tenant identifier.' },
   { label: 'Twin event bootstrap', method: 'POST', path: '/twin/stores/{store_id}/bootstrap', group: 'operations', detail: 'Replays existing canonical events into the twin without rerunning cascades.' },
   { label: 'Signed edge observations', method: 'POST', path: '/twin/edge/observations', group: 'connections', detail: 'HMAC-authenticated derived edge facts; raw frames never enter the twin.' },
   { label: 'Twin calibration', method: 'POST', path: '/twin/stores/{store_id}/calibration', group: 'connections', detail: 'Records a bounded sensor/reference calibration result.' },
+  { label: 'Camera/sensor device register', method: 'POST', path: '/twin/stores/{store_id}/devices', group: 'connections', detail: 'Owner-only: provision an HMAC credential for a camera/sensor system to push structured events - never raw video.' },
+  { label: 'Camera/sensor device revoke', method: 'POST', path: '/twin/stores/{store_id}/devices/{device_id}/revoke', group: 'connections', detail: 'Owner-only: disable a previously issued camera/sensor device credential.' },
   { label: 'Twin scenario', method: 'POST', path: '/twin/stores/{store_id}/scenarios', group: 'intelligence', detail: 'Runs an isolated what-if branch without changing reported state.' },
   { label: 'Barcode scan', method: 'POST', path: '/scan/barcode', group: 'connections', detail: 'Multimodal SKU lookup from barcode input.' },
   { label: 'Confirm reviewed scan', method: 'POST', path: '/scan/candidates/confirm', group: 'connections', detail: 'Promotes one manager-reviewed scanner candidate into canonical ingest.' },
@@ -1718,6 +1745,12 @@ function Sidebar({
                     onOpen={() => openWorkspace('connections')}
                   />
                   <NavRow
+                    label="People & access"
+                    value="work accounts"
+                    active={activeWorkspace === 'people'}
+                    onOpen={() => openWorkspace('people')}
+                  />
+                  <NavRow
                     label="Operations"
                     value={operationsValue}
                     tone={operationsValue === 'live' ? 'ok' : undefined}
@@ -1952,6 +1985,319 @@ function WorkspaceEmpty({ children }: { children: ReactNode }) {
   return <p className="workspace-empty">{children}</p>
 }
 
+type ConnectorCredentialField = { key: string; label: string; secret?: boolean }
+type ConnectorCredentialSystem = { system: string; label: string; fields: ConnectorCredentialField[] }
+
+// The four poll-based ERP/WMS systems that actually read from
+// `shelfwise_connectors.credentials` (see connector_poll_service.py's `_resolved_fields` -
+// field names here must match exactly what that resolver looks up). Webhook-based systems
+// (Shopify/Square/Lightspeed/Yoco) authenticate the sender via a shared webhook secret
+// instead, not a credential a store owner enters here.
+const CONNECTOR_CREDENTIAL_SYSTEMS: ConnectorCredentialSystem[] = [
+  {
+    system: 'odoo',
+    label: 'Odoo',
+    fields: [
+      { key: 'base_url', label: 'Base URL' },
+      { key: 'database', label: 'Database' },
+      { key: 'uid', label: 'User ID' },
+      { key: 'api_key', label: 'API key', secret: true },
+    ],
+  },
+  {
+    system: 'sap',
+    label: 'SAP S/4HANA',
+    fields: [
+      { key: 'base_url', label: 'Base URL' },
+      { key: 'token', label: 'API token', secret: true },
+    ],
+  },
+  {
+    system: 'syspro',
+    label: 'SYSPRO',
+    fields: [
+      { key: 'base_url', label: 'Base URL' },
+      { key: 'token', label: 'API token', secret: true },
+    ],
+  },
+  {
+    system: 'dynamics',
+    label: 'Dynamics Business Central',
+    fields: [
+      { key: 'base_url', label: 'Items collection URL' },
+      { key: 'token', label: 'OAuth bearer token', secret: true },
+      { key: 'location_id', label: 'Location ID' },
+    ],
+  },
+]
+
+/** Self-serve "connect your ERP/POS" panel: the actual UI a store owner uses to store
+ * their own encrypted connector credentials (POST /connectors/{system}/credentials, owner
+ * role only - see routes_connector_credentials.py) instead of an operator hand-editing
+ * env vars. Values are never re-displayed once saved - only whether a system is
+ * configured (GET .../credentials returns configured: bool, never the stored fields). */
+function ConnectorCredentialsPanel() {
+  const [status, setStatus] = useState<Record<string, boolean>>({})
+  const [openSystem, setOpenSystem] = useState<string | null>(null)
+  const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [busySystem, setBusySystem] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<Record<string, string>>({})
+
+  const refreshStatus = useCallback(() => {
+    const controller = new AbortController()
+    Promise.all(
+      CONNECTOR_CREDENTIAL_SYSTEMS.map((entry) =>
+        fetchJson<{ configured?: boolean }>(`/connectors/${entry.system}/credentials`, {}, controller.signal)
+          .then((payload) => [entry.system, Boolean(payload.configured)] as const)
+          .catch(() => [entry.system, undefined] as const),
+      ),
+    ).then((pairs) => {
+      if (controller.signal.aborted) return
+      setStatus((prev) => {
+        const next = { ...prev }
+        for (const [system, configured] of pairs) {
+          if (configured !== undefined) next[system] = configured
+        }
+        return next
+      })
+    })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => refreshStatus(), [refreshStatus])
+
+  const openForm = (entry: ConnectorCredentialSystem) => {
+    setOpenSystem(entry.system)
+    setFormValues(Object.fromEntries(entry.fields.map((field) => [field.key, ''])))
+    setRowError((prev) => ({ ...prev, [entry.system]: '' }))
+  }
+
+  const submitForm = async (entry: ConnectorCredentialSystem) => {
+    const missing = entry.fields.filter((field) => !formValues[field.key]?.trim())
+    if (missing.length) {
+      setRowError((prev) => ({ ...prev, [entry.system]: `${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.` }))
+      return
+    }
+    setBusySystem(entry.system)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/connectors/${entry.system}/credentials`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: formValues }),
+        },
+        controller.signal,
+      )
+      setOpenSystem(null)
+      setFormValues({})
+      setStatus((prev) => ({ ...prev, [entry.system]: true }))
+    } catch (submitError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: submitError instanceof Error ? submitError.message : String(submitError) }))
+    } finally {
+      setBusySystem(null)
+    }
+  }
+
+  const disconnect = async (entry: ConnectorCredentialSystem) => {
+    setBusySystem(entry.system)
+    const controller = new AbortController()
+    try {
+      await fetchJson(`/connectors/${entry.system}/credentials/delete`, { method: 'POST' }, controller.signal)
+      setStatus((prev) => ({ ...prev, [entry.system]: false }))
+    } catch (deleteError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: deleteError instanceof Error ? deleteError.message : String(deleteError) }))
+    } finally {
+      setBusySystem(null)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect your systems" count={pluralLabel(CONNECTOR_CREDENTIAL_SYSTEMS.length, 'system')}>
+      <p className="workspace-empty">
+        Store your own ERP/POS credentials here - encrypted at rest, never shown again once saved.
+        Owner login required. Webhook-based systems (Shopify, Square, Lightspeed, Yoco) connect via a
+        shared webhook secret instead and are configured with us directly, not here.
+      </p>
+      <div className="workspace-list connector-credentials">
+        {CONNECTOR_CREDENTIAL_SYSTEMS.map((entry) => {
+          const configured = status[entry.system]
+          const isOpen = openSystem === entry.system
+          const busy = busySystem === entry.system
+          return (
+            <div className="connector-credential-row" key={entry.system}>
+              <WorkspaceRow
+                label={entry.label}
+                meta={configured === undefined ? 'checking status…' : configured ? 'Connected' : 'Not connected'}
+                detail={rowError[entry.system] || undefined}
+                value={configured ? 'connected' : 'not connected'}
+                tone={configured ? 'ok' : undefined}
+                onSelect={() => (isOpen ? setOpenSystem(null) : openForm(entry))}
+              />
+              {isOpen ? (
+                <div className="connector-credential-form">
+                  {entry.fields.map((field) => (
+                    <label className="login-field" key={field.key}>
+                      <span>{field.label}</span>
+                      <input
+                        type={field.secret ? 'password' : 'text'}
+                        value={formValues[field.key] ?? ''}
+                        onChange={(e) => setFormValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                        disabled={busy}
+                      />
+                    </label>
+                  ))}
+                  <div className="connector-credential-actions">
+                    <button className="btn btn-primary" type="button" disabled={busy} onClick={() => submitForm(entry)}>
+                      {busy ? 'Saving…' : configured ? 'Update' : 'Connect'}
+                    </button>
+                    {configured ? (
+                      <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => disconnect(entry)}>
+                        Disconnect
+                      </button>
+                    ) : null}
+                    <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => setOpenSystem(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </WorkspaceSection>
+  )
+}
+
+type EdgeDeviceRow = { device_id: string; store_id: string; active: boolean }
+
+/** Self-serve "connect a camera or sensor" panel. This is the real answer to "can a shop
+ * just connect their existing camera system": most commercial retail camera/people-counting
+ * systems push structured events via their own webhook or REST API rather than streaming
+ * raw video to a third party - this panel provisions the HMAC credential a shop points that
+ * existing integration at (POST /twin/stores/{store_id}/devices, owner role only). Raw video
+ * ingestion/processing is a separate, much larger computer-vision project and is not what
+ * this panel does - the help text says so plainly rather than implying otherwise. */
+function EdgeDeviceRegistrationPanel({ storeId }: { storeId: string }) {
+  const [devices, setDevices] = useState<EdgeDeviceRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [justRegistered, setJustRegistered] = useState<{ deviceId: string; secret: string } | null>(null)
+
+  const refresh = useCallback(() => {
+    const controller = new AbortController()
+    fetchJson<{ devices?: EdgeDeviceRow[] }>(
+      `/twin/stores/${encodeURIComponent(storeId)}/devices`,
+      {},
+      controller.signal,
+    )
+      .then((payload) => {
+        if (!controller.signal.aborted) setDevices(Array.isArray(payload.devices) ? payload.devices : [])
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [storeId])
+
+  useEffect(() => refresh(), [refresh])
+
+  const register = async () => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      const payload = await fetchJson<{ device_id: string; hmac_secret: string }>(
+        `/twin/stores/${encodeURIComponent(storeId)}/devices`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+        controller.signal,
+      )
+      setJustRegistered({ deviceId: payload.device_id, secret: payload.hmac_secret })
+      refresh()
+    } catch (registerError) {
+      setError(registerError instanceof Error ? registerError.message : String(registerError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async (deviceId: string) => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/twin/stores/${encodeURIComponent(storeId)}/devices/${encodeURIComponent(deviceId)}/revoke`,
+        { method: 'POST' },
+        controller.signal,
+      )
+      if (justRegistered?.deviceId === deviceId) setJustRegistered(null)
+      refresh()
+    } catch (revokeError) {
+      setError(revokeError instanceof Error ? revokeError.message : String(revokeError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect a camera or sensor" count={pluralLabel(devices.length, 'device')}>
+      <p className="workspace-empty">
+        If your camera or people-counting system can push structured events to a webhook or
+        REST API (most commercial retail systems can), register a device credential here and
+        point that integration at it. This is not raw video streaming or storage - ShelfWise
+        never receives or stores camera frames, only the derived facts your system already
+        computes (occupancy, temperature, door-open events, and similar).
+      </p>
+      {error ? <p className="login-error">{error}</p> : null}
+      {justRegistered ? (
+        <div className="connector-credential-form">
+          <p className="workspace-empty">
+            <strong>Save this now - it will not be shown again.</strong>
+          </p>
+          <label className="login-field">
+            <span>Device ID</span>
+            <input type="text" readOnly value={justRegistered.deviceId} />
+          </label>
+          <label className="login-field">
+            <span>HMAC secret</span>
+            <input type="text" readOnly value={justRegistered.secret} />
+          </label>
+          <div className="connector-credential-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => setJustRegistered(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="workspace-list connector-credentials">
+        {devices.map((device) => (
+          <div className="connector-credential-row" key={device.device_id}>
+            <WorkspaceRow
+              label={device.device_id}
+              meta={device.active ? 'Active' : 'Revoked'}
+              value={device.active ? 'active' : 'revoked'}
+              tone={device.active ? 'ok' : undefined}
+            />
+            {device.active ? (
+              <div className="connector-credential-actions" style={{ padding: '0 2px 12px' }}>
+                <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => revoke(device.device_id)}>
+                  Revoke
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div className="connector-credential-actions" style={{ padding: '4px 2px' }}>
+        <button className="btn btn-primary" type="button" disabled={busy} onClick={register}>
+          {busy ? 'Registering…' : 'Register a new device'}
+        </button>
+      </div>
+    </WorkspaceSection>
+  )
+}
+
 function batchExpiryText(batch: FefoBatch): string {
   const d = batch.days_to_expiry
   if (d == null) return 'No expiry date'
@@ -2058,6 +2404,13 @@ function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: stri
         kicker: 'Data feeds',
         status: 'read first',
         subtitle: 'Systems feeding stock, POS, delivery, and catalogue facts into ShelfWise.',
+      }
+    case 'people':
+      return {
+        title: 'People & access',
+        kicker: 'Workforce accounts',
+        status: 'owner managed',
+        subtitle: 'Create and manage store work accounts and responsibilities.',
       }
     case 'operations':
       return {
@@ -2657,6 +3010,9 @@ function WorkspaceScreen({
         <WorkspaceMetric label="Inbound records" value={String(ops.inboundRecords.length || fieldNumber(obsConnectors, 'inbound_records'))} />
         <WorkspaceMetric label="Invalid records" value={String(fieldNumber(obsConnectors, 'invalid_records'))} tone={fieldNumber(obsConnectors, 'invalid_records') ? 'risk' : undefined} />
       </div>
+      <CompanyProfilePanel />
+      <ConnectorCredentialsPanel />
+      <CsvImportPanel />
       <WorkspaceSection title="Connector catalogue" count={pluralLabel(connectorRows.length, 'system')}>
         <div className="workspace-list">
           {connectorRows.map((system) => {
@@ -2724,7 +3080,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'connections' || item.group === 'intelligence').map((item) => (
             <WorkspaceRow
-              key={item.path}
+              key={`${item.method}:${item.path}`}
               label={item.label}
               meta={`${item.method} ${item.path}`}
               detail={item.detail}
@@ -2783,7 +3139,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {OPERATION_READ_ENDPOINTS.map((item) => (
             <WorkspaceRow
-              key={item.path}
+              key={`${item.method}:${item.path}`}
               label={item.label}
               meta={`${item.method} ${item.path}`}
               detail={item.detail}
@@ -2869,7 +3225,7 @@ function WorkspaceScreen({
           />
         </div>
       </WorkspaceSection>
-      <WorkspaceSection title="Worker and worldgen">
+      <WorkspaceSection title="Worker and validation history">
         <div className="workspace-list">
           <WorkspaceRow
             label="Worker service"
@@ -2896,7 +3252,7 @@ function WorkspaceScreen({
             ops.worldgenRuns.slice(0, 4).map((run, index) => (
               <WorkspaceRow
                 key={String(run.run_id ?? index)}
-                label={fieldText(run, 'scenario_id', 'Worldgen run')}
+                label={fieldText(run, 'scenario_id', 'Validation run')}
                 meta={fieldText(run, 'run_id', 'Run')}
                 detail={[`events ${formatValue(run.events_total)}`, `decisions ${formatValue(run.decisions_total)}`].join(' · ')}
                 value={fieldText(run, 'status', 'completed')}
@@ -2904,7 +3260,7 @@ function WorkspaceScreen({
               />
             ))
           ) : (
-            <WorkspaceRow label="Worldgen runs" meta="No synthetic drill run recorded yet." value="clear" />
+            <WorkspaceRow label="Validation runs" meta="No internal validation run recorded yet." value="clear" />
           )}
         </div>
       </WorkspaceSection>
@@ -2974,7 +3330,7 @@ function WorkspaceScreen({
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
               <WorkspaceRow
-                key={item.path}
+                key={`${item.method}:${item.path}`}
                 label={isRunnable ? `${item.label} - click to run` : item.label}
                 meta={`${item.method} ${item.path}`}
                 detail={isRunnable ? (run?.detail ?? item.detail) : item.detail}
@@ -3058,6 +3414,8 @@ function WorkspaceScreen({
           <WorkspaceMetric label="Raw media" value="never stored" tone="ok" />
         </div>
       </WorkspaceSection>
+      <StoreSetupPanel />
+      <EdgeDeviceRegistrationPanel storeId={seed?.location ?? 'store_12'} />
       <WorkspaceSection title="Operator actions">
         <div className="workspace-list">
           <WorkspaceRow label="Snapshot" meta="GET /twin/stores/{store_id}/snapshot" detail="Projection hash anchors assistant and scenario context." value="available" tone="ok" />
@@ -3084,6 +3442,8 @@ function WorkspaceScreen({
         return renderColdChain()
       case 'connections':
         return renderConnections()
+      case 'people':
+        return <PeopleAccessPanel />
       case 'operations':
         return renderOperations()
       case 'results':
@@ -3223,6 +3583,237 @@ function isOverlayViewport(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+function PeopleAccessPanel() {
+  const [form, setForm] = useState({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
+  const [accounts, setAccounts] = useState<Array<{ id: string; email: string; given_name: string; surname: string; position: string; role: string; active: boolean }>>([])
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchBackendJson<{ accounts?: typeof accounts }>('/accounts', { method: 'GET' }, controller.signal)
+      .then((payload) => setAccounts(payload.accounts ?? []))
+      .catch(() => setNotice('People & access is available to store owners only.'))
+    return () => controller.abort()
+  }, [])
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (form.password !== form.password_confirmation) {
+      setNotice('The password confirmation does not match.')
+      return
+    }
+    setBusy(true); setNotice(null)
+    try {
+      const { password_confirmation: _, ...accountForm } = form
+      const payload = await fetchJson<{ account: (typeof accounts)[number] }>(
+        '/accounts',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accountForm) },
+        new AbortController().signal,
+      )
+      setAccounts((current) => [...current, payload.account].sort((a, b) => a.surname.localeCompare(b.surname)))
+      setNotice(`${form.given_name} ${form.surname} can now sign in with their work account.`)
+      setForm({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
+    } catch { setNotice('The account could not be created. Check the details and try again.') }
+    finally { setBusy(false) }
+  }
+  const deactivate = async (accountId: string) => {
+    if (!window.confirm('Deactivate this work account? They will no longer be able to sign in.')) return
+    try {
+      await fetchJson(`/accounts/${encodeURIComponent(accountId)}/deactivate`, { method: 'POST' }, new AbortController().signal)
+      setAccounts((current) => current.map((account) => account.id === accountId ? { ...account, active: false } : account))
+    } catch { setNotice('The account could not be deactivated. Try again.') }
+  }
+  const reactivate = async (accountId: string) => {
+    try {
+      await fetchJson(
+        `/accounts/${encodeURIComponent(accountId)}/reactivate`,
+        { method: 'POST' },
+        new AbortController().signal,
+      )
+      setAccounts((current) => current.map((account) => (
+        account.id === accountId ? { ...account, active: true } : account
+      )))
+    } catch { setNotice('The account could not be reactivated. Try again.') }
+  }
+  const changeRole = async (accountId: string, role: string) => {
+    try {
+      const payload = await fetchJson<{ account: (typeof accounts)[number] }>(
+        `/accounts/${encodeURIComponent(accountId)}/role`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) },
+        new AbortController().signal,
+      )
+      setAccounts((current) => current.map((account) => account.id === accountId ? payload.account : account))
+    } catch { setNotice('The work role could not be changed. Try again.') }
+  }
+  return <>
+    <WorkspaceSection title="Store work accounts" count={accounts.length ? pluralLabel(accounts.length, 'account') : undefined}>
+      {accounts.length ? <div className="workspace-list">{accounts.map((account) => <div key={account.id}><WorkspaceRow label={`${account.given_name} ${account.surname}`} meta={`${account.position} · ${account.email}`} value={account.role} tone={account.active ? 'ok' : 'warn'} />{account.active ? <><label className="login-field"><span>Work role</span><select value={account.role} onChange={(e) => changeRole(account.id, e.target.value)}>{['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}</select></label><button className="btn" type="button" onClick={() => deactivate(account.id)}>Deactivate access</button></> : <button className="btn btn-primary" type="button" onClick={() => reactivate(account.id)}>Reactivate access</button>}</div>)}</div> : <WorkspaceEmpty>No staff accounts have been created yet.</WorkspaceEmpty>}
+    </WorkspaceSection>
+    <WorkspaceSection title="Create work account">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">Create an account for a person who works in this store. Their role controls what they can do.</p>
+      {(['given_name', 'surname', 'position', 'email', 'password', 'password_confirmation'] as const).map((field) => <label className="login-field" key={field}><span>{field === 'given_name' ? 'First name' : field === 'surname' ? 'Surname' : field === 'position' ? 'Work position' : field === 'email' ? 'Work email' : field === 'password' ? 'Temporary password' : 'Confirm password'}</span><input type={field.includes('password') ? 'password' : field === 'email' ? 'email' : 'text'} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required /></label>)}
+      <label className="login-field"><span>Store role</span><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}</select></label>
+      {notice ? <p className="login-error">{notice}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
+    </form>
+    </WorkspaceSection>
+  </>
+}
+
+function CsvImportPanel() {
+  const [kind, setKind] = useState('products')
+  const [csvText, setCsvText] = useState('')
+  const [result, setResult] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const run = async (commit: boolean) => {
+    if (!csvText.trim()) return
+    setBusy(true); setResult(null)
+    try {
+      const payload = await fetchJson<Record<string, unknown>>(
+        commit ? '/intake/csv/commit' : '/intake/csv/preview',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, csv_text: csvText }) },
+        new AbortController().signal,
+      )
+      const count = Number(payload.accepted_rows ?? payload.records_committed ?? payload.row_count ?? 0)
+      setResult(commit ? `${count || 'Your'} rows were imported.` : `Preview completed. ${count || 'Review'} valid rows are ready to import.`)
+    } catch { setResult('The file could not be processed. Check its columns and try the preview again.') }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Import store data">
+    <p className="muted">Upload products first, then stock, expiry, and sales. Preview checks the data before any import.</p>
+    <label className="login-field"><span>Data type</span><select value={kind} onChange={(e) => setKind(e.target.value)}>{['products', 'stock', 'expiry', 'sales'].map((item) => <option key={item}>{item}</option>)}</select></label>
+    <label className="login-field"><span>CSV file</span><input type="file" accept=".csv,text/csv" onChange={async (e) => setCsvText(await e.target.files?.[0]?.text() ?? '')} /></label>
+    {result ? <p className="login-error">{result}</p> : null}
+    <div className="workspace-actions"><button className="btn" type="button" disabled={busy || !csvText} onClick={() => run(false)}>Preview file</button><button className="btn btn-primary" type="button" disabled={busy || !csvText} onClick={() => run(true)}>Import approved file</button></div>
+  </WorkspaceSection>
+}
+
+function StoreSetupPanel() {
+  const [storeId, setStoreId] = useState('')
+  const [name, setName] = useState('')
+  const [areas, setAreas] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setMessage(null)
+    try {
+      const entities = areas.split(',').map((label) => label.trim()).filter(Boolean).map((label, index) => ({ local_id: `area_${index + 1}`, entity_type: 'area', display_name: label }))
+      await fetchJson('/twin/onboarding/self-service', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ store_id: storeId, display_name: name, entities }) }, new AbortController().signal)
+      setMessage(`${name} is ready for data import, connections, and operational monitoring.`)
+    } catch { setMessage('The store could not be created. Use a short store ID with letters, numbers, underscores, or hyphens.') }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Set up your store">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">Create the operational store record before importing stock or connecting systems.</p>
+      <label className="login-field"><span>Store name</span><input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+      <label className="login-field"><span>Store ID</span><input value={storeId} onChange={(e) => setStoreId(e.target.value)} placeholder="central-store" required /></label>
+      <label className="login-field"><span>Initial store areas</span><input value={areas} onChange={(e) => setAreas(e.target.value)} placeholder="Backroom, Dairy fridge, Front shelf" /></label>
+      {message ? <p className="login-error">{message}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy || !name || !storeId}>{busy ? 'Creating…' : 'Create store'}</button>
+    </form>
+  </WorkspaceSection>
+}
+
+function CompanyProfilePanel() {
+  const [form, setForm] = useState({ name: '', country: 'ZA', currency: 'ZAR', timezone: 'Africa/Johannesburg' })
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchBackendJson<{ profile?: typeof form }>('/tenants/me', { method: 'GET' }, controller.signal)
+      .then((payload) => payload.profile && setForm({ ...form, ...payload.profile }))
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setMessage(null)
+    try {
+      await fetchJson('/tenants/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }, new AbortController().signal)
+      setMessage('Company profile saved.')
+    } catch { setMessage('The company profile could not be saved. Try again.') }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Company profile">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">Set the business identity used throughout this store’s operations.</p>
+      <label className="login-field"><span>Company name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
+      <label className="login-field"><span>Country</span><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} required /></label>
+      <label className="login-field"><span>Currency</span><input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} required /></label>
+      <label className="login-field"><span>Timezone</span><input value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} required /></label>
+      {message ? <p className="login-error">{message}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save company profile'}</button>
+    </form>
+  </WorkspaceSection>
+}
+
+// Shown only when the backend is configured for real client auth
+// (SHELFWISE_AUTH_MODE=jwt, public demo sessions disabled) and this browser has no valid
+// session cookie yet - the owner's actual entry point into a real deployment, not a demo
+// gate. See ensureBrowserSession/isUnauthorizedError above for how this state is reached.
+function LoginScreen({
+  onLogin,
+  error,
+  busy,
+}: {
+  onLogin: (email: string, password: string) => void
+  error: string | null
+  busy: boolean
+}) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!email.trim() || !password || busy) return
+    onLogin(email.trim(), password)
+  }
+
+  return (
+    <div className="login-screen">
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-mark" aria-hidden>
+          <span className="avatar-mark" />
+        </div>
+        <h1>ShelfWise</h1>
+        <p className="muted">Sign in with your company account to open this store's operations.</p>
+        <p className="muted">Need access? Ask your store owner to create your work account in People &amp; access.</p>
+        <label className="login-field">
+          <span>Email</span>
+          <input
+            type="email"
+            autoComplete="username"
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy}
+            required
+          />
+        </label>
+        <label className="login-field">
+          <span>Password</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={busy}
+            required
+          />
+        </label>
+        {error ? <p className="login-error">{error}</p> : null}
+        <button className="btn btn-primary" type="submit" disabled={busy || !email.trim() || !password}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 function App() {
@@ -3237,6 +3828,9 @@ function App() {
   const [agenticRuns, setAgenticRuns] = useState<Record<string, AgenticRunStatus>>({})
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [authRequired, setAuthRequired] = useState(false)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loggingIn, setLoggingIn] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   // Sidebar is persistent on desktop (open by default), an overlay on mobile (closed by default).
   const [sidebarOpen, setSidebarOpen] = useState(() => !isOverlayViewport())
@@ -3291,7 +3885,18 @@ function App() {
     setError(null)
     setOps(emptyOps(dataDomain))
     async function load() {
-      await ensureBrowserSession(controller.signal)
+      try {
+        await ensureBrowserSession(controller.signal)
+      } catch (sessionError) {
+        if (controller.signal.aborted) return
+        if (isUnauthorizedError(sessionError)) {
+          setAuthRequired(true)
+          setLoadState('idle')
+          return
+        }
+        throw sessionError
+      }
+      setAuthRequired(false)
       const payload = dataDomain === 'world_simulation'
         ? await fetchScenario(SCENARIO_PATH, controller.signal)
         : ({} as GoldenScenario)
@@ -3437,6 +4042,21 @@ function App() {
   }, [])
 
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
+
+  const handleLogin = async (email: string, password: string) => {
+    setLoggingIn(true)
+    setLoginError(null)
+    const controller = new AbortController()
+    try {
+      await postLogin(email, password, controller.signal)
+      setAuthRequired(false)
+      setReloadKey((key) => key + 1)
+    } catch (loginErr) {
+      setLoginError(loginErr instanceof Error ? loginErr.message : String(loginErr))
+    } finally {
+      setLoggingIn(false)
+    }
+  }
 
   // Opening a surface (approvals) or starting a new chat must reveal the chat on mobile, where the
   // sidebar is a full overlay; on desktop the persistent sidebar stays put.
@@ -3693,6 +4313,10 @@ function App() {
       })
   }
 
+  if (authRequired) {
+    return <LoginScreen onLogin={handleLogin} error={loginError} busy={loggingIn} />
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -3743,7 +4367,7 @@ function App() {
               type="button"
               className={dataDomain === 'world_simulation' ? 'is-active' : ''}
               aria-pressed={dataDomain === 'world_simulation'}
-              title="Generated test scenarios"
+              title="Operational validation"
               onClick={() => selectDataDomain('world_simulation')}
             >
               Simulation

@@ -681,9 +681,11 @@ flowchart TB
     HITL --> WRITE
 ```
 
-Neither diagram above is implemented yet — today's chat is a single dual-model role router with a
-12-message window and no skill catalogue or hierarchical memory. See the plan doc's Sections 41-43
-for the implementation-ready code blueprint and phased rollout before either is claimed as built.
+The conversation-memory and progressive-skill parts of these diagrams are implemented. Chat keeps
+a provenance-tracked rolling summary beyond the recent-turn window, discovers only promoted,
+role-appropriate skills, and records the exact preflight context budget used for each inference
+request. The diagrams remain an architectural overview: they do not claim token streaming, an
+unbounded memory store, or automatic write execution without human approval.
 
 ## Inference Strategy
 

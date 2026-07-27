@@ -137,6 +137,14 @@ class PostgresCandidateHistoryStore:
         candidate_key = record["candidate_key"]
         recorded_at = datetime.now(UTC)
         with self._connect(tenant_id) as conn:
+            # `max(sequence) + 1` is otherwise a read-modify-write race: two lifecycle
+            # transitions for the same candidate can both select the same next sequence
+            # and one loses to the primary key. Scope an advisory lock to this tenant and
+            # candidate for the transaction; unrelated candidates continue concurrently.
+            conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"{tenant_id}\x1f{candidate_key}",),
+            )
             row = conn.execute(
                 """
                 insert into shelfwise_candidate_history

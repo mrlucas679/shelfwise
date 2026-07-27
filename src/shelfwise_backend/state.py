@@ -11,6 +11,7 @@ from __future__ import annotations
 from shelfwise_action import create_decision_store
 from shelfwise_catalog import create_product_catalog_store
 from shelfwise_connectors import (
+    create_connector_credential_store,
     create_cursor_store,
     create_inbound_record_store,
     create_writeback_sink,
@@ -18,12 +19,13 @@ from shelfwise_connectors import (
 from shelfwise_inventory import create_inventory_position_store
 from shelfwise_memory import create_learning_store
 from shelfwise_mlops import (
+    create_evaluation_registry,
     create_model_run_registry,
     create_prompt_registry,
     create_tenant_fact_store,
 )
 from shelfwise_mlops.skill_registry import create_skill_registry, default_skill_manifests
-from shelfwise_storage import create_tenant_profile_store
+from shelfwise_storage import create_account_store, create_tenant_profile_store
 from shelfwise_twin import (
     ScenarioEngine,
     TwinProjectionLoopService,
@@ -60,12 +62,15 @@ journal = create_journal()
 trace_registry = TraceRegistry()
 tool_audit = AuditLog()
 model_run_registry = create_model_run_registry()
+evaluation_registry = create_evaluation_registry()
 prompt_registry = create_prompt_registry()
 tenant_fact_store = create_tenant_fact_store()
 tenant_profile_store = create_tenant_profile_store()
+account_store = create_account_store()
 writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
 connector_cursor_store = create_cursor_store()
+connector_credential_store = create_connector_credential_store()
 product_catalog_store = create_product_catalog_store()
 candidate_store = create_candidate_store()
 open_order_store = create_open_order_store()

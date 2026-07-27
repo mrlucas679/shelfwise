@@ -5,6 +5,7 @@ description = "AMD ACT II hackathon app: AI operating layer for retail waste, in
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
+  "cryptography>=42",
   "fastapi>=0.115",
   "httpx>=0.27",
   "psycopg[binary,pool]>=3.2",
@@ -42,6 +43,7 @@ packages = [
   "src/shelfwise",
   "src/shelfwise_action",
   "src/shelfwise_backend",
+  "src/shelfwise_benchmark",
   "src/shelfwise_capabilities",
   "src/shelfwise_catalog",
   "src/shelfwise_connectors",
@@ -51,10 +53,12 @@ packages = [
   "src/shelfwise_edge",
   "src/shelfwise_eval",
   "src/shelfwise_inference",
+  "src/shelfwise_inventory",
   "src/shelfwise_memory",
   "src/shelfwise_multimodal",
   "src/shelfwise_mlops",
   "src/shelfwise_resilience",
+  "src/shelfwise_runtime",
   "src/shelfwise_storage",
   "src/shelfwise_synthdata",
   "src/shelfwise_twin",

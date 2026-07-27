@@ -75,6 +75,14 @@ create table if not exists shelfwise_connector_cursors (
     primary key (tenant_id, system)
 );
 
+create table if not exists shelfwise_connector_credentials (
+    tenant_id text not null,
+    system text not null,
+    encrypted_payload text not null,
+    updated_at timestamptz not null default now(),
+    primary key (tenant_id, system)
+);
+
 create table if not exists shelfwise_open_orders (
     tenant_id text not null,
     data_domain text not null default 'operational_twin',
@@ -294,6 +302,18 @@ on shelfwise_model_runs (tenant_id, created_at desc);
 
 create index if not exists idx_shelfwise_model_runs_tenant_domain_created
 on shelfwise_model_runs (tenant_id, data_domain, created_at desc);
+
+create table if not exists shelfwise_evaluations (
+    tenant_id text not null,
+    id text not null,
+    pass_rate double precision not null check (pass_rate >= 0 and pass_rate <= 1),
+    gate_passed boolean not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, id)
+);
+
+create index if not exists idx_shelfwise_evaluations_tenant_created
+on shelfwise_evaluations (tenant_id, created_at desc);
 
 create table if not exists shelfwise_prompt_versions (
     tenant_id text not null,
@@ -634,6 +654,14 @@ create policy shelfwise_connector_cursors_tenant_isolation on shelfwise_connecto
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 
+alter table shelfwise_connector_credentials enable row level security;
+alter table shelfwise_connector_credentials force row level security;
+drop policy if exists shelfwise_connector_credentials_tenant_isolation
+on shelfwise_connector_credentials;
+create policy shelfwise_connector_credentials_tenant_isolation on shelfwise_connector_credentials
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
 alter table shelfwise_open_orders enable row level security;
 alter table shelfwise_open_orders force row level security;
 drop policy if exists shelfwise_open_orders_tenant_isolation on shelfwise_open_orders;
@@ -690,6 +718,13 @@ alter table shelfwise_model_runs enable row level security;
 alter table shelfwise_model_runs force row level security;
 drop policy if exists shelfwise_model_runs_tenant_isolation on shelfwise_model_runs;
 create policy shelfwise_model_runs_tenant_isolation on shelfwise_model_runs
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_evaluations enable row level security;
+alter table shelfwise_evaluations force row level security;
+drop policy if exists shelfwise_evaluations_tenant_isolation on shelfwise_evaluations;
+create policy shelfwise_evaluations_tenant_isolation on shelfwise_evaluations
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 
@@ -868,3 +903,16 @@ create index if not exists brin_shelfwise_inbound_records_ingested_at
 on shelfwise_inbound_records using brin (ingested_at);
 create index if not exists brin_cascade_runs_started_at
 on cascade_runs using brin (started_at);
+
+create table if not exists shelfwise_work_accounts (
+    tenant_id text not null,
+    email text not null,
+    payload jsonb not null,
+    primary key (tenant_id, email)
+);
+alter table shelfwise_work_accounts enable row level security;
+alter table shelfwise_work_accounts force row level security;
+drop policy if exists shelfwise_work_accounts_tenant_isolation on shelfwise_work_accounts;
+create policy shelfwise_work_accounts_tenant_isolation on shelfwise_work_accounts
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));

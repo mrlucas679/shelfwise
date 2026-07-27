@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
-from shelfwise_backend.app import app
+from shelfwise_backend.app import _chunk_answer_for_delta_events, app
 from shelfwise_backend.chat_store import ChatConversationStore
 from shelfwise_backend.tenant import encode_hs256_token
 
@@ -187,9 +187,26 @@ def test_chat_store_bounds_persisted_history() -> None:
     assert conversation["messages"][0]["id"] == "msg_7"
 
 
+def test_chunk_answer_for_delta_events_reconstitutes_exactly() -> None:
+    assert "".join(_chunk_answer_for_delta_events("")) == ""
+    assert "".join(_chunk_answer_for_delta_events("one")) == "one"
+    long_answer = " ".join(f"word{i}" for i in range(37))
+    assert "".join(_chunk_answer_for_delta_events(long_answer)) == long_answer
+    assert len(_chunk_answer_for_delta_events(long_answer, words_per_chunk=4)) > 1
+
+
 def test_chat_stream_emits_a_truthful_lifecycle_envelope(monkeypatch) -> None:
-    """SSE streaming, honestly: accepted -> answer (the validated reply, once it truly
-    exists) -> done (the same receipts POST /chat returns). No fake token dribble."""
+    """SSE streaming, honestly: accepted -> delta* (the validated reply, delivered
+    incrementally, only once it truly exists) -> answer (the same complete text once
+    more, for backward compatibility) -> done (the same receipts POST /chat returns).
+
+    The `delta` events chunk the already-validated answer rather than dribbling live,
+    unvalidated provider tokens - see `_chunk_answer_for_delta_events`'s docstring for why
+    that is the correct (not merely convenient) design given the shared agentic
+    tool-calling loop every cascade also depends on. Concatenating every `delta` chunk
+    must reconstitute the exact validated answer, byte for byte.
+    """
+    import json as _json
     from uuid import uuid4
 
     _enable_jwt(monkeypatch)
@@ -210,12 +227,26 @@ def test_chat_stream_emits_a_truthful_lifecycle_envelope(monkeypatch) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     text = response.text
     assert "event: accepted" in text
+    assert "event: delta" in text
     assert "event: answer" in text
     assert "event: done" in text
     assert '"correlation_id"' in text
-    assert "event: delta" not in text, (
-        "no live endpoint is configured, so no token delta may be fabricated"
-    )
+
+    events: list[tuple[str, dict]] = []
+    for block in text.split("\n\n"):
+        if not block.strip():
+            continue
+        event_line, data_line = block.split("\n", 1)
+        event_name = event_line.removeprefix("event: ")
+        payload = _json.loads(data_line.removeprefix("data: "))
+        events.append((event_name, payload))
+
+    delta_text = "".join(payload["text"] for name, payload in events if name == "delta")
+    answer_text = next(payload["text"] for name, payload in events if name == "answer")
+    assert delta_text == answer_text, "concatenated deltas must reconstitute the full answer"
+    assert events[0][0] == "accepted"
+    assert events[-1][0] == "done"
+    assert events[-2][0] == "answer", "the terminal answer event must arrive right before done"
 
     # Idempotent duplicate must be announced as a replay, not a fresh answer.
     replay = client.post(
@@ -228,6 +259,7 @@ def test_chat_stream_emits_a_truthful_lifecycle_envelope(monkeypatch) -> None:
         },
     )
     assert "event: replayed" in replay.text
+    assert "event: delta" in replay.text
 
 
 def test_stream_chat_deltas_parses_real_wire_chunks_and_fails_closed_offline(
@@ -268,7 +300,7 @@ def test_stream_chat_deltas_parses_real_wire_chunks_and_fails_closed_offline(
             return False
 
     monkeypatch.setattr(
-        "urllib.request.urlopen", lambda request, timeout=None: _Resp()
+        "shelfwise_inference.client._open_inference_request", lambda request, timeout=None: _Resp()
     )
     live = OpenAICompatibleInferenceClient()
     deltas = list(stream_chat_deltas(live, agent="chat", system="s", user="u"))
