@@ -33,7 +33,7 @@ from shelfwise_mlops import (
     PostgresPromptRegistry,
     PostgresTenantFactStore,
 )
-from shelfwise_storage import bind_tenant_context, reset_tenant_context
+from shelfwise_storage import bind_tenant_context, connect, reset_tenant_context
 from shelfwise_storage.tenant_profiles import PostgresTenantProfileStore
 from shelfwise_twin import (
     PostgresCalibrationRegistry,
@@ -673,12 +673,6 @@ def test_postgres_connector_credentials_are_encrypted_at_rest_and_tenant_isolate
     encryption, and isolation enforced by the same RLS every other tenant-scoped table in
     this codebase relies on (see the exhaustive RLS-coverage audit in HANDOFF.md), not just
     an incidental `where tenant_id = %s` that happened to be correct."""
-    from uuid import uuid4
-
-    import psycopg
-
-    from shelfwise_connectors import SourceSystem
-
     monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
     monkeypatch.setenv("SHELFWISE_CREDENTIAL_ENCRYPTION_KEY", "pg-contract-test-key")
     tenant_a = f"pg_cred_a_{uuid4().hex[:10]}"
@@ -688,11 +682,11 @@ def test_postgres_connector_credentials_are_encrypted_at_rest_and_tenant_isolate
 
     store.upsert(tenant_id=tenant_a, system=SourceSystem.ODOO, fields={"api_key": secret})
 
-    # Raw column contents must never contain the plaintext secret - the store's own
-    # connection is tenant_a-bound while writing, so a direct unscoped read (simulating a
-    # backup, replica, or an operator without the encryption key) is the right way to prove
-    # the ciphertext, not the plaintext, is what actually lands in the table.
-    with psycopg.connect(_DATABASE_URL, row_factory=psycopg.rows.dict_row) as conn:
+    # Read the raw column through the same tenant-bound, least-privilege app role. An
+    # unscoped read must return no rows because FORCE RLS is working, so it cannot prove
+    # ciphertext storage. The tenant-bound read exposes the stored value, not a decrypted
+    # application object, while preserving the production security boundary.
+    with connect(_DATABASE_URL, tenant_id=tenant_a) as conn:
         row = conn.execute(
             "select encrypted_payload from shelfwise_connector_credentials "
             "where tenant_id = %s and system = %s",
@@ -725,9 +719,7 @@ def test_postgres_edge_device_secrets_are_encrypted_at_rest_and_survive_a_fresh_
         EdgeDevice(device_id=device_id, tenant_id=tenant_id, store_id="store_1", hmac_secret=secret)
     )
 
-    import psycopg
-
-    with psycopg.connect(_DATABASE_URL, row_factory=psycopg.rows.dict_row) as conn:
+    with connect(_DATABASE_URL, tenant_id=tenant_id) as conn:
         row = conn.execute(
             "select encrypted_secret from shelfwise_edge_devices where device_id = %s",
             (device_id,),

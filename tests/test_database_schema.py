@@ -126,6 +126,25 @@ def test_compose_init_schema_matches_tenant_scoped_tables() -> None:
         assert f"create policy {table}_tenant_isolation" in schema
 
 
+def test_compose_init_schema_includes_edge_device_registry() -> None:
+    """Keep production migrations aligned with the registry's local bootstrap schema."""
+    schema = (ROOT / "src" / "shelfwise_storage" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(schema.split())
+
+    assert "create table if not exists shelfwise_edge_devices" in normalized
+    for column in (
+        "device_id text primary key",
+        "tenant_id text not null",
+        "store_id text not null",
+        "encrypted_secret text not null",
+        "active boolean not null default true",
+    ):
+        assert column in normalized
+    assert "alter table shelfwise_edge_devices force row level security" not in normalized
+
+
 def test_model_run_schema_migrates_telemetry_columns_before_domain_index() -> None:
     schema = (ROOT / "src" / "shelfwise_storage" / "schema.sql").read_text(
         encoding="utf-8"

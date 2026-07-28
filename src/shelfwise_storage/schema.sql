@@ -83,6 +83,20 @@ create table if not exists shelfwise_connector_credentials (
     primary key (tenant_id, system)
 );
 
+-- Edge device identity is intentionally not tenant-RLS-scoped. The signed observation
+-- endpoint must resolve the tenant from an opaque device_id before a tenant is known.
+-- Tenant-scoped list/revoke operations enforce tenant_id in their application queries.
+create table if not exists shelfwise_edge_devices (
+    device_id text primary key,
+    tenant_id text not null,
+    store_id text not null,
+    encrypted_secret text not null,
+    active boolean not null default true,
+    created_at timestamptz not null default now()
+);
+create index if not exists idx_shelfwise_edge_devices_tenant_store
+on shelfwise_edge_devices (tenant_id, store_id, device_id);
+
 create table if not exists shelfwise_open_orders (
     tenant_id text not null,
     data_domain text not null default 'operational_twin',
