@@ -83,3 +83,6 @@ reports/*.out.log
 reports/*.err.log
 reports/inference_architecture_eval_*/
 .playwright-cli/
+
+# Horizon audit sessions contain generated and private local evidence.
+/.horizon/
