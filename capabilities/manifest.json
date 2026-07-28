@@ -302,7 +302,7 @@
           "symbol": "SourceSystem.CSV"
         },
         {
-          "line": 33,
+          "line": 41,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -337,7 +337,7 @@
           "symbol": "SourceSystem.DYNAMICS"
         },
         {
-          "line": 35,
+          "line": 53,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -371,7 +371,7 @@
           "symbol": "SourceSystem.LIGHTSPEED"
         },
         {
-          "line": 67,
+          "line": 97,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -406,7 +406,7 @@
           "symbol": "SourceSystem.ODOO"
         },
         {
-          "line": 34,
+          "line": 42,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -441,7 +441,7 @@
           "symbol": "SourceSystem.SAP"
         },
         {
-          "line": 46,
+          "line": 65,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -476,7 +476,7 @@
           "symbol": "SourceSystem.SHOPIFY"
         },
         {
-          "line": 56,
+          "line": 76,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -511,7 +511,7 @@
           "symbol": "SourceSystem.SQUARE"
         },
         {
-          "line": 45,
+          "line": 64,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -546,7 +546,7 @@
           "symbol": "SourceSystem.SYSPRO"
         },
         {
-          "line": 66,
+          "line": 86,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -581,7 +581,7 @@
           "symbol": "SourceSystem.YOCO"
         },
         {
-          "line": 77,
+          "line": 107,
           "path": "src/shelfwise_connectors/catalog.py",
           "symbol": "_CATALOG"
         },
@@ -1211,7 +1211,7 @@
       ],
       "sources": [
         {
-          "line": 1091,
+          "line": 1093,
           "path": "frontend/src/App.tsx",
           "symbol": "ApprovalPanel"
         }
@@ -1236,7 +1236,7 @@
       ],
       "sources": [
         {
-          "line": 3486,
+          "line": 3533,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -1261,7 +1261,7 @@
       ],
       "sources": [
         {
-          "line": 1180,
+          "line": 1182,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1286,7 +1286,7 @@
       ],
       "sources": [
         {
-          "line": 1181,
+          "line": 1183,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1311,7 +1311,7 @@
       ],
       "sources": [
         {
-          "line": 1179,
+          "line": 1181,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1340,7 +1340,7 @@
       ],
       "sources": [
         {
-          "line": 1183,
+          "line": 1185,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1360,7 +1360,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1182,
+          "line": 1184,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1389,7 +1389,7 @@
       ],
       "sources": [
         {
-          "line": 1175,
+          "line": 1177,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1418,7 +1418,7 @@
       ],
       "sources": [
         {
-          "line": 1184,
+          "line": 1186,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1443,7 +1443,7 @@
       ],
       "sources": [
         {
-          "line": 1178,
+          "line": 1180,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1468,7 +1468,7 @@
       ],
       "sources": [
         {
-          "line": 1173,
+          "line": 1175,
           "path": "frontend/src/App.tsx",
           "symbol": "SidebarPage"
         }
@@ -1493,7 +1493,7 @@
       ],
       "sources": [
         {
-          "line": 1177,
+          "line": 1179,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1513,7 +1513,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1176,
+          "line": 1178,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1902,7 +1902,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 30,
+          "line": 45,
           "path": "src/shelfwise_backend/routes_connector_credentials.py",
           "symbol": "list_connector_credential_status"
         }
@@ -3222,7 +3222,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 46,
+          "line": 61,
           "path": "src/shelfwise_backend/routes_connector_credentials.py",
           "symbol": "upsert_connector_credentials"
         }
@@ -3244,9 +3244,31 @@
       "relationships": [],
       "sources": [
         {
-          "line": 68,
+          "line": 115,
           "path": "src/shelfwise_backend/routes_connector_credentials.py",
           "symbol": "delete_connector_credentials"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_method",
+        "tests/test_frontend_route_coverage.py::test_frontend_connects_every_backend_schema_path"
+      ]
+    },
+    {
+      "id": "openapi_route:post:/connectors/{system}/credentials/test",
+      "kind": "openapi_route",
+      "method": "POST",
+      "name": "POST /connectors/{system}/credentials/test",
+      "note": null,
+      "operation_id": "test_connector_credentials",
+      "path": "/connectors/{system}/credentials/test",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 83,
+          "path": "src/shelfwise_backend/routes_connector_credentials.py",
+          "symbol": "test_connector_credentials"
         }
       ],
       "status": "verified",
@@ -5645,7 +5667,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:e6c26aa1e4aa417af2dac5d9e6f06a2a103cd8e959d583e18e2e62766271684c",
+  "fingerprint": "sha256:a4009e9f7d26cb758d753b11f88aa4e0633b0b9a0dbe94515228a21c5c055226",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

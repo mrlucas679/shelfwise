@@ -218,6 +218,8 @@ type ConnectorSystemRow = {
   write_back_mode?: string
   enabled_for_tenant?: boolean
   status?: string
+  credential_fields?: { key: string; label: string; secret?: boolean }[]
+  connection_test_supported?: boolean
 }
 type InboundRecordRow = {
   id?: string
@@ -1263,6 +1265,7 @@ const GATED_ENDPOINTS = [
   { label: 'Connector credential status', method: 'GET', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Whether this tenant has stored credentials for a system - never returns the values.' },
   { label: 'Connector credential store', method: 'POST', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Owner-only: store this tenant\'s own encrypted ERP credentials, used in place of the shared env-var default.' },
   { label: 'Connector credential delete', method: 'POST', path: '/connectors/{system}/credentials/delete', group: 'connections', detail: 'Owner-only: remove this tenant\'s stored credentials, reverting that system to the shared env-var default.' },
+  { label: 'Connector credential test', method: 'POST', path: '/connectors/{system}/credentials/test', group: 'connections', detail: 'Owner-only: live-probe a poll-based system with posted or stored credentials before relying on them.' },
   { label: 'CSV import preview', method: 'POST', path: '/intake/csv/preview', group: 'connections', detail: 'Dry-run a client CSV: inferred column mapping and per-row validation, no writes.' },
   { label: 'CSV import commit', method: 'POST', path: '/intake/csv/commit', group: 'connections', detail: 'Idempotent CSV import through the connector pipeline; invalid rows quarantine with provenance.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
@@ -1986,67 +1989,58 @@ function WorkspaceEmpty({ children }: { children: ReactNode }) {
 }
 
 type ConnectorCredentialField = { key: string; label: string; secret?: boolean }
-type ConnectorCredentialSystem = { system: string; label: string; fields: ConnectorCredentialField[] }
-
-// The four poll-based ERP/WMS systems that actually read from
-// `shelfwise_connectors.credentials` (see connector_poll_service.py's `_resolved_fields` -
-// field names here must match exactly what that resolver looks up). Webhook-based systems
-// (Shopify/Square/Lightspeed/Yoco) authenticate the sender via a shared webhook secret
-// instead, not a credential a store owner enters here.
-const CONNECTOR_CREDENTIAL_SYSTEMS: ConnectorCredentialSystem[] = [
-  {
-    system: 'odoo',
-    label: 'Odoo',
-    fields: [
-      { key: 'base_url', label: 'Base URL' },
-      { key: 'database', label: 'Database' },
-      { key: 'uid', label: 'User ID' },
-      { key: 'api_key', label: 'API key', secret: true },
-    ],
-  },
-  {
-    system: 'sap',
-    label: 'SAP S/4HANA',
-    fields: [
-      { key: 'base_url', label: 'Base URL' },
-      { key: 'token', label: 'API token', secret: true },
-    ],
-  },
-  {
-    system: 'syspro',
-    label: 'SYSPRO',
-    fields: [
-      { key: 'base_url', label: 'Base URL' },
-      { key: 'token', label: 'API token', secret: true },
-    ],
-  },
-  {
-    system: 'dynamics',
-    label: 'Dynamics Business Central',
-    fields: [
-      { key: 'base_url', label: 'Items collection URL' },
-      { key: 'token', label: 'OAuth bearer token', secret: true },
-      { key: 'location_id', label: 'Location ID' },
-    ],
-  },
-]
+type ConnectorCredentialSystem = {
+  system: string
+  label: string
+  fields: ConnectorCredentialField[]
+  connectionTestSupported: boolean
+}
+type ConnectionTestOutcome = { status: string; ok: boolean; detail: string }
 
 /** Self-serve "connect your ERP/POS" panel: the actual UI a store owner uses to store
  * their own encrypted connector credentials (POST /connectors/{system}/credentials, owner
  * role only - see routes_connector_credentials.py) instead of an operator hand-editing
  * env vars. Values are never re-displayed once saved - only whether a system is
- * configured (GET .../credentials returns configured: bool, never the stored fields). */
+ * configured (GET .../credentials returns configured: bool, never the stored fields).
+ *
+ * The field list itself is fetched from GET /connectors/systems (credential_fields,
+ * catalog.py) instead of being duplicated here, so adding a new poll-based system is a
+ * backend catalog entry, not a frontend code change - see connector_test.CREDENTIAL_FIELDS
+ * for the single source of truth. */
 function ConnectorCredentialsPanel() {
+  const [systems, setSystems] = useState<ConnectorCredentialSystem[]>([])
   const [status, setStatus] = useState<Record<string, boolean>>({})
   const [openSystem, setOpenSystem] = useState<string | null>(null)
   const [formValues, setFormValues] = useState<Record<string, string>>({})
   const [busySystem, setBusySystem] = useState<string | null>(null)
   const [rowError, setRowError] = useState<Record<string, string>>({})
+  const [testResult, setTestResult] = useState<Record<string, ConnectionTestOutcome>>({})
+  const [testingSystem, setTestingSystem] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchJson<{ systems?: ConnectorSystemRow[] }>('/connectors/systems', {}, controller.signal)
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        const credentialSystems = (payload.systems ?? [])
+          .filter((row) => (row.credential_fields?.length ?? 0) > 0 && row.system && row.label)
+          .map((row) => ({
+            system: row.system as string,
+            label: row.label as string,
+            fields: row.credential_fields ?? [],
+            connectionTestSupported: Boolean(row.connection_test_supported),
+          }))
+        setSystems(credentialSystems)
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
 
   const refreshStatus = useCallback(() => {
+    if (!systems.length) return () => undefined
     const controller = new AbortController()
     Promise.all(
-      CONNECTOR_CREDENTIAL_SYSTEMS.map((entry) =>
+      systems.map((entry) =>
         fetchJson<{ configured?: boolean }>(`/connectors/${entry.system}/credentials`, {}, controller.signal)
           .then((payload) => [entry.system, Boolean(payload.configured)] as const)
           .catch(() => [entry.system, undefined] as const),
@@ -2062,7 +2056,7 @@ function ConnectorCredentialsPanel() {
       })
     })
     return () => controller.abort()
-  }, [])
+  }, [systems])
 
   useEffect(() => refreshStatus(), [refreshStatus])
 
@@ -2070,10 +2064,43 @@ function ConnectorCredentialsPanel() {
     setOpenSystem(entry.system)
     setFormValues(Object.fromEntries(entry.fields.map((field) => [field.key, ''])))
     setRowError((prev) => ({ ...prev, [entry.system]: '' }))
+    setTestResult((prev) => ({ ...prev, [entry.system]: undefined as unknown as ConnectionTestOutcome }))
+  }
+
+  const missingFields = (entry: ConnectorCredentialSystem) =>
+    entry.fields.filter((field) => !formValues[field.key]?.trim())
+
+  const testConnection = async (entry: ConnectorCredentialSystem, useSavedCredentials: boolean) => {
+    if (!useSavedCredentials) {
+      const missing = missingFields(entry)
+      if (missing.length) {
+        setRowError((prev) => ({ ...prev, [entry.system]: `${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required before testing.` }))
+        return
+      }
+    }
+    setTestingSystem(entry.system)
+    setRowError((prev) => ({ ...prev, [entry.system]: '' }))
+    const controller = new AbortController()
+    try {
+      const outcome = await fetchJson<ConnectionTestOutcome>(
+        `/connectors/${entry.system}/credentials/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(useSavedCredentials ? {} : { fields: formValues }),
+        },
+        controller.signal,
+      )
+      setTestResult((prev) => ({ ...prev, [entry.system]: outcome }))
+    } catch (testError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: testError instanceof Error ? testError.message : String(testError) }))
+    } finally {
+      setTestingSystem(null)
+    }
   }
 
   const submitForm = async (entry: ConnectorCredentialSystem) => {
-    const missing = entry.fields.filter((field) => !formValues[field.key]?.trim())
+    const missing = missingFields(entry)
     if (missing.length) {
       setRowError((prev) => ({ ...prev, [entry.system]: `${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.` }))
       return
@@ -2106,6 +2133,7 @@ function ConnectorCredentialsPanel() {
     try {
       await fetchJson(`/connectors/${entry.system}/credentials/delete`, { method: 'POST' }, controller.signal)
       setStatus((prev) => ({ ...prev, [entry.system]: false }))
+      setTestResult((prev) => ({ ...prev, [entry.system]: undefined as unknown as ConnectionTestOutcome }))
     } catch (deleteError) {
       setRowError((prev) => ({ ...prev, [entry.system]: deleteError instanceof Error ? deleteError.message : String(deleteError) }))
     } finally {
@@ -2114,17 +2142,20 @@ function ConnectorCredentialsPanel() {
   }
 
   return (
-    <WorkspaceSection title="Connect your systems" count={pluralLabel(CONNECTOR_CREDENTIAL_SYSTEMS.length, 'system')}>
+    <WorkspaceSection title="Connect your systems" count={pluralLabel(systems.length, 'system')}>
       <p className="workspace-empty">
         Store your own ERP/POS credentials here - encrypted at rest, never shown again once saved.
-        Owner login required. Webhook-based systems (Shopify, Square, Lightspeed, Yoco) connect via a
-        shared webhook secret instead and are configured with us directly, not here.
+        Owner login required. Test the connection before saving to confirm the values actually work.
+        Webhook-based systems (Shopify, Square, Lightspeed, Yoco) connect via a shared webhook secret
+        instead and are configured with us directly, not here.
       </p>
       <div className="workspace-list connector-credentials">
-        {CONNECTOR_CREDENTIAL_SYSTEMS.map((entry) => {
+        {systems.map((entry) => {
           const configured = status[entry.system]
           const isOpen = openSystem === entry.system
           const busy = busySystem === entry.system
+          const testing = testingSystem === entry.system
+          const result = testResult[entry.system]
           return (
             <div className="connector-credential-row" key={entry.system}>
               <WorkspaceRow
@@ -2144,20 +2175,36 @@ function ConnectorCredentialsPanel() {
                         type={field.secret ? 'password' : 'text'}
                         value={formValues[field.key] ?? ''}
                         onChange={(e) => setFormValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                        disabled={busy}
+                        disabled={busy || testing}
                       />
                     </label>
                   ))}
+                  {result ? (
+                    <p className={result.ok ? 'workspace-empty' : 'login-error'}>
+                      {result.ok ? 'Connection test passed: ' : 'Connection test failed: '}
+                      {result.detail}
+                    </p>
+                  ) : null}
                   <div className="connector-credential-actions">
-                    <button className="btn btn-primary" type="button" disabled={busy} onClick={() => submitForm(entry)}>
+                    {entry.connectionTestSupported ? (
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        disabled={busy || testing}
+                        onClick={() => testConnection(entry, false)}
+                      >
+                        {testing ? 'Testing…' : 'Test connection'}
+                      </button>
+                    ) : null}
+                    <button className="btn btn-primary" type="button" disabled={busy || testing} onClick={() => submitForm(entry)}>
                       {busy ? 'Saving…' : configured ? 'Update' : 'Connect'}
                     </button>
                     {configured ? (
-                      <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => disconnect(entry)}>
+                      <button className="btn btn-secondary" type="button" disabled={busy || testing} onClick={() => disconnect(entry)}>
                         Disconnect
                       </button>
                     ) : null}
-                    <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => setOpenSystem(null)}>
+                    <button className="btn btn-ghost" type="button" disabled={busy || testing} onClick={() => setOpenSystem(null)}>
                       Cancel
                     </button>
                   </div>

@@ -22,6 +22,14 @@ from .connectors import (
     create_cursor_store,
     verify_signature,
 )
+from .connector_test import (
+    CREDENTIAL_FIELDS,
+    TESTABLE_SYSTEMS,
+    ConnectionTestResult,
+    ConnectorTestNotSupported,
+    build_test_connector,
+    test_connection,
+)
 from .connectors.systems import (
     DynamicsBusinessCentralInventoryConnector,
     LightspeedSaleWebhookReceiver,
@@ -78,10 +86,14 @@ from .validation import validate_expiry, validate_inventory, validate_product, v
 from .writeback import PostgresTaskWriteBackSink, TaskWriteBackSink, create_writeback_sink
 
 __all__ = [
+    "CREDENTIAL_FIELDS",
     "CSV_INTAKE_KINDS",
     "MAX_WEBHOOK_BYTES",
+    "TESTABLE_SYSTEMS",
+    "ConnectionTestResult",
     "ConnectorCapability",
     "ConnectorCredentialError",
+    "ConnectorTestNotSupported",
     "CredentialEncryptionError",
     "CsvIntakeError",
     "CsvPreview",
@@ -117,6 +129,7 @@ __all__ = [
     "WebhookReceiver",
     "YocoCheckoutWebhookReceiver",
     "build_records",
+    "build_test_connector",
     "connector_status_for_policy",
     "create_connector_credential_store",
     "create_cursor_store",
@@ -144,6 +157,7 @@ __all__ = [
     "raw_payload_hash",
     "record_to_event",
     "resolve_connector_credentials",
+    "test_connection",
     "validate_expiry",
     "validate_inventory",
     "validate_product",

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import time
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import shelfwise_connectors.connector_test as connector_test_module
 from shelfwise_backend.app import app
 from shelfwise_backend.state import connector_credential_store
 from shelfwise_backend.tenant import encode_hs256_token
@@ -110,6 +112,113 @@ def test_unknown_connector_system_returns_404(monkeypatch: pytest.MonkeyPatch) -
     response = client.get("/connectors/not_a_real_system/credentials", headers=owner)
 
     assert response.status_code == 404
+
+
+def test_connection_test_reports_ok_with_unsaved_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _jwt_mode(monkeypatch)
+
+    async def fake_fetch_page(self, cursor):  # noqa: ARG001 - matches PollingConnector shape
+        return [], None
+
+    monkeypatch.setattr(
+        connector_test_module.SapS4InventoryConnector, "fetch_page", fake_fetch_page
+    )
+    client = TestClient(app)
+    owner = {"Authorization": f"Bearer {_token('owner')}"}
+
+    response = client.post(
+        "/connectors/sap/credentials/test",
+        json={"fields": {"base_url": "https://sap.example.com", "token": "tok"}},
+        headers=owner,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "system": "sap",
+        "status": "ok",
+        "ok": True,
+        "detail": "connected successfully",
+    }
+
+
+def test_connection_test_reports_auth_error_without_saving_bad_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _jwt_mode(monkeypatch)
+
+    async def failing_fetch_page(self, cursor):  # noqa: ARG001
+        request = httpx.Request("GET", "https://sap.example.com")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+    monkeypatch.setattr(
+        connector_test_module.SapS4InventoryConnector, "fetch_page", failing_fetch_page
+    )
+    client = TestClient(app)
+    owner = {"Authorization": f"Bearer {_token('owner')}"}
+
+    response = client.post(
+        "/connectors/sap/credentials/test",
+        json={"fields": {"base_url": "https://sap.example.com", "token": "bad"}},
+        headers=owner,
+    )
+    status = client.get("/connectors/sap/credentials", headers=owner)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "auth_error"
+    assert status.json()["configured"] is False
+
+
+def test_connection_test_uses_stored_credentials_when_no_fields_posted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _jwt_mode(monkeypatch)
+
+    async def fake_fetch_page(self, cursor):  # noqa: ARG001
+        return [], None
+
+    monkeypatch.setattr(
+        connector_test_module.SapS4InventoryConnector, "fetch_page", fake_fetch_page
+    )
+    client = TestClient(app)
+    owner = {"Authorization": f"Bearer {_token('owner')}"}
+    client.post(
+        "/connectors/sap/credentials",
+        json={"fields": {"base_url": "https://sap.example.com", "token": "tok"}},
+        headers=owner,
+    )
+
+    response = client.post("/connectors/sap/credentials/test", json={}, headers=owner)
+
+    assert response.json()["status"] == "ok"
+
+
+def test_connection_test_on_webhook_only_system_returns_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _jwt_mode(monkeypatch)
+    client = TestClient(app)
+    owner = {"Authorization": f"Bearer {_token('owner')}"}
+
+    response = client.post("/connectors/shopify/credentials/test", json={}, headers=owner)
+
+    assert response.status_code == 422
+
+
+def test_connection_test_requires_owner_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    _jwt_mode(monkeypatch)
+    client = TestClient(app)
+    manager = {"Authorization": f"Bearer {_token('manager')}"}
+
+    response = client.post(
+        "/connectors/sap/credentials/test",
+        json={"fields": {"base_url": "https://sap.example.com", "token": "tok"}},
+        headers=manager,
+    )
+
+    assert response.status_code == 403
 
 
 def test_tenants_cannot_read_each_others_credential_status(
