@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **932 passed / 21 environment-gated skips**;
+Branch: `developers` · Final local gates: **943 passed / 21 environment-gated skips**;
 Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean;
 capability manifest **248 capabilities**, contract-verified
 (`sha256:457267630...`); Playwright golden path **11/11 passed** against isolated disposable
@@ -16,7 +16,13 @@ Postgres/Redis, the distributable wheel, the production Compose topology, and th
 shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
 credentials; this remains explicitly external rather than being inferred from the green build.
 
-## 2026-07-28 self-serve connection completeness
+## 2026-07-28 one-command startup and self-serve connection completeness
+
+- ✅ `scripts/start_shelfwise.py` provisions a shop, starts the Compose stack, waits for a
+  real health signal, and prints the console URL and first-login credentials in one command.
+  Re-running never regenerates existing secrets, which would otherwise make stored connector
+  credentials undecryptable and lock the owner out. Live `docker compose up` proof is an
+  external boundary: this machine had no free disk and an unresponsive Docker CLI.
 
 - ✅ All nine supported source systems are now owner-connectable from the product with no
   developer step. Poll-based ERPs use stored credentials with a live connection test;

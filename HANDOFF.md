@@ -1,5 +1,47 @@
 # HANDOFF — current continuation state as of 2026-07-28
 
+## One-command shop startup — BUILT, 2026-07-28
+
+`provision_new_shop.py` generated a shop's secrets but stopped there: an operator still had
+to paste the fragment into a `.env`, know which Compose file to run, and know how to tell when
+the stack was actually ready. That was the remaining developer step between "downloaded the
+application" and "signed in as the owner".
+
+`scripts/start_shelfwise.py` closes it. One command provisions the shop (only if not already
+provisioned), brings the Compose stack up, polls the real `/health` endpoint, and prints the
+console URL plus first-login credentials:
+
+```
+python scripts/start_shelfwise.py --company "Boxer Bramley" --owner-email owner@example.com
+```
+
+Design points that are correctness, not polish:
+
+- **An existing `.env` is never regenerated or overwritten.** Re-minting
+  `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` would make every stored connector credential, webhook
+  secret, and device secret permanently undecryptable, and a new password hash would lock the
+  owner out of their own instance. Re-running only restarts the stack.
+- **An empty `.env` still counts as unprovisioned**, so a half-created file is not mistaken
+  for a configured shop.
+- **The health wait is bounded and fails closed.** A stack that never becomes healthy reports
+  a clear failure instead of hanging and looking like a successful start; `ok: false` is
+  treated as not-ready rather than ready.
+- **The plaintext owner password never reaches the env file** - only its scrypt hash - and a
+  password the owner supplied is not echoed back as if generated.
+- Missing Docker produces an installable instruction, not a traceback.
+
+Tests: `tests/test_start_shelfwise.py` (11), covering each of the above.
+
+**Verification boundary, stated honestly:** the provisioning, health-gating, and Compose
+detection logic is unit-tested, but a live `docker compose up` was **not** executed in this
+session - the machine's C: drive was at zero bytes free and the Docker CLI was unresponsive.
+Whoever picks this up should free disk space and run the command once end to end against real
+Docker before treating the startup path itself as proven.
+
+**Scope, stated plainly:** this deploys ShelfWise on the machine that runs it, which is what a
+single shop evaluating the product needs. It is not a hosted multi-tenant sign-up service and
+provisions no cloud infrastructure; that remains a separate, larger piece of work.
+
 ## Self-serve retailer webhook endpoints — BUILT, 2026-07-28
 
 Closes the last connector gap that still required a developer. The 2026-07-23 credential
@@ -40,7 +82,7 @@ probe which ids exist; poll-based systems are refused an endpoint they could nev
 
 Verification on this tree:
 
-- `932 passed, 21 skipped` — complete Python suite.
+- `943 passed, 21 skipped` — complete Python suite (including the startup-script tests).
 - Ruff clean; frontend TypeScript check and production build clean.
 - Capability contract: 248 capabilities,
   `sha256:4572676304541c4f4e3fb104515af9195c8fa10a4c3620c4ccaa597f2bd5ca43`.

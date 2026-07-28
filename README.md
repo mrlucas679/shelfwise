@@ -346,6 +346,31 @@ A few endpoints worth knowing by name (used throughout this README):
 
 ## Deployment
 
+### Starting ShelfWise for one shop
+
+Requires Docker. One command sets the shop up, starts everything, and waits until the backend
+is genuinely healthy before telling you it is ready:
+
+```bash
+python scripts/start_shelfwise.py --company "Boxer Bramley" --owner-email owner@example.com
+```
+
+It writes this shop's `.env` (tenant id, session secret, owner login hash, credential
+encryption key), brings the Compose stack up, polls `/health`, then prints the console URL and
+the first-login credentials. Re-running it restarts the stack and **never** regenerates
+existing secrets — doing so would invalidate the owner's password and make every stored
+connector credential undecryptable, so an already-provisioned `.env` is left untouched.
+
+After signing in, connecting the shop's own systems is self-serve in the browser: ERP/POS
+credentials with a live connection test, signed webhook endpoints for tills and online stores,
+camera/sensor device credentials, CSV import, and staff accounts.
+
+Scope, stated plainly: this deploys ShelfWise on the machine that runs it, which is what a
+single shop evaluating the product needs. It is not a hosted multi-tenant sign-up service, and
+it provisions no cloud infrastructure.
+
+### Running Compose directly
+
 ```bash
 docker compose up --build
 ```
