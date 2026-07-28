@@ -21,8 +21,9 @@ credentials; this remains explicitly external rather than being inferred from th
 - ✅ `scripts/start_shelfwise.py` provisions a shop, starts the Compose stack, waits for a
   real health signal, and prints the console URL and first-login credentials in one command.
   Re-running never regenerates existing secrets, which would otherwise make stored connector
-  credentials undecryptable and lock the owner out. Live `docker compose up` proof is an
-  external boundary: this machine had no free disk and an unresponsive Docker CLI.
+  credentials undecryptable and lock the owner out. A real run proved the .env-preservation
+  guard and the Docker-failure path; the successful-start path remains unproven because this
+  machine's disk is full and its Docker engine is unresponsive. See HANDOFF.md.
 
 - ✅ All nine supported source systems are now owner-connectable from the product with no
   developer step. Poll-based ERPs use stored credentials with a live connection test;

@@ -32,11 +32,28 @@ Design points that are correctness, not polish:
 
 Tests: `tests/test_start_shelfwise.py` (11), covering each of the above.
 
-**Verification boundary, stated honestly:** the provisioning, health-gating, and Compose
-detection logic is unit-tested, but a live `docker compose up` was **not** executed in this
-session - the machine's C: drive was at zero bytes free and the Docker CLI was unresponsive.
-Whoever picks this up should free disk space and run the command once end to end against real
-Docker before treating the startup path itself as proven.
+**Verification boundary, stated precisely.** The script *was* executed for real against this
+machine's Docker, and that run proved two of its three paths:
+
+- **The `.env` preservation guard works in the real script**, not only in tests: the run
+  reported "`.env` already exists - keeping the existing setup and secrets" and left the
+  existing file untouched. This is the behaviour that protects an owner's password and every
+  stored connector/webhook/device secret from being silently invalidated by a re-run.
+- **The Docker-failure path behaves as designed**: when Compose could not start the stack, the
+  script printed the intended actionable message (Docker Desktop not running, or ports 8000 /
+  5173 already in use) and exited non-zero, rather than emitting a traceback or hanging
+  forever while looking like a successful start.
+
+**What is still unproven: the happy path** - a successful `compose up`, `/health` going green,
+and the console URL/credentials being printed. That could not be reached here for a purely
+environmental reason: this machine's C: drive is effectively full (it fell from ~1.6 GB to
+297 MB free during the attempt) and the Docker Desktop Linux engine became unresponsive
+(`context deadline exceeded` on its named pipe). No amount of application change fixes that.
+
+Whoever picks this up: **free real disk space first** (a backend + frontend image build needs
+several GB), confirm `docker compose version` and `docker info` both respond, then run
+`python scripts/start_shelfwise.py --company "..." --owner-email ...` once end to end in a
+clean directory and confirm the printed URL actually serves the console.
 
 **Scope, stated plainly:** this deploys ShelfWise on the machine that runs it, which is what a
 single shop evaluating the product needs. It is not a hosted multi-tenant sign-up service and
