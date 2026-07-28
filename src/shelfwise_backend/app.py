@@ -50,6 +50,7 @@ from shelfwise_storage import (
     reset_tenant_context,
 )
 
+from .auth_credentials import login_credentials_valid, scrypt_password_hash
 from .cascade import (
     validate_inventory_exception,
     validate_recall_notice,
@@ -505,40 +506,8 @@ def change_work_account_role(
     return {"account": account}
 
 
-def _scrypt_password_hash(password: str) -> str:
-    """Create a self-describing scrypt credential without persisting plaintext."""
-    import hashlib
-
-    salt = os.urandom(16)
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1)
-    return f"scrypt${salt.hex()}${digest.hex()}"
-
-
-def _login_credentials_valid(
-    *, email: str, password: str, configured_email: str, configured_hash: str
-) -> bool:
-    """Constant-shape verification: hash first, compare both, no early-exit oracle."""
-    import hashlib
-    import hmac as _hmac
-
-    try:
-        scheme, salt_hex, hash_hex = configured_hash.split("$", 2)
-        if scheme != "scrypt":
-            return False
-        expected = bytes.fromhex(hash_hex)
-        computed = hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=bytes.fromhex(salt_hex),
-            n=16384,
-            r=8,
-            p=1,
-            dklen=len(expected),
-        )
-    except (ValueError, TypeError):
-        return False
-    email_ok = _hmac.compare_digest(email.strip().lower(), configured_email)
-    password_ok = _hmac.compare_digest(computed, expected)
-    return email_ok and password_ok
+_scrypt_password_hash = scrypt_password_hash
+_login_credentials_valid = login_credentials_valid
 
 
 @app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
