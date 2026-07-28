@@ -423,6 +423,15 @@ create table if not exists shelfwise_business_profile (
     updated_at timestamptz not null
 );
 
+create table if not exists shelfwise_policy_confirmations (
+    tenant_id text not null,
+    category text not null,
+    policy_id text not null,
+    confirmed_by text not null,
+    confirmed_at timestamptz not null,
+    primary key (tenant_id, category)
+);
+
 create table if not exists shelfwise_products (
     tenant_id text not null,
     product_id text not null,
@@ -795,6 +804,15 @@ alter table shelfwise_business_profile force row level security;
 drop policy if exists shelfwise_business_profile_tenant_isolation
 on shelfwise_business_profile;
 create policy shelfwise_business_profile_tenant_isolation on shelfwise_business_profile
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+alter table shelfwise_policy_confirmations enable row level security;
+alter table shelfwise_policy_confirmations force row level security;
+drop policy if exists shelfwise_policy_confirmations_tenant_isolation
+on shelfwise_policy_confirmations;
+create policy shelfwise_policy_confirmations_tenant_isolation
+on shelfwise_policy_confirmations
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 

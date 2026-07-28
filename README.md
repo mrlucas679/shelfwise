@@ -40,6 +40,7 @@ happens.
 - [API Reference](#api-reference)
 - [Demo & Evidence](#demo--evidence)
 - [Deployment](#deployment)
+- [Operations](#operations)
 - [Project Structure](#project-structure)
 - [Current Scope](#current-scope)
   - [Digital Twin](#digital-twin-software-layer-implemented-and-tested)
@@ -315,8 +316,9 @@ A few endpoints worth knowing by name (used throughout this README):
 | `POST /scenarios/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
 | `GET /inference/smoke` | Confirms whether a call is offline, generic OpenAI-compatible, Fireworks, or explicitly declared AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
-| `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
-| `GET /onboarding/status` | Owner-only, server-derived progress for company, store, data source, devices, and work accounts |
+| `GET /decisions?queue_view=assigned` · `POST /decisions/{id}/approve\|reject` | Role-derived HITL queue; the unfiltered tenant ledger remains available with `queue_view=all` |
+| `GET /onboarding/status` · `GET /onboarding/policies` · `POST /onboarding/policies/confirm` | Owner-only progress for company, store, data source, current product policies, devices, and work accounts |
+| `GET /reports/value-recovered` | Monthly operational value backed only by explicit completion receipts; estimates remain separate |
 | `GET /auth/setup-status` · `POST /platform/bootstrap` | One-time dedicated-client company and first-owner setup |
 | `POST /auth/activate` · `POST /auth/password-reset/request\|consume` · `POST /auth/change-password` | Signed single-use activation, recovery, forced password replacement, and session invalidation |
 | `GET /accounts` · `POST /accounts/invitations` · `GET /accounts/audit` · `POST /accounts/{id}/role` · `POST /accounts/{id}/deactivate\|reactivate` | Owner-managed named work accounts, least-privilege roles, email invitations, and identity-only audit |
@@ -351,6 +353,17 @@ docker compose up --build
 The production Nginx image proxies frontend and API traffic through one origin. With the supplied
 Compose mapping, open `http://<host>:5173`; judge browsers never call their own localhost. A custom
 backend can still be selected at build time with `VITE_API_BASE`.
+
+## Operations
+
+- [Release and operations runbook](docs/RELEASE_AND_OPERATIONS_RUNBOOK.md) defines the exact-head
+  evidence gate, deployment/rollback boundary, incident handoff, and recurring controls.
+- [POPIA operations checklist](docs/POPIA_OPERATIONS_CHECKLIST.md) inventories application data
+  and marks operator/legal acceptance items honestly external.
+- `scripts/client_backup.sh` and `scripts/client_restore_verify.sh` implement the client backup
+  and isolated restore-verification procedure.
+- `scripts/health_monitor.py` probes public health/readiness without extra dependencies and can
+  write bounded incident receipts or notify an approved HTTPS webhook.
 
 ## Project Structure
 

@@ -729,6 +729,22 @@ input {
   line-height: 1.5;
 }
 
+.onboarding-policy-option {
+  cursor: pointer;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.onboarding-policy-option input {
+  accent-color: var(--accent);
+  height: 1rem;
+  width: 1rem;
+}
+
+.onboarding-policy-option small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
 .workspace-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

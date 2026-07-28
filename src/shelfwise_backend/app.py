@@ -75,6 +75,7 @@ from .decision_access import (
     reject_cross_tenant_decision_access,
     tenant_scoped_decisions,
 )
+from .decision_assignment import assigned_decision_roles, filter_assigned_decisions
 from .deps import (
     _COOKIE_OVERRIDE_ENV,
     _INSECURE_APP_ENV_NAMES,
@@ -112,6 +113,7 @@ from .routes_connector_credentials import router as connector_credentials_router
 from .routes_connectors import router as connectors_router
 from .routes_mlops import router as mlops_router
 from .routes_onboarding import router as onboarding_router
+from .routes_reports import router as reports_router
 from .routes_scenarios import router as scenarios_router
 from .routes_twin import router as twin_router
 from .state import (
@@ -237,6 +239,7 @@ app.include_router(connectors_router)
 app.include_router(connector_credentials_router)
 app.include_router(mlops_router)
 app.include_router(onboarding_router)
+app.include_router(reports_router)
 app.include_router(scenarios_router)
 
 try:
@@ -458,6 +461,12 @@ class TaskCompletionBody(BaseModel):
     completed_units: int = Field(ge=0, le=1_000_000)
     observed_location: str | None = Field(default=None, max_length=200)
     note: str | None = Field(default=None, max_length=500)
+    actual_value_recovered_minor_units: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000_000_000,
+    )
+    currency: Literal["ZAR"] = "ZAR"
 
 
 class InventoryPositionBody(BaseModel):
@@ -1781,12 +1790,21 @@ def process_one_worker_event() -> dict[str, object]:
 @app.get("/decisions")
 def list_decisions(
     data_domain: Literal["operational_twin", "world_simulation"] | None = None,
+    queue_view: Literal["all", "assigned"] = "all",
     ctx: TenantContext = CURRENT_TENANT_DEP,
 ) -> dict[str, object]:
     resolved_domain = data_domain or _chat_data_domain()
+    decisions = tenant_scoped_decisions(ctx, data_domain=resolved_domain)
+    if queue_view == "assigned":
+        decisions = filter_assigned_decisions(decisions, role=ctx.role)
     return {
         "data_domain": resolved_domain,
-        "decisions": tenant_scoped_decisions(ctx, data_domain=resolved_domain),
+        "queue_view": queue_view,
+        "assignment": {
+            "account_role": ctx.role.value,
+            "decision_roles": list(assigned_decision_roles(ctx.role)),
+        },
+        "decisions": decisions,
     }
 
 
@@ -1892,6 +1910,10 @@ def complete_writeback_task(
         "observed_location": body.observed_location,
         "note": body.note,
         "completed_by": ctx.user_id,
+        "actual_value_recovered_minor_units": (
+            body.actual_value_recovered_minor_units
+        ),
+        "currency": body.currency,
     }
     try:
         task = writeback_sink.complete_task(
@@ -1905,7 +1927,48 @@ def complete_writeback_task(
     if task is None:  # It may have disappeared between validation and completion.
         raise HTTPException(status_code=404, detail="Write-back task not found")
     positions = _record_completed_inventory_movement(task)
+    _record_verified_value_receipt(task, ctx=ctx)
     return {"task": task, "positions": positions}
+
+
+def _record_verified_value_receipt(
+    task: dict[str, Any],
+    *,
+    ctx: TenantContext,
+) -> None:
+    """Attach explicit actual value to the related decision, never an estimate."""
+    receipt = (
+        task.get("completion_receipt")
+        if isinstance(task.get("completion_receipt"), dict)
+        else {}
+    )
+    amount = receipt.get("actual_value_recovered_minor_units")
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+        return
+    rollback = (
+        task.get("rollback_instructions")
+        if isinstance(task.get("rollback_instructions"), dict)
+        else {}
+    )
+    decision_id = str(rollback.get("decision_id") or "")
+    decision = decision_store.get(decision_id) if decision_id else None
+    if (
+        decision is None
+        or decision_tenant_id(decision, ctx.tenant_id) != ctx.tenant_id
+        or str(decision.get("data_domain") or "") != DataDomain.OPERATIONAL_TWIN.value
+    ):
+        return
+    decision_store.annotate(
+        decision_id,
+        verified_outcome={
+            "minor_units": amount,
+            "currency": "ZAR",
+            "source_reference": str(receipt.get("source_reference") or ""),
+            "task_id": str(task.get("id") or ""),
+            "verified_by": ctx.user_id,
+            "verified_at": str(task.get("completed_at") or task.get("updated_at") or ""),
+        },
+    )
 
 
 def _record_completed_inventory_movement(task: dict[str, Any]) -> list[dict[str, Any]]:

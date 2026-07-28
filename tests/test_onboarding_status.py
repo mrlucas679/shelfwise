@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
+from shelfwise_backend.state import policy_confirmation_store
 from shelfwise_backend.tenant import encode_hs256_token
 
 
@@ -12,13 +13,17 @@ def test_onboarding_status_starts_incomplete_without_inventing_progress() -> Non
     assert response.status_code == 200
     body = response.json()
     assert body["ready_for_operations"] is False
-    assert body["required_steps"] == {"completed": 0, "total": 3, "next": "company"}
+    assert body["required_steps"] == {"completed": 0, "total": 4, "next": "company"}
     assert body["company"] == {"configured": False, "name": ""}
     assert body["stores"] == []
     assert body["data"] == {
         "configured": False,
         "connector_systems": [],
         "has_imported_records": False,
+    }
+    assert body["policies"] == {
+        "configured": False,
+        "confirmed_categories": [],
     }
 
 
@@ -54,13 +59,17 @@ def test_onboarding_status_resumes_from_authoritative_server_state(
             }
         },
     ).status_code == 200
+    assert client.post(
+        "/onboarding/policies/confirm",
+        json={"categories": ["dairy"]},
+    ).status_code == 200
 
     response = client.get("/onboarding/status")
 
     assert response.status_code == 200
     body = response.json()
     assert body["ready_for_operations"] is True
-    assert body["required_steps"] == {"completed": 3, "total": 3, "next": "review"}
+    assert body["required_steps"] == {"completed": 4, "total": 4, "next": "review"}
     assert body["company"] == {"configured": True, "name": "Kasi Grocer"}
     assert body["stores"] == [
         {
@@ -74,6 +83,10 @@ def test_onboarding_status_resumes_from_authoritative_server_state(
         "configured": True,
         "connector_systems": ["odoo"],
         "has_imported_records": False,
+    }
+    assert body["policies"] == {
+        "configured": True,
+        "confirmed_categories": ["dairy"],
     }
 
 
@@ -90,9 +103,14 @@ def test_onboarding_status_treats_csv_as_a_real_data_source() -> None:
         "/intake/csv/commit",
         json={"kind": "products", "csv_text": csv_text},
     )
+    confirmed = client.post(
+        "/onboarding/policies/confirm",
+        json={"categories": ["ambient"]},
+    )
     response = client.get("/onboarding/status")
 
     assert committed.status_code == 200
+    assert confirmed.status_code == 200
     assert response.status_code == 200
     assert response.json()["data"] == {
         "configured": True,
@@ -100,6 +118,86 @@ def test_onboarding_status_treats_csv_as_a_real_data_source() -> None:
         "has_imported_records": True,
     }
     assert response.json()["ready_for_operations"] is True
+
+
+def test_policy_confirmation_rejects_unknown_templates_and_is_tenant_scoped(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "policy-confirmation-secret")
+
+    def owner_headers(tenant_id: str) -> dict[str, str]:
+        token = encode_hs256_token(
+            {
+                "tenant_id": tenant_id,
+                "user_id": f"{tenant_id}_owner",
+                "role": "owner",
+            },
+            secret="policy-confirmation-secret",
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    client = TestClient(app)
+    tenant_a = owner_headers("policy_tenant_a")
+    tenant_b = owner_headers("policy_tenant_b")
+
+    unknown = client.post(
+        "/onboarding/policies/confirm",
+        json={"categories": ["invented"]},
+        headers=tenant_a,
+    )
+    confirmed = client.post(
+        "/onboarding/policies/confirm",
+        json={"categories": ["dairy", "produce"]},
+        headers=tenant_a,
+    )
+    tenant_a_policies = client.get("/onboarding/policies", headers=tenant_a)
+    tenant_b_policies = client.get("/onboarding/policies", headers=tenant_b)
+
+    assert unknown.status_code == 422
+    assert confirmed.status_code == 200
+    assert confirmed.json()["current_confirmation_count"] == 2
+    assert tenant_a_policies.json()["current_confirmation_count"] == 2
+    assert tenant_b_policies.json()["current_confirmation_count"] == 0
+
+
+def test_policy_confirmation_is_owner_only_in_jwt_mode(monkeypatch) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "policy-role-secret")
+    manager_token = encode_hs256_token(
+        {
+            "tenant_id": "sa_retail_demo",
+            "user_id": "manager_1",
+            "role": "manager",
+        },
+        secret="policy-role-secret",
+    )
+    headers = {"Authorization": f"Bearer {manager_token}"}
+    client = TestClient(app)
+
+    assert client.get("/onboarding/policies", headers=headers).status_code == 403
+    assert client.post(
+        "/onboarding/policies/confirm",
+        json={"categories": ["dairy"]},
+        headers=headers,
+    ).status_code == 403
+
+
+def test_superseded_policy_template_does_not_satisfy_readiness() -> None:
+    policy_confirmation_store.confirm(
+        tenant_id="sa_retail_demo",
+        category="dairy",
+        policy_id="dairy_chilled_v0",
+        confirmed_by="local",
+    )
+
+    status = TestClient(app).get("/onboarding/status")
+
+    assert status.status_code == 200
+    assert status.json()["policies"] == {
+        "configured": False,
+        "confirmed_categories": [],
+    }
 
 
 def test_onboarding_status_is_owner_only_in_jwt_mode(monkeypatch) -> None:

@@ -5,16 +5,28 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **907 passed / 21 environment-gated skips**;
-Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (288 modules);
-capability manifest **241 capabilities**, contract-verified
-(`sha256:3697ed095...`); Playwright golden path **10/10 passed** against isolated disposable
+Branch: `developers` · Final local gates: **921 passed / 21 environment-gated skips**;
+Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean;
+capability manifest **244 capabilities**, contract-verified
+(`sha256:4f39cff65...`); Playwright golden path **10/10 passed** against isolated disposable
 ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
 installed frontend toolchain ran these gates directly.
 GitHub CI on implementation commit `e656d1d` passed **927 tests / 1 skip** with fresh
 Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
 shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
 credentials; this remains explicitly external rather than being inferred from the green build.
+
+## 2026-07-28 product operations closure (plans 013-016)
+
+- ✅ Guided onboarding now requires an explicit confirmation of the current product-policy
+  templates per category; a superseded template version stops satisfying readiness instead of
+  silently reusing an old acknowledgement.
+- ✅ Decision queues are personalized by the verified workforce role through one server-owned
+  assignment matrix; the complete tenant ledger remains available and audit visibility is intact.
+- ✅ Monthly value reporting separates verified recovered amounts from estimated exposure.
+  Only recorded actual amounts count as verified; modeled outcomes are never summed into them.
+- ✅ Portable operations controls without a paid dependency: a stdlib health monitor with
+  bounded incident receipts, plus release/rollback and POPIA operator documentation.
 
 ## 2026-07-28 guided onboarding and account readiness
 

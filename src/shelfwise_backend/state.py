@@ -25,7 +25,11 @@ from shelfwise_mlops import (
     create_tenant_fact_store,
 )
 from shelfwise_mlops.skill_registry import create_skill_registry, default_skill_manifests
-from shelfwise_storage import create_account_store, create_tenant_profile_store
+from shelfwise_storage import (
+    create_account_store,
+    create_policy_confirmation_store,
+    create_tenant_profile_store,
+)
 from shelfwise_twin import (
     ScenarioEngine,
     TwinProjectionLoopService,
@@ -67,6 +71,7 @@ prompt_registry = create_prompt_registry()
 tenant_fact_store = create_tenant_fact_store()
 tenant_profile_store = create_tenant_profile_store()
 account_store = create_account_store()
+policy_confirmation_store = create_policy_confirmation_store()
 writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
 connector_cursor_store = create_cursor_store()

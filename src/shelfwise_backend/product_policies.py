@@ -44,6 +44,30 @@ _POLICIES = (
 )
 
 
+def list_product_policy_templates() -> list[dict[str, object]]:
+    """Return the current owner-confirmable policy templates.
+
+    The registry remains the single source of truth used by the cascade.  The API
+    receives serialized views of these same objects, so setup cannot drift from the
+    rules that operational decisions actually apply.
+    """
+    return [
+        _serialize_policy("ambient", DEFAULT_POLICY),
+        *[_serialize_policy(category, policy) for category, policy in _POLICIES],
+    ]
+
+
+def registered_product_policy(category: str) -> ProductPolicy:
+    """Resolve an exact registered category or reject an invented template."""
+    normalized = category.strip().lower()
+    if normalized == "ambient":
+        return DEFAULT_POLICY
+    for registered_category, policy in _POLICIES:
+        if normalized == registered_category:
+            return policy
+    raise ValueError(f"unsupported product policy category: {category}")
+
+
 def resolve_product_policy(category: str | None, physics: str | None = None) -> ProductPolicy:
     """Resolve a stable policy by category or physical storage family."""
     haystack = f"{category or ''} {physics or ''}".lower()
@@ -51,3 +75,17 @@ def resolve_product_policy(category: str | None, physics: str | None = None) -> 
         if term in haystack:
             return policy
     return DEFAULT_POLICY
+
+
+def _serialize_policy(category: str, policy: ProductPolicy) -> dict[str, object]:
+    """Create the bounded public representation used by onboarding."""
+    return {
+        "category": category,
+        "policy_id": policy.policy_id,
+        "expiry_review_days": policy.expiry_review_days,
+        "minimum_margin_pct": policy.minimum_margin_pct,
+        "cold_chain_sensitive": policy.cold_chain_sensitive,
+        "hitl_required": policy.hitl_required,
+        "markdown_discount_pct": policy.markdown_discount_pct,
+        "markdown_duration_hours": policy.markdown_duration_hours,
+    }

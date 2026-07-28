@@ -256,6 +256,16 @@ type WritebackTaskRow = {
   action?: RecommendedAction
   created_at?: string
   data_domain?: DataDomain
+  completion_receipt?: JsonObject
+}
+type ValueStatement = {
+  month?: string
+  currency?: string
+  verified_recovered_minor_units?: number
+  verified_receipt_count?: number
+  estimated_opportunity_minor_units?: number
+  unverified_decision_count?: number
+  verified_receipts?: JsonObject[]
 }
 type OperationalSnapshot = {
   dataDomain: DataDomain
@@ -274,6 +284,7 @@ type OperationalSnapshot = {
   platformTools: JsonObject[]
   platformToolAudit: JsonObject[]
   writebackTasks: WritebackTaskRow[]
+  valueStatement: ValueStatement
   learningThresholds: JsonObject
   learningEvents: JsonObject[]
   productAttention: ProductAttentionPayload
@@ -300,7 +311,7 @@ type OnboardingStatus = {
   required_steps: {
     completed: number
     total: number
-    next: 'company' | 'store' | 'data' | 'review'
+    next: 'company' | 'store' | 'data' | 'policies' | 'review'
   }
   company: { configured: boolean; name: string }
   stores: OnboardingStoreSummary[]
@@ -309,10 +320,18 @@ type OnboardingStatus = {
     connector_systems: string[]
     has_imported_records: boolean
   }
+  policies: {
+    configured: boolean
+    confirmed_categories: string[]
+  }
   devices: { active: number; total: number }
   accounts: { active: number; total: number }
 }
-type DecisionLogResponse = { decisions?: Decision[] }
+type DecisionLogResponse = {
+  decisions?: Decision[]
+  queue_view?: 'all' | 'assigned'
+  assignment?: { account_role?: string; decision_roles?: string[] }
+}
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
@@ -588,6 +607,14 @@ function moneyMinorUnits(value: unknown): number | null {
   }
   return null
 }
+function formatZarMinor(value: unknown): string {
+  const minorUnits = Number(value ?? 0)
+  if (!Number.isFinite(minorUnits) || minorUnits <= 0) return 'R0'
+  return `R${(minorUnits / 100).toLocaleString('en-ZA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '-'
   const money = formatMoneyish(value)
@@ -620,6 +647,7 @@ function emptyOps(dataDomain: DataDomain = 'operational_twin'): OperationalSnaps
     platformTools: [],
     platformToolAudit: [],
     writebackTasks: [],
+    valueStatement: {},
     learningThresholds: {},
     learningEvents: [],
     productAttention: {},
@@ -1247,6 +1275,8 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Product search', method: 'GET', path: '/products/search', detail: 'Bounded search-first catalogue lookup.' },
   { label: 'Decisions', method: 'GET', path: '/decisions', detail: 'Decision ledger for approvals, history, and outcomes.' },
   { label: 'Decision detail', method: 'GET', path: '/decisions/{decision_id}', detail: 'Parameterized decision record behind approval rows.' },
+  { label: 'Verified value report', method: 'GET', path: '/reports/value-recovered', detail: 'Monthly receipt-backed recovered value separated from estimates.' },
+  { label: 'Onboarding policy templates', method: 'GET', path: '/onboarding/policies', detail: 'Current versioned product policies and tenant confirmations.' },
   { label: 'Learning', method: 'GET', path: '/learning', detail: 'Outcome learning thresholds and learning events.' },
   { label: 'Write-back tasks', method: 'GET', path: '/writeback/tasks', detail: 'Task-only write-back queue.' },
   { label: 'Events', method: 'GET', path: '/events', detail: 'Persisted canonical event log.' },
@@ -1288,6 +1318,7 @@ const OPERATION_READ_ENDPOINTS = [
 ]
 
 const GATED_ENDPOINTS = [
+  { label: 'Confirm onboarding policies', method: 'POST', path: '/onboarding/policies/confirm', group: 'operations', detail: 'Owner confirmation of the exact policy templates used by decisions.' },
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
   { label: 'Account setup status', method: 'GET', path: '/auth/setup-status', group: 'operations', detail: 'Reports whether this dedicated client workspace still needs its first owner.' },
   { label: 'First company owner', method: 'POST', path: '/platform/bootstrap', group: 'operations', detail: 'One-time platform-authorized company and owner bootstrap.' },
@@ -1496,7 +1527,7 @@ function Sidebar({
   data,
   seed,
   ops,
-  recoveredToday,
+  verifiedThisMonth,
 }: {
   open: boolean
   onClose: () => void
@@ -1510,7 +1541,7 @@ function Sidebar({
   data: GoldenScenario | null
   seed: SeedSummary | null
   ops: OperationalSnapshot
-  recoveredToday: string | null
+  verifiedThisMonth: string | null
 }) {
   const intel = data?.store_intelligence
   const cover = intel?.supplier_cover
@@ -1771,9 +1802,9 @@ function Sidebar({
                     onOpen={() => openWorkspace('products')}
                   />
                   <NavRow
-                    label="Today's results"
-                    value={recoveredToday ?? 'R0'}
-                    tone={recoveredToday ? 'ok' : undefined}
+                    label="Verified value"
+                    value={verifiedThisMonth ?? 'R0'}
+                    tone={verifiedThisMonth ? 'ok' : undefined}
                     active={activeWorkspace === 'results'}
                     onOpen={() => openWorkspace('results')}
                   />
@@ -2537,12 +2568,123 @@ function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: stri
       }
     case 'results':
       return {
-        title: "Today's results",
+        title: 'Verified value',
         kicker: 'Outcome ledger',
-        status: 'today',
-        subtitle: 'Resolved actions and value recovered from decisions closed today.',
+        status: 'this month',
+        subtitle: 'Receipt-backed value kept separate from model estimates.',
       }
   }
+}
+
+function TaskCompletionPanel({
+  task,
+  onCancel,
+  onCompleted,
+}: {
+  task: WritebackTaskRow | undefined
+  onCancel: () => void
+  onCompleted: () => void
+}) {
+  const approvedUnits = Number(task?.action?.params?.units ?? 0)
+  const [sourceReference, setSourceReference] = useState('')
+  const [completedUnits, setCompletedUnits] = useState(
+    Number.isFinite(approvedUnits) ? approvedUnits : 0,
+  )
+  const [actualValueRand, setActualValueRand] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  if (!task?.id) return null
+  const taskId = task.id
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setMessage(null)
+    const actualValue = actualValueRand.trim()
+      ? Math.round(Number(actualValueRand) * 100)
+      : null
+    if (actualValue !== null && (!Number.isFinite(actualValue) || actualValue < 0)) {
+      setMessage('Actual value must be a non-negative rand amount.')
+      setBusy(false)
+      return
+    }
+    try {
+      await fetchJson(
+        `/writeback/tasks/${encodeURIComponent(taskId)}/complete?data_domain=${task.data_domain ?? 'operational_twin'}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_reference: sourceReference,
+            completed_units: completedUnits,
+            ...(actualValue === null
+              ? {}
+              : {
+                  actual_value_recovered_minor_units: actualValue,
+                  currency: 'ZAR',
+                }),
+          }),
+        },
+        new AbortController().signal,
+      )
+      onCompleted()
+    } catch {
+      setMessage('The completion receipt could not be recorded. Check the approved units and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Record completion evidence" count="manager review">
+      <form className="login-card" onSubmit={(event) => void submit(event)}>
+        <p className="muted">
+          Completing this task records evidence only. It does not write directly to the source
+          system. Actual recovered value is counted only when you enter it here.
+        </p>
+        <label className="login-field">
+          <span>Source reference</span>
+          <input
+            value={sourceReference}
+            onChange={(event) => setSourceReference(event.target.value)}
+            placeholder="POS receipt, stock count, or invoice reference"
+            maxLength={200}
+            required
+          />
+        </label>
+        <label className="login-field">
+          <span>Completed units</span>
+          <input
+            type="number"
+            min={0}
+            max={1_000_000}
+            value={completedUnits}
+            onChange={(event) => setCompletedUnits(Number(event.target.value))}
+            required
+          />
+        </label>
+        <label className="login-field">
+          <span>Actual value recovered (ZAR, optional)</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={actualValueRand}
+            onChange={(event) => setActualValueRand(event.target.value)}
+            placeholder="0.00"
+          />
+        </label>
+        {message ? <p className="login-error" role="status">{message}</p> : null}
+        <div className="onboarding-step-actions">
+          <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? 'Recording…' : 'Complete task'}
+          </button>
+        </div>
+      </form>
+    </WorkspaceSection>
+  )
 }
 
 function WorkspaceScreen({
@@ -2554,7 +2696,8 @@ function WorkspaceScreen({
   seed,
   queue,
   ops,
-  recoveredToday,
+  verifiedThisMonth,
+  onRefresh,
   agenticRuns,
   onRunAgentic,
 }: {
@@ -2566,7 +2709,8 @@ function WorkspaceScreen({
   seed: SeedSummary | null
   queue: Decision[]
   ops: OperationalSnapshot
-  recoveredToday: string | null
+  verifiedThisMonth: string | null
+  onRefresh: () => void
   agenticRuns: Record<string, AgenticRunStatus>
   onRunAgentic: (path: string) => void
 }) {
@@ -2576,6 +2720,7 @@ function WorkspaceScreen({
   const [catalogSearchState, setCatalogSearchState] = useState<LoadState>('idle')
   const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null)
   const [selectedDeliverySku, setSelectedDeliverySku] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const intel = data?.store_intelligence
   const cover = intel?.supplier_cover
   const coverDays = daysNumber(cover?.days_of_supply)
@@ -3471,17 +3616,28 @@ function WorkspaceScreen({
   const renderResults = () => (
     <>
       <div className="workspace-metrics">
-        <WorkspaceMetric label="Recovered today" value={recoveredToday ?? 'R0'} tone={recoveredToday ? 'ok' : undefined} />
+        <WorkspaceMetric label="Verified this month" value={verifiedThisMonth ?? 'R0'} tone={verifiedThisMonth ? 'ok' : undefined} />
         <WorkspaceMetric label="Approvals waiting" value={String(queue.length)} tone={queue.length ? 'warn' : 'ok'} />
         <WorkspaceMetric label="Write-back tasks" value={String(ops.writebackTasks.length || fieldNumber(obsWriteback, 'tasks'))} />
         <WorkspaceMetric label="Learning events" value={String(ops.learningEvents.length || fieldNumber(obsLearning, 'learning_events'))} />
       </div>
       <WorkspaceSection title="Today">
-        {recoveredToday ? (
-          <WorkspaceRow label="Resolved value" meta="Approved actions closed today" value={recoveredToday} tone="ok" />
+        {verifiedThisMonth ? (
+          <WorkspaceRow
+            label="Receipt-backed recovered value"
+            meta={`${Number(ops.valueStatement.verified_receipt_count ?? 0)} completion receipts`}
+            value={verifiedThisMonth}
+            tone="ok"
+          />
         ) : (
-          <WorkspaceEmpty>No recovered value has been recorded today.</WorkspaceEmpty>
+          <WorkspaceEmpty>No receipt-backed recovered value has been recorded this month.</WorkspaceEmpty>
         )}
+        <WorkspaceRow
+          label="Estimated opportunity"
+          meta="Not counted as recovered until completion evidence is recorded"
+          value={formatZarMinor(ops.valueStatement.estimated_opportunity_minor_units)}
+          tone="info"
+        />
       </WorkspaceSection>
       <WorkspaceSection title="Write-back ledger" count={ops.writebackTasks.length ? pluralLabel(ops.writebackTasks.length, 'task') : undefined}>
         {ops.writebackTasks.length ? (
@@ -3492,7 +3648,8 @@ function WorkspaceScreen({
                 label={task.title ?? describeAction(task.action)}
                 meta={task.assignee_role}
                 value={formatLabel(task.status ?? 'pending')}
-            tone={optionalStatusTone(task.status ?? 'pending')}
+                tone={optionalStatusTone(task.status ?? 'pending')}
+                onSelect={task.id && task.status !== 'completed' ? () => setSelectedTaskId(task.id ?? null) : undefined}
               />
             ))}
           </div>
@@ -3500,6 +3657,16 @@ function WorkspaceScreen({
           <WorkspaceEmpty>No task-only write-back records yet.</WorkspaceEmpty>
         )}
       </WorkspaceSection>
+      {selectedTaskId ? (
+        <TaskCompletionPanel
+          task={ops.writebackTasks.find((task) => task.id === selectedTaskId)}
+          onCancel={() => setSelectedTaskId(null)}
+          onCompleted={() => {
+            setSelectedTaskId(null)
+            onRefresh()
+          }}
+        />
+      ) : null}
       <WorkspaceSection title="Learning outcomes" count={ops.learningEvents.length ? pluralLabel(ops.learningEvents.length, 'event') : undefined}>
         {ops.learningEvents.length ? (
           <div className="workspace-list">
@@ -3932,7 +4099,7 @@ function CompanyProfilePanel({ onSaved }: { onSaved?: () => void } = {}) {
   </WorkspaceSection>
 }
 
-type OnboardingStepId = 'company' | 'store' | 'data' | 'devices' | 'people' | 'review'
+type OnboardingStepId = 'company' | 'store' | 'data' | 'policies' | 'devices' | 'people' | 'review'
 
 const ONBOARDING_STEPS: Array<{
   id: OnboardingStepId
@@ -3942,6 +4109,7 @@ const ONBOARDING_STEPS: Array<{
   { id: 'company', label: 'Company' },
   { id: 'store', label: 'Store' },
   { id: 'data', label: 'Data source' },
+  { id: 'policies', label: 'Policies' },
   { id: 'devices', label: 'Devices', optional: true },
   { id: 'people', label: 'People', optional: true },
   { id: 'review', label: 'Review' },
@@ -3958,6 +4126,8 @@ function isOnboardingStepComplete(
       return status.stores.length > 0
     case 'data':
       return status.data.configured
+    case 'policies':
+      return status.policies.configured
     case 'devices':
       return status.devices.active > 0
     case 'people':
@@ -4015,6 +4185,134 @@ function OnboardingDataStep({
       <CsvImportPanel onCommitted={onChanged} />
       <div className="onboarding-step-actions">
         <button className="btn btn-primary" type="button" onClick={onNext}>
+          Continue to policies
+        </button>
+      </div>
+    </>
+  )
+}
+
+type ProductPolicyTemplate = {
+  category: string
+  policy_id: string
+  expiry_review_days: number
+  minimum_margin_pct: number
+  cold_chain_sensitive: boolean
+  hitl_required: boolean
+  markdown_discount_pct: string
+  markdown_duration_hours: number
+}
+type OnboardingPoliciesPayload = {
+  templates: ProductPolicyTemplate[]
+  confirmations: Array<{ category: string; policy_id: string }>
+  current_confirmation_count: number
+}
+
+function OnboardingPoliciesStep({
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  const [payload, setPayload] = useState<OnboardingPoliciesPayload | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const next = await fetchJson<OnboardingPoliciesPayload>(
+        '/onboarding/policies',
+        {},
+        new AbortController().signal,
+      )
+      setPayload(next)
+      setSelected(next.confirmations.map((confirmation) => confirmation.category))
+    } catch {
+      setMessage('Product policies could not be loaded. Try again.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const confirm = async () => {
+    if (!selected.length) {
+      setMessage('Select at least one product family used by this store.')
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      await fetchJson(
+        '/onboarding/policies/confirm',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categories: selected }),
+        },
+        new AbortController().signal,
+      )
+      await load()
+      onChanged()
+      setMessage('Current product policy templates confirmed.')
+    } catch {
+      setMessage('Product policies could not be confirmed. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <WorkspaceSection title="Confirm product operating policies" count="one required">
+        <p className="workspace-empty">
+          Select the product families this store handles. These are the same versioned
+          rules ShelfWise uses for expiry review, margin protection, cold-chain checks,
+          and human approval.
+        </p>
+        <div className="workspace-list">
+          {(payload?.templates || []).map((template) => {
+            const checked = selected.includes(template.category)
+            return (
+              <label className="workspace-row onboarding-policy-option" key={template.policy_id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => setSelected((current) => (
+                    checked
+                      ? current.filter((category) => category !== template.category)
+                      : [...current, template.category]
+                  ))}
+                />
+                <span>
+                  <strong>{formatLabel(template.category)}</strong>
+                  <small>
+                    Review {template.expiry_review_days}d · minimum margin {template.minimum_margin_pct}% · markdown {Number(template.markdown_discount_pct) * 100}% for {template.markdown_duration_hours}h
+                  </small>
+                </span>
+                <span>{template.cold_chain_sensitive ? 'cold chain' : 'ambient'}</span>
+              </label>
+            )
+          })}
+        </div>
+        {message ? <p className="login-error" role="status">{message}</p> : null}
+        <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void confirm()}>
+          {busy ? 'Confirming…' : 'Confirm selected policies'}
+        </button>
+      </WorkspaceSection>
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button
+          className="btn btn-primary"
+          type="button"
+          disabled={!payload?.current_confirmation_count}
+          onClick={onNext}
+        >
           Continue to devices
         </button>
       </div>
@@ -4144,6 +4442,13 @@ function OnboardingReviewStep({
           onSelect={() => onNavigate('data')}
         />
         <WorkspaceRow
+          label="Product policies"
+          detail="Owner-confirmed rules for the product families this store handles."
+          value={status.policies.configured ? `${status.policies.confirmed_categories.length} confirmed` : 'required'}
+          tone={status.policies.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('policies')}
+        />
+        <WorkspaceRow
           label="Camera and sensor devices"
           detail="Optional for stores with compatible structured-event systems."
           value={status.devices.active ? `${status.devices.active} active` : 'optional'}
@@ -4192,14 +4497,20 @@ function OnboardingStepContent({
         onNavigate('data')
       }} />
     case 'data':
-      return <OnboardingDataStep onChanged={onChanged} onNext={() => onNavigate('devices')} />
+      return <OnboardingDataStep onChanged={onChanged} onNext={() => onNavigate('policies')} />
+    case 'policies':
+      return <OnboardingPoliciesStep
+        onChanged={onChanged}
+        onBack={() => onNavigate('data')}
+        onNext={() => onNavigate('devices')}
+      />
     case 'devices':
       return <OnboardingDevicesStep
         status={status}
         selectedStoreId={selectedStoreId}
         onStoreChange={onStoreChange}
         onChanged={onChanged}
-        onBack={() => onNavigate('data')}
+        onBack={() => onNavigate('policies')}
         onNext={() => onNavigate('people')}
       />
     case 'people':
@@ -4389,16 +4700,10 @@ function App() {
     return Array.from(byId.values()).filter((d) => (d.status ?? 'pending').toLowerCase() !== 'pending')
   }, [decisions, data])
 
-  // Value recovered by decisions resolved today - one honest number, summed from real outcomes.
-  const recoveredToday = useMemo(() => {
-    let cents = 0
-    for (const d of resolved) {
-      if (dayLabel(d.updated_at ?? d.created_at) !== 'Today') continue
-      const minor = moneyMinorUnits(d.outcome?.rand_recovered)
-      if (minor && minor > 0) cents += minor
-    }
-    return cents > 0 ? `R${Math.round(cents / 100).toLocaleString('en-ZA')}` : null
-  }, [resolved])
+  const verifiedThisMonth = useMemo(() => {
+    const minorUnits = Number(ops.valueStatement.verified_recovered_minor_units ?? 0)
+    return minorUnits > 0 ? formatZarMinor(minorUnits) : null
+  }, [ops.valueStatement.verified_recovered_minor_units])
 
   const recents = useMemo<Recent[]>(() => {
     const firstUser = messages.find((m) => m.role === 'user')
@@ -4461,6 +4766,7 @@ function App() {
         platformToolsPayload,
         platformToolAuditPayload,
         writebackPayload,
+        valueReportPayload,
         learningPayload,
         productAttentionPayload,
         modelRunsPayload,
@@ -4477,7 +4783,10 @@ function App() {
         fetchIfAvailable<JsonObject>('/health'),
         fetchIfAvailable<JsonObject>('/readiness'),
         fetchIfAvailable<JsonObject>('/inference/config'),
-        fetchIfAvailable<DecisionLogResponse>(withDataDomain('/decisions', dataDomain), '/decisions'),
+        fetchIfAvailable<DecisionLogResponse>(
+          `${withDataDomain('/decisions', dataDomain)}&queue_view=assigned`,
+          '/decisions',
+        ),
         fetchIfAvailable<{ conversations?: ConversationSummary[] }>(
           withDataDomain('/chat/conversations', dataDomain),
           '/chat/conversations',
@@ -4497,6 +4806,9 @@ function App() {
         fetchIfAvailable<{ tools?: JsonObject[] }>(withDataDomain('/tools/platform', dataDomain), '/tools/platform'),
         fetchIfAvailable<{ events?: JsonObject[] }>(withDataDomain('/tools/platform/audit', dataDomain), '/tools/platform/audit'),
         fetchIfAvailable<{ tasks?: WritebackTaskRow[] }>(withDataDomain('/writeback/tasks', dataDomain), '/writeback/tasks'),
+        dataDomain === 'operational_twin'
+          ? fetchIfAvailable<{ report?: ValueStatement }>('/reports/value-recovered')
+          : Promise.resolve(null),
         fetchIfAvailable<{ thresholds?: JsonObject; events?: JsonObject[] }>(withDataDomain('/learning', dataDomain), '/learning'),
         fetchIfAvailable<ProductAttentionPayload>(withDataDomain('/products/attention?limit=20', dataDomain), '/products/attention'),
         fetchIfAvailable<{ model_runs?: JsonObject[] }>(withDataDomain('/mlops/model-runs', dataDomain), '/mlops/model-runs'),
@@ -4536,6 +4848,7 @@ function App() {
         platformTools: asArray<JsonObject>(platformToolsPayload?.tools),
         platformToolAudit: asArray<JsonObject>(platformToolAuditPayload?.events),
         writebackTasks: asArray<WritebackTaskRow>(writebackPayload?.tasks),
+        valueStatement: valueReportPayload?.report ?? {},
         learningThresholds: asObject(learningPayload?.thresholds),
         learningEvents: asArray<JsonObject>(learningPayload?.events),
         productAttention: productAttentionPayload ?? {},
@@ -4889,7 +5202,7 @@ function App() {
         data={data}
         seed={seed}
         ops={ops}
-        recoveredToday={recoveredToday}
+        verifiedThisMonth={verifiedThisMonth}
       />
 
       <div className="app-main">
@@ -4967,7 +5280,8 @@ function App() {
               seed={seed}
               queue={queue}
               ops={ops}
-              recoveredToday={recoveredToday}
+              verifiedThisMonth={verifiedThisMonth}
+              onRefresh={() => setReloadKey((key) => key + 1)}
               agenticRuns={agenticRuns}
               onRunAgentic={runAgenticScenario}
             />

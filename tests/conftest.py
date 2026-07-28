@@ -35,7 +35,7 @@ from shelfwise_backend.app import (
     write_limiter,
     writeback_sink,
 )
-from shelfwise_backend.state import scenario_engine
+from shelfwise_backend.state import policy_confirmation_store, scenario_engine
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +67,7 @@ def _reset_demo_stores() -> None:
     tenant_fact_store.clear()
     tenant_profile_store.clear()
     account_store.clear()
+    policy_confirmation_store.clear()
     writeback_sink.clear()
     worldgen_run_store.clear()
     cold_chain_feed.clear()

@@ -81,6 +81,10 @@ test('the guided setup resumes from real server state and reaches readiness', as
 
   const dataMetric = setup.locator('.workspace-metric', { hasText: 'Data source' })
   await expect(dataMetric).toContainText('connected')
+  await setup.getByRole('button', { name: 'Continue to policies' }).click()
+  await setup.getByRole('checkbox', { name: /Dairy/ }).check()
+  await setup.getByRole('button', { name: 'Confirm selected policies' }).click()
+  await expect(setup.getByText('Current product policy templates confirmed.')).toBeVisible()
   await setup.getByRole('button', { name: 'Continue to devices' }).click()
   await setup.getByRole('button', { name: 'Skip for now' }).click()
   await setup.getByRole('button', { name: 'Skip for now' }).click()
@@ -113,7 +117,7 @@ test('every populated simulation workspace opens from the navigation rail', asyn
     [/^Deliveries \d+ issues$/, 'Deliveries workspace'],
     ['Cold chain clear', 'Cold chain workspace'],
     ['Products search', 'Products workspace'],
-    ["Today's results R0", "Today's results workspace"],
+    ['Verified value R0', 'Verified value workspace'],
     ['Store twin state + scenarios', 'Store twin workspace'],
     [/^Connections \d+ systems$/, 'Connections workspace'],
     ['Operations simulation', 'Operations workspace'],

@@ -41,6 +41,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_twin_onboarding_manifests": "tenant_id",
     "shelfwise_work_accounts": "tenant_id",
     "shelfwise_account_audit": "tenant_id",
+    "shelfwise_policy_confirmations": "tenant_id",
 }
 
 

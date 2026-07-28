@@ -1,5 +1,44 @@
 # HANDOFF — current continuation state as of 2026-07-28
 
+## Plans 013-016 — BUILT and gate-verified, 2026-07-28
+
+The four remaining IN PROGRESS plans are implemented and their done criteria are met:
+
+- **013 category policy confirmation.** `product_policies.py` exposes serializable built-in
+  templates; a tenant-scoped memory/Postgres confirmation store with central-schema RLS records
+  them. Owner-only `GET /onboarding/policies` and `POST /onboarding/policies/confirm` persist by
+  tenant/category/template, and a superseded template ID no longer satisfies readiness
+  (`_current_policy_confirmations` re-checks each confirmation against the current template).
+  Setup readiness is now four required steps: company, store, data source, policies.
+- **014 role-personalized queues.** `decision_assignment.py` owns one server-side assignment
+  matrix; `GET /decisions?queue_view=assigned` derives the queue from the verified
+  `TenantContext.role` only, never a query parameter, and `queue_view=all` still returns the
+  complete tenant ledger. The browser approval queue consumes the assigned view.
+- **015 verified value reporting.** `value_reporting.py` plus `routes_reports.py` expose a
+  month-bounded `GET /reports/value-recovered`. Only explicitly recorded actual amounts count as
+  `verified_recovered`; modeled approval outcomes stay separately labelled and are never summed
+  into it, which is the specific overclaim the plan's HIGH risk flagged.
+- **016 operations controls.** `scripts/health_monitor.py` is a stdlib uptime probe that requires
+  both liveness and seed readiness, exits non-zero on failure, writes a bounded JSONL incident
+  receipt without copying response bodies, and rejects insecure or credential-bearing webhook
+  URLs. `docs/RELEASE_AND_OPERATIONS_RUNBOOK.md` and `docs/POPIA_OPERATIONS_CHECKLIST.md` record
+  release/rollback, support, and data-protection responsibilities. No paid dependency was added.
+
+Verification on this tree:
+
+- `921 passed, 21 skipped` — complete Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- Frontend TypeScript check and production build passed.
+- Capability contract: 244 deterministic capabilities,
+  `sha256:4f39cff655f653320b23765f80a6915d67e78126760fcb436d411418f1ade21d`.
+- Playwright **10/10** against isolated ShelfWise ports **5187/8017**.
+
+Browser-suite isolation note: an earlier run failed for an environmental reason, not a ShelfWise
+assertion — Playwright reused an unrelated MediChain server already listening on the default port
+5173. That external application was left running and unmodified; this suite is instead pinned to
+its own ports via `PLAYWRIGHT_FRONTEND_PORT`/`PLAYWRIGHT_BACKEND_PORT`, so it can only talk to
+this repository's servers. Re-run with those variables set, never on the shared default port.
+
 ## Workforce productization, bounded retrieval, and POS inventory projection — BUILT, 2026-07-28
 
 Plan 012 is implemented against the existing dedicated-client architecture:
