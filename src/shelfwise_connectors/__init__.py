@@ -11,6 +11,14 @@ from .catalog import (
     connector_status_for_policy,
     list_connector_capabilities,
 )
+from .connector_test import (
+    CREDENTIAL_FIELDS,
+    TESTABLE_SYSTEMS,
+    ConnectionTestResult,
+    ConnectorTestNotSupported,
+    build_test_connector,
+    test_connection,
+)
 from .connectors import (
     CursorStore,
     InMemoryCursorStore,
@@ -21,14 +29,6 @@ from .connectors import (
     WebhookReceiver,
     create_cursor_store,
     verify_signature,
-)
-from .connector_test import (
-    CREDENTIAL_FIELDS,
-    TESTABLE_SYSTEMS,
-    ConnectionTestResult,
-    ConnectorTestNotSupported,
-    build_test_connector,
-    test_connection,
 )
 from .connectors.systems import (
     DynamicsBusinessCentralInventoryConnector,

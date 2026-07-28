@@ -109,14 +109,18 @@ runbook executable in under a day.
 Run these tracks in parallel only after the pilot is live; their content will be re-prioritized
 by what the pilot actually hurt on.
 
-**A. Self-serve onboarding.** Turn the runbook into product: guided CSV import with mapping
-wizard and validation preview, connector connect-flows with credential checks, category policy
-templates ("dairy", "bakery", "ambient") the owner confirms instead of configures. Target:
-a competent owner onboards without us on a call.
+**A. Self-serve onboarding — core delivered 2026-07-28.** The resumable Setup guide now covers
+company identity, store creation, guided CSV preview/commit, connector connect-flows with live
+credential checks, optional devices, optional people, and a server-derived readiness review.
+The remaining productization item is category policy templates ("dairy", "bakery", "ambient")
+that the owner confirms instead of configures. Target remains: a competent owner onboards
+without us on a call, to be measured with the first pilot rather than declared from tests alone.
 
-**B. Multi-user reality.** Per-person staff accounts (already the recorded roadmap after the
-owner account), role queues (cashier vs. manager vs. procurement), and the approval matrix the
-HITL layer already models. One shop = several people on day one.
+**B. Multi-user reality — account lifecycle delivered, queue personalization remains.**
+Per-person staff accounts now include name, surname, position, email, password, bounded work
+role, owner-controlled role changes, and deactivate/reactivate lifecycle. Remaining work is
+personalized role queues (cashier vs. manager vs. procurement) and the approval-assignment
+matrix the HITL layer already models. One shop = several people on day one.
 
 **C. Operate like a product, not a project.**
    - Automated backups with a *tested restore drill* (a backup that has never been restored is

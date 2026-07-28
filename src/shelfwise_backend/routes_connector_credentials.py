@@ -103,7 +103,10 @@ async def test_connector_credentials(
         fields = body.fields
     else:
         fields = resolve_connector_credentials(
-            connector_credential_store, tenant_id=ctx.tenant_id, system=resolved_system, env_fallback={}
+            connector_credential_store,
+            tenant_id=ctx.tenant_id,
+            system=resolved_system,
+            env_fallback={},
         )
     try:
         result = await test_connection(resolved_system, fields)

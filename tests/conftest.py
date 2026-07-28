@@ -13,6 +13,7 @@ from shelfwise_backend.app import (
     candidate_store,
     chat_store,
     cold_chain_feed,
+    connector_credential_store,
     decision_store,
     evaluation_registry,
     event_bus,
@@ -56,6 +57,7 @@ def _reset_demo_stores() -> None:
     journal.clear()
     trace_registry.clear()
     twin_service.store.clear()
+    twin_service.onboarding_manifests.clear()
     scenario_engine.clear()
     edge_device_registry.clear()
     tool_audit.clear()
@@ -68,6 +70,7 @@ def _reset_demo_stores() -> None:
     writeback_sink.clear()
     worldgen_run_store.clear()
     cold_chain_feed.clear()
+    connector_credential_store.clear()
     chat_store.clear()
     candidate_store.clear()
     open_order_store.clear()

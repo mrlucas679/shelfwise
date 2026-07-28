@@ -623,6 +623,106 @@ input {
   padding-top: 20px;
 }
 
+.onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(112px, 1fr));
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.onboarding-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  min-width: 112px;
+  padding: 11px 12px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.onboarding-step:last-child {
+  border-right: 0;
+}
+
+.onboarding-step > span {
+  grid-row: 1 / span 2;
+  align-self: center;
+  min-width: 26px;
+  padding: 4px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-align: center;
+}
+
+.onboarding-step strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboarding-step small {
+  color: var(--mute);
+  font-size: 10.5px;
+}
+
+.onboarding-step:hover {
+  background: var(--surface-2);
+}
+
+.onboarding-step:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.onboarding-step.is-current {
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.onboarding-step.is-complete > span {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.onboarding-step-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.onboarding-step-actions .btn {
+  width: auto;
+}
+
+.onboarding-store-picker {
+  max-width: 420px;
+  margin-top: 8px;
+}
+
+.onboarding-ready {
+  margin: 14px 0 0;
+  padding: 12px;
+  border-left: 3px solid var(--ok);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .workspace-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -2272,6 +2372,10 @@ input {
 
   .workspace-title h1 {
     font-size: 22px;
+  }
+
+  .onboarding-steps {
+    grid-template-columns: repeat(6, 132px);
   }
 }
 

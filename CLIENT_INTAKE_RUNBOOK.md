@@ -1,6 +1,6 @@
 # Client Intake Runbook — Taking a Real Shop Live on a Dedicated Stack
 
-Date: 2026-07-23. Deployment model: **one dedicated stack per client** (owner decision,
+Date: 2026-07-28. Deployment model: **one dedicated stack per client** (owner decision,
 2026-07-23). The client's owner login IS the stack's configured company account; the
 multi-tenant plumbing stays internal until there are enough clients to justify shared
 hosting. Every step below is an operator action against software that already exists;
@@ -45,11 +45,16 @@ this runbook shrinking.
    idempotent migrations; verify `/health` and `/readiness` report every lifespan
    service green.
 
-## 2. Load the client's data (browser-led CSV intake)
+## 2. Complete the in-product Setup guide
 
-The normal client path is now the **Connections** workspace: choose Products, Stock, Expiry,
-or Sales; select the CSV file; preview the inferred mapping and validation result; then import
-the approved file. Owners do not need curl, a database login, or an environment-file edit. The
+The normal client path is now **System → Setup guide**. It resumes from server state and leads
+the owner through company identity, store creation, and one required data source. The owner may
+connect an ERP with encrypted credentials or choose Products, Stock, Expiry, or Sales CSV,
+preview the inferred mapping and validation result, then import the approved file. Devices and
+named work accounts are offered in the same flow but are optional. Owners do not need curl, a
+database login, or an environment-file edit.
+
+Verify `GET /onboarding/status` reports `ready_for_operations: true` before leaving setup. The
 API details below remain the recovery/automation contract, not the required client workflow.
 
 The API is the product path: `POST /intake/csv/preview` then `POST /intake/csv/commit`
@@ -81,12 +86,11 @@ Notes that matter:
   different product names. That is a data-quality finding to resolve WITH the client,
   never auto-merged.
 
-## 3. Onboard the physical store (twin)
+## 3. Extend the physical store twin when needed
 
-The normal client path is now the **Store Twin → Set up your store** form. It asks only for the
-store name and store ID, derives the tenant from the signed-in owner, and creates the initial
-store record without exposing an internal tenant identifier. The API form below remains useful
-for automated or advanced topology imports.
+The Setup guide creates the initial store without exposing an internal tenant identifier.
+Use **Store Twin** afterward for advanced topology and operational review. The API form below
+remains useful for automated or detailed fixture imports.
 
 1. `POST /twin/onboarding` with the store's fixtures: fridges, freezers, shelves,
    backroom (type + label is enough to start).
@@ -106,6 +110,8 @@ for automated or advanced topology imports.
 ## 4. Acceptance before the client touches it
 
 - [ ] Owner can log in from their own device over HTTPS; cookie session works.
+- [ ] Setup guide reports ready from server state; reload the page and confirm progress resumes.
+- [ ] Required staff have named work accounts with the correct position and least-privilege role.
 - [ ] Chat answers a grounded question about THEIR data ("what's expiring this week?")
       with tool citations, on the live model.
 - [ ] At least one real candidate/recommendation exists in the approval queue and its

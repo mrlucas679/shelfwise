@@ -4,17 +4,29 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-23 (supersedes the 2026-07-21 update below; that entry is kept as history)
-Branch: `developers` · Gates at time of writing, verified against the project's own
-`.venv/Scripts/python.exe` (see HANDOFF.md's "Client-readiness verification pass" entry for
-why that distinction matters - a stray unrelated tool venv on this machine's shell `PATH`
-had been silently masking the real deployment interpreter): **852 passed / 20 env-gated
-skips** locally; ruff clean; frontend `tsc --noEmit` clean; frontend production build
-clean; capability manifest **219 capabilities**, contract-verified
-(`sha256:126ef28c...`); both `shelfwise-backend` and `shelfwise-web` boot and connect for
-real - verified live via the Browser pane, not just inferred from passing tests: `/health`
-responds correctly, the frontend loads and renders live backend state, and all 20 API calls
-its initial load makes return 200 OK.
+Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
+Branch: `developers` · Final local gates: **890 passed / 21 environment-gated skips**;
+Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (287 modules);
+capability manifest **231 capabilities**, contract-verified
+(`sha256:704b122af...`); Playwright golden path **8/8 passed** against isolated disposable
+ShelfWise servers. The machine's project `.venv` launcher currently targets a removed
+uv-managed interpreter, so these gates used the installed Hermes Python environment and
+bundled Node runtime; see the 2026-07-28 HANDOFF entry for the exact proof boundary.
+
+## 2026-07-28 guided onboarding and account readiness
+
+- ✅ Resumable **Setup guide** for company, store, data source, optional devices, optional
+  people, and final readiness review.
+- ✅ Owner-only `GET /onboarding/status` derives progress from authoritative tenant-scoped
+  stores; no client-provided completion state.
+- ✅ Guided CSV preview/commit and encrypted ERP credential flows are available directly in
+  onboarding; committed data or a configured connector satisfies the required data-source gate.
+- ✅ Named work accounts include first name, surname, work position, email, password, and
+  bounded operational role. Owners can create, change role, deactivate, and reactivate accounts;
+  staff sign in through the normal login path.
+- ✅ Browser regressions cover full onboarding, connector connection, and device registration.
+- ✅ Runtime endpoint precedence and strict company-profile write payload bugs found during
+  real browser execution are fixed.
 
 ## 2026-07-23 technical-debt and readiness campaign
 
@@ -274,8 +286,10 @@ not an oversight).
 - ✅ Company-account login (landed 2026-07-17): `POST /auth/login` verifies the configured
   owner account with stdlib scrypt (honest 503 unconfigured, uniform 401 on failure with no
   field oracle, constant-shape comparison) and mints the exact owner-role JWT session cookie
-  the platform already verifies everywhere. Per-person staff accounts remain the multi-user
-  phase of the owner roadmap.
+  the platform already verifies everywhere.
+- ✅ Per-person work accounts: owner-provisioned names, surname, position, email, password,
+  role changes, deactivation/reactivation, tenant-scoped storage, and normal login. Personalized
+  per-role queue routing remains a product refinement, not an account-creation gap.
 
 ## 10. Simulation, evaluation, and observability — ✅
 

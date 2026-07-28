@@ -120,7 +120,10 @@ async def test_connection(system: SourceSystem, fields: dict[str, str]) -> Conne
         raise ConnectorTestNotSupported(f"{system.value} has no live connection test")
     missing = _missing_fields(system, fields)
     if missing:
-        return ConnectionTestResult("config_error", f"missing required field(s): {', '.join(missing)}")
+        return ConnectionTestResult(
+            "config_error",
+            f"missing required field(s): {', '.join(missing)}",
+        )
     try:
         connector = build_test_connector(system, fields)
     except ValueError as exc:
@@ -130,14 +133,23 @@ async def test_connection(system: SourceSystem, fields: dict[str, str]) -> Conne
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         if code in (401, 403):
-            return ConnectionTestResult("auth_error", "the source system rejected these credentials")
+            return ConnectionTestResult(
+                "auth_error",
+                "the source system rejected these credentials",
+            )
         if code == 404:
-            return ConnectionTestResult("not_found", "the source system URL was reachable but returned 404")
+            return ConnectionTestResult(
+                "not_found",
+                "the source system URL was reachable but returned 404",
+            )
         return ConnectionTestResult("unknown_error", f"the source system returned HTTP {code}")
     except httpx.TimeoutException:
         return ConnectionTestResult("timeout", "the source system did not respond in time")
     except httpx.RequestError:
-        return ConnectionTestResult("network_error", "could not reach the source system - check the URL")
+        return ConnectionTestResult(
+            "network_error",
+            "could not reach the source system - check the URL",
+        )
     except (KeyError, TypeError, ValueError) as exc:
         return ConnectionTestResult("config_error", str(exc))
     return ConnectionTestResult("ok", "connected successfully")

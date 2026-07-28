@@ -15,6 +15,48 @@ test('chat console loads and the approval queue is reachable', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Approval queue' })).toBeVisible()
 })
 
+test('the guided setup resumes from real server state and reaches readiness', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Setup guide guided' }).click()
+
+  const setup = page.getByRole('main', { name: 'Set up ShelfWise workspace' })
+  await expect(setup).toBeVisible()
+  await expect(setup.getByRole('navigation', { name: 'Setup steps' })).toBeVisible()
+
+  await setup.getByLabel('Company name').fill('E2E Guided Shop')
+  await setup.getByRole('button', { name: 'Save company profile' }).click()
+
+  await setup.getByLabel('Store name').fill('E2E Guided Shop Johannesburg')
+  await setup.getByLabel('Store ID').fill('e2e_guided_shop')
+  await setup.getByLabel('Initial store areas').fill('Backroom, Dairy fridge')
+  await setup.getByRole('button', { name: 'Create store' }).click()
+
+  const csv = [
+    'sku,name,barcode',
+    'E2E-SKU-1,E2E Milk,6001000000001',
+  ].join('\n')
+  await setup.getByLabel('CSV file').setInputFiles({
+    name: 'e2e-products.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(csv),
+  })
+  await setup.getByRole('button', { name: 'Preview file' }).click()
+  await expect(setup.getByText(/Preview completed/)).toBeVisible()
+  await setup.getByRole('button', { name: 'Import approved file' }).click()
+  await expect(setup.getByText(/rows were imported/)).toBeVisible()
+
+  const dataMetric = setup.locator('.workspace-metric', { hasText: 'Data source' })
+  await expect(dataMetric).toContainText('connected')
+  await setup.getByRole('button', { name: 'Continue to devices' }).click()
+  await setup.getByRole('button', { name: 'Skip for now' }).click()
+  await setup.getByRole('button', { name: 'Skip for now' }).click()
+
+  await expect(setup.getByText('Ready for store operations')).toBeVisible()
+  await expect(setup.getByText('Required setup is complete.')).toBeVisible()
+})
+
 test('simulation delivery badge matches the full receiving-exception queue', async ({ page }) => {
   await page.goto('/')
 
@@ -34,9 +76,9 @@ test('every populated simulation workspace opens from the navigation rail', asyn
   await page.getByRole('button', { name: 'Simulation', exact: true }).click()
 
   const workspaces = [
-    ['To order 17 products', 'To order workspace'],
-    ['Sell first 12 products', 'Sell first workspace'],
-    ['Deliveries 17 issues', 'Deliveries workspace'],
+    [/^To order \d+ products$/, 'To order workspace'],
+    [/^Sell first \d+ products$/, 'Sell first workspace'],
+    [/^Deliveries \d+ issues$/, 'Deliveries workspace'],
     ['Cold chain clear', 'Cold chain workspace'],
     ['Products search', 'Products workspace'],
     ["Today's results R0", "Today's results workspace"],

@@ -316,6 +316,10 @@ A few endpoints worth knowing by name (used throughout this README):
 | `GET /inference/smoke` | Confirms whether a call is offline, generic OpenAI-compatible, Fireworks, or explicitly declared AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
+| `GET /onboarding/status` | Owner-only, server-derived progress for company, store, data source, devices, and work accounts |
+| `GET /accounts` · `POST /accounts` · `POST /accounts/{id}/role` · `POST /accounts/{id}/deactivate\|reactivate` | Owner-managed named work accounts and access lifecycle |
+| `POST /intake/csv/preview` · `POST /intake/csv/commit` | Validated, idempotent browser-led CSV onboarding |
+| `POST /connectors/{system}/credentials/test` | Live credential and endpoint check without exposing stored secrets |
 | `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
 | `GET /twin/stores/{store_id}` · `GET /twin/entities/{twin_id}` | Exact-store topology, current state, and provenance |
 | `GET /twin/observations` · `GET /twin/fidelity` · `POST /twin/observations` | Derived observations, fidelity guards, and tenant-bound intake |
@@ -360,7 +364,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         755 passing tests (16 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         890 passing tests (21 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -396,8 +400,11 @@ Built now:
 - Postgres store with tenant-scoped RLS schema; offline-safe OpenAI-compatible inference gateway
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
-  workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 755 passing tests (16 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+  workspaces, FEFO lot drill-down, decision log, inference routing, HITL approval, and a
+  resumable first-store Setup guide backed by server-derived progress.
+- Owner-managed named work accounts with work identity, bounded roles, normal sign-in, role
+  changes, and deactivate/reactivate lifecycle.
+- 890 passing tests (21 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external

@@ -27,6 +27,8 @@ class OnboardingManifestRegistry(Protocol):
 
     def get(self, tenant_id: str, store_id: str) -> TwinOnboardingManifest | None: ...
 
+    def list(self, tenant_id: str, *, limit: int = 100) -> list[TwinOnboardingManifest]: ...
+
     def clear(self) -> None: ...
 
 
@@ -44,6 +46,17 @@ class InMemoryOnboardingManifestRegistry:
     def get(self, tenant_id: str, store_id: str) -> TwinOnboardingManifest | None:
         with self._lock:
             return self._manifests.get((tenant_id, store_id))
+
+    def list(self, tenant_id: str, *, limit: int = 100) -> list[TwinOnboardingManifest]:
+        """Return a bounded, deterministic list of explicitly onboarded stores."""
+        _validate_limit(limit)
+        with self._lock:
+            rows = [
+                manifest
+                for (candidate_tenant, _store_id), manifest in self._manifests.items()
+                if candidate_tenant == tenant_id
+            ]
+        return sorted(rows, key=lambda item: item.store_id)[:limit]
 
     def clear(self) -> None:
         with self._lock:
@@ -86,6 +99,22 @@ class PostgresOnboardingManifestRegistry:
             ).fetchone()
         return TwinOnboardingManifest.model_validate(row["manifest"]) if row else None
 
+    def list(self, tenant_id: str, *, limit: int = 100) -> list[TwinOnboardingManifest]:
+        """Return a bounded, tenant-RLS-scoped list of onboarding manifests."""
+        _validate_limit(limit)
+        with self._connect(tenant_id) as conn:
+            rows = conn.execute(
+                """
+                select manifest
+                from shelfwise_twin_onboarding_manifests
+                where tenant_id = %s
+                order by store_id
+                limit %s
+                """,
+                (tenant_id, limit),
+            ).fetchall()
+        return [TwinOnboardingManifest.model_validate(row["manifest"]) for row in rows]
+
     def clear(self) -> None:
         with self._connect(None) as conn:
             conn.execute("delete from shelfwise_twin_onboarding_manifests")
@@ -126,3 +155,8 @@ def create_onboarding_manifest_registry() -> (
     if backend == "postgres":
         return PostgresOnboardingManifestRegistry(os.getenv("DATABASE_URL", ""))
     raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
+
+
+def _validate_limit(limit: int) -> None:
+    if limit < 1 or limit > 100:
+        raise ValueError("limit must be between 1 and 100")

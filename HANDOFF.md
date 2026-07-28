@@ -1,4 +1,47 @@
-# HANDOFF — current continuation state as of 2026-07-23
+# HANDOFF — current continuation state as of 2026-07-28
+
+## Guided first-store onboarding — BUILT and browser-verified, 2026-07-28
+
+ShelfWise now has a resumable **Setup guide** in the product instead of requiring a new
+client to assemble the runbook manually. The owner completes three required steps backed by
+authoritative tenant-scoped server state: company profile, store creation, and one real data
+source (encrypted connector credentials or a committed CSV import). Device provisioning and
+named work accounts are available in the same flow but remain optional, so an owner-operated
+shop without edge hardware is not blocked.
+
+The new owner-only `GET /onboarding/status` read model derives progress from the company
+profile store, durable twin onboarding manifests, configured connector credentials, imported
+records, edge devices, and work accounts. It never accepts browser completion flags. Store
+manifest listing is now bounded and tenant-scoped in both memory and Postgres.
+
+The browser campaign found and fixed two real defects:
+
+- An empty runtime `apiBase` incorrectly overrode `VITE_API_BASE`, so isolated deployments and
+  tests silently fell back to `localhost:8000`. Empty runtime values now correctly defer to the
+  build-time endpoint.
+- The company form merged the full server profile into editable form state, then posted
+  server-only fields (`tenant_id`, `status`, and timestamps) back to a strict endpoint, causing
+  a 422. The form now selects only the four editable company fields at the trust boundary.
+
+The Playwright harness now uses explicit isolated frontend/backend ports and invokes the local
+Vite executable directly, preventing it from reusing an unrelated server on port 5173. Its
+stale navigation smoke assertion was also corrected: dynamic simulation counts are matched as
+counts, while the dedicated delivery test continues to assert the exact 17-issue result.
+
+Verification on the final tree:
+
+- `890 passed, 21 skipped` — complete Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- TypeScript `tsc --noEmit` and the Vite production build passed (287 modules).
+- Capability contract: 231 deterministic capabilities,
+  `sha256:704b122afaf55b2157bb80a4ff2fa0c3c3f4c2965c3d0759a60392044fe7b582`.
+- Playwright golden path: 8/8 passed against disposable ShelfWise servers, including guided
+  onboarding, HITL approval, grounded chat, ERP connection, and edge-device registration.
+
+Local environment note: this machine's project `.venv` launcher currently points at a removed
+uv-managed Python installation. Verification therefore used the already-installed Hermes
+Python environment plus the bundled Node runtime. This is a local launcher repair, not an
+application or CI failure; do not claim that the broken `.venv` itself was tested.
 
 ## Camera/sensor connectivity — BUILT, 2026-07-23 (real self-serve credential, not raw video)
 

@@ -105,6 +105,7 @@ from .routes_catalog import router as catalog_router
 from .routes_connector_credentials import router as connector_credentials_router
 from .routes_connectors import router as connectors_router
 from .routes_mlops import router as mlops_router
+from .routes_onboarding import router as onboarding_router
 from .routes_scenarios import router as scenarios_router
 from .routes_twin import router as twin_router
 from .state import (
@@ -229,6 +230,7 @@ app.include_router(catalog_router)
 app.include_router(connectors_router)
 app.include_router(connector_credentials_router)
 app.include_router(mlops_router)
+app.include_router(onboarding_router)
 app.include_router(scenarios_router)
 
 try:

@@ -287,6 +287,30 @@ type OperationalSnapshot = {
   observability: JsonObject
   worker: JsonObject
 }
+type OnboardingStoreSummary = {
+  store_id: string
+  display_name: string
+  timezone: string
+  entity_count: number
+}
+type OnboardingStatus = {
+  tenant_id: string
+  ready_for_operations: boolean
+  required_steps: {
+    completed: number
+    total: number
+    next: 'company' | 'store' | 'data' | 'review'
+  }
+  company: { configured: boolean; name: string }
+  stores: OnboardingStoreSummary[]
+  data: {
+    configured: boolean
+    connector_systems: string[]
+    has_imported_records: boolean
+  }
+  devices: { active: number; total: number }
+  accounts: { active: number; total: number }
+}
 type DecisionLogResponse = { decisions?: Decision[] }
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -336,7 +360,8 @@ function runtimeConfig(): Window['SHELFWISE_CONFIG'] {
 }
 function configuredBase(): string {
   const env = import.meta.env as Record<string, string | undefined>
-  return (runtimeConfig()?.apiBase ?? env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
+  const runtimeBase = runtimeConfig()?.apiBase?.trim()
+  return runtimeBase || (env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
 }
 function apiKey(): string {
   // Deliberately runtime-config only (public/shelfwise-config.js, a deployment-owned
@@ -1174,6 +1199,7 @@ function UserBubble({ text }: { text: string }) {
 // ---------------------------------------------------------------------------
 type SidebarPage = 'settings'
 type WorkspaceSurface =
+  | 'onboarding'
   | 'products'
   | 'twin'
   | 'to-order'
@@ -1742,6 +1768,12 @@ function Sidebar({
                 <div className="sidebar-section">
                   <div className="sidebar-kicker">System</div>
                   <NavRow
+                    label="Setup guide"
+                    value="guided"
+                    active={activeWorkspace === 'onboarding'}
+                    onOpen={() => openWorkspace('onboarding')}
+                  />
+                  <NavRow
                     label="Connections"
                     value={`${connectorCount} systems`}
                     active={activeWorkspace === 'connections'}
@@ -2007,7 +2039,7 @@ type ConnectionTestOutcome = { status: string; ok: boolean; detail: string }
  * catalog.py) instead of being duplicated here, so adding a new poll-based system is a
  * backend catalog entry, not a frontend code change - see connector_test.CREDENTIAL_FIELDS
  * for the single source of truth. */
-function ConnectorCredentialsPanel() {
+function ConnectorCredentialsPanel({ onChanged }: { onChanged?: () => void } = {}) {
   const [systems, setSystems] = useState<ConnectorCredentialSystem[]>([])
   const [status, setStatus] = useState<Record<string, boolean>>({})
   const [openSystem, setOpenSystem] = useState<string | null>(null)
@@ -2120,6 +2152,7 @@ function ConnectorCredentialsPanel() {
       setOpenSystem(null)
       setFormValues({})
       setStatus((prev) => ({ ...prev, [entry.system]: true }))
+      onChanged?.()
     } catch (submitError) {
       setRowError((prev) => ({ ...prev, [entry.system]: submitError instanceof Error ? submitError.message : String(submitError) }))
     } finally {
@@ -2134,6 +2167,7 @@ function ConnectorCredentialsPanel() {
       await fetchJson(`/connectors/${entry.system}/credentials/delete`, { method: 'POST' }, controller.signal)
       setStatus((prev) => ({ ...prev, [entry.system]: false }))
       setTestResult((prev) => ({ ...prev, [entry.system]: undefined as unknown as ConnectionTestOutcome }))
+      onChanged?.()
     } catch (deleteError) {
       setRowError((prev) => ({ ...prev, [entry.system]: deleteError instanceof Error ? deleteError.message : String(deleteError) }))
     } finally {
@@ -2227,7 +2261,13 @@ type EdgeDeviceRow = { device_id: string; store_id: string; active: boolean }
  * existing integration at (POST /twin/stores/{store_id}/devices, owner role only). Raw video
  * ingestion/processing is a separate, much larger computer-vision project and is not what
  * this panel does - the help text says so plainly rather than implying otherwise. */
-function EdgeDeviceRegistrationPanel({ storeId }: { storeId: string }) {
+function EdgeDeviceRegistrationPanel({
+  storeId,
+  onChanged,
+}: {
+  storeId: string
+  onChanged?: () => void
+}) {
   const [devices, setDevices] = useState<EdgeDeviceRow[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2261,6 +2301,7 @@ function EdgeDeviceRegistrationPanel({ storeId }: { storeId: string }) {
       )
       setJustRegistered({ deviceId: payload.device_id, secret: payload.hmac_secret })
       refresh()
+      onChanged?.()
     } catch (registerError) {
       setError(registerError instanceof Error ? registerError.message : String(registerError))
     } finally {
@@ -2280,6 +2321,7 @@ function EdgeDeviceRegistrationPanel({ storeId }: { storeId: string }) {
       )
       if (justRegistered?.deviceId === deviceId) setJustRegistered(null)
       refresh()
+      onChanged?.()
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : String(revokeError))
     } finally {
@@ -2403,6 +2445,13 @@ function productRows(items: ProductCatalogItem[]): WorkspaceRowProps[] {
 
 function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: string; status: string; subtitle: string } {
   switch (surface) {
+    case 'onboarding':
+      return {
+        title: 'Set up ShelfWise',
+        kicker: 'First-store guide',
+        status: 'resumable',
+        subtitle: 'Create the company and store, connect one real data source, then add devices and work accounts when needed.',
+      }
     case 'twin':
       return {
         title: 'Store twin',
@@ -3475,6 +3524,8 @@ function WorkspaceScreen({
 
   const renderContent = () => {
     switch (surface) {
+      case 'onboarding':
+        return <OnboardingWizard />
       case 'twin':
         return renderTwin()
       case 'products':
@@ -3632,7 +3683,7 @@ function isOverlayViewport(): boolean {
 // ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
-function PeopleAccessPanel() {
+function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
   const [form, setForm] = useState({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
   const [accounts, setAccounts] = useState<Array<{ id: string; email: string; given_name: string; surname: string; position: string; role: string; active: boolean }>>([])
   const [notice, setNotice] = useState<string | null>(null)
@@ -3661,6 +3712,7 @@ function PeopleAccessPanel() {
       setAccounts((current) => [...current, payload.account].sort((a, b) => a.surname.localeCompare(b.surname)))
       setNotice(`${form.given_name} ${form.surname} can now sign in with their work account.`)
       setForm({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
+      onChanged?.()
     } catch { setNotice('The account could not be created. Check the details and try again.') }
     finally { setBusy(false) }
   }
@@ -3669,6 +3721,7 @@ function PeopleAccessPanel() {
     try {
       await fetchJson(`/accounts/${encodeURIComponent(accountId)}/deactivate`, { method: 'POST' }, new AbortController().signal)
       setAccounts((current) => current.map((account) => account.id === accountId ? { ...account, active: false } : account))
+      onChanged?.()
     } catch { setNotice('The account could not be deactivated. Try again.') }
   }
   const reactivate = async (accountId: string) => {
@@ -3681,6 +3734,7 @@ function PeopleAccessPanel() {
       setAccounts((current) => current.map((account) => (
         account.id === accountId ? { ...account, active: true } : account
       )))
+      onChanged?.()
     } catch { setNotice('The account could not be reactivated. Try again.') }
   }
   const changeRole = async (accountId: string, role: string) => {
@@ -3691,6 +3745,7 @@ function PeopleAccessPanel() {
         new AbortController().signal,
       )
       setAccounts((current) => current.map((account) => account.id === accountId ? payload.account : account))
+      onChanged?.()
     } catch { setNotice('The work role could not be changed. Try again.') }
   }
   return <>
@@ -3709,14 +3764,15 @@ function PeopleAccessPanel() {
   </>
 }
 
-function CsvImportPanel() {
+function CsvImportPanel({ onCommitted }: { onCommitted?: () => void } = {}) {
   const [kind, setKind] = useState('products')
   const [csvText, setCsvText] = useState('')
   const [result, setResult] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
   const run = async (commit: boolean) => {
     if (!csvText.trim()) return
-    setBusy(true); setResult(null)
+    setBusy(true); setResult(null); setFailed(false)
     try {
       const payload = await fetchJson<Record<string, unknown>>(
         commit ? '/intake/csv/commit' : '/intake/csv/preview',
@@ -3725,19 +3781,23 @@ function CsvImportPanel() {
       )
       const count = Number(payload.accepted_rows ?? payload.records_committed ?? payload.row_count ?? 0)
       setResult(commit ? `${count || 'Your'} rows were imported.` : `Preview completed. ${count || 'Review'} valid rows are ready to import.`)
-    } catch { setResult('The file could not be processed. Check its columns and try the preview again.') }
+      if (commit) onCommitted?.()
+    } catch {
+      setFailed(true)
+      setResult('The file could not be processed. Check its columns and try the preview again.')
+    }
     finally { setBusy(false) }
   }
   return <WorkspaceSection title="Import store data">
     <p className="muted">Upload products first, then stock, expiry, and sales. Preview checks the data before any import.</p>
     <label className="login-field"><span>Data type</span><select value={kind} onChange={(e) => setKind(e.target.value)}>{['products', 'stock', 'expiry', 'sales'].map((item) => <option key={item}>{item}</option>)}</select></label>
     <label className="login-field"><span>CSV file</span><input type="file" accept=".csv,text/csv" onChange={async (e) => setCsvText(await e.target.files?.[0]?.text() ?? '')} /></label>
-    {result ? <p className="login-error">{result}</p> : null}
+    {result ? <p className={failed ? 'login-error' : 'workspace-empty'} role="status">{result}</p> : null}
     <div className="workspace-actions"><button className="btn" type="button" disabled={busy || !csvText} onClick={() => run(false)}>Preview file</button><button className="btn btn-primary" type="button" disabled={busy || !csvText} onClick={() => run(true)}>Import approved file</button></div>
   </WorkspaceSection>
 }
 
-function StoreSetupPanel() {
+function StoreSetupPanel({ onCreated }: { onCreated?: (storeId: string) => void } = {}) {
   const [storeId, setStoreId] = useState('')
   const [name, setName] = useState('')
   const [areas, setAreas] = useState('')
@@ -3750,6 +3810,7 @@ function StoreSetupPanel() {
       const entities = areas.split(',').map((label) => label.trim()).filter(Boolean).map((label, index) => ({ local_id: `area_${index + 1}`, entity_type: 'area', display_name: label }))
       await fetchJson('/twin/onboarding/self-service', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ store_id: storeId, display_name: name, entities }) }, new AbortController().signal)
       setMessage(`${name} is ready for data import, connections, and operational monitoring.`)
+      onCreated?.(storeId)
     } catch { setMessage('The store could not be created. Use a short store ID with letters, numbers, underscores, or hyphens.') }
     finally { setBusy(false) }
   }
@@ -3765,14 +3826,26 @@ function StoreSetupPanel() {
   </WorkspaceSection>
 }
 
-function CompanyProfilePanel() {
+function CompanyProfilePanel({ onSaved }: { onSaved?: () => void } = {}) {
   const [form, setForm] = useState({ name: '', country: 'ZA', currency: 'ZAR', timezone: 'Africa/Johannesburg' })
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
-    fetchBackendJson<{ profile?: typeof form }>('/tenants/me', { method: 'GET' }, controller.signal)
-      .then((payload) => payload.profile && setForm({ ...form, ...payload.profile }))
+    fetchBackendJson<{ profile?: Partial<typeof form> }>(
+      '/tenants/me',
+      { method: 'GET' },
+      controller.signal,
+    )
+      .then((payload) => {
+        if (!payload.profile) return
+        setForm((current) => ({
+          name: payload.profile?.name ?? current.name,
+          country: payload.profile?.country ?? current.country,
+          currency: payload.profile?.currency ?? current.currency,
+          timezone: payload.profile?.timezone ?? current.timezone,
+        }))
+      })
       .catch(() => undefined)
     return () => controller.abort()
   }, [])
@@ -3781,6 +3854,7 @@ function CompanyProfilePanel() {
     try {
       await fetchJson('/tenants/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }, new AbortController().signal)
       setMessage('Company profile saved.')
+      onSaved?.()
     } catch { setMessage('The company profile could not be saved. Try again.') }
     finally { setBusy(false) }
   }
@@ -3795,6 +3869,421 @@ function CompanyProfilePanel() {
       <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save company profile'}</button>
     </form>
   </WorkspaceSection>
+}
+
+type OnboardingStepId = 'company' | 'store' | 'data' | 'devices' | 'people' | 'review'
+
+const ONBOARDING_STEPS: Array<{
+  id: OnboardingStepId
+  label: string
+  optional?: boolean
+}> = [
+  { id: 'company', label: 'Company' },
+  { id: 'store', label: 'Store' },
+  { id: 'data', label: 'Data source' },
+  { id: 'devices', label: 'Devices', optional: true },
+  { id: 'people', label: 'People', optional: true },
+  { id: 'review', label: 'Review' },
+]
+
+function isOnboardingStepComplete(
+  status: OnboardingStatus,
+  stepId: OnboardingStepId,
+): boolean {
+  switch (stepId) {
+    case 'company':
+      return status.company.configured
+    case 'store':
+      return status.stores.length > 0
+    case 'data':
+      return status.data.configured
+    case 'devices':
+      return status.devices.active > 0
+    case 'people':
+      return status.accounts.active > 0
+    case 'review':
+      return status.ready_for_operations
+  }
+}
+
+function OnboardingStoreStep({
+  status,
+  onCreated,
+}: {
+  status: OnboardingStatus
+  onCreated: (storeId: string) => void
+}) {
+  return (
+    <>
+      {status.stores.length ? (
+        <WorkspaceSection title="Existing stores" count={pluralLabel(status.stores.length, 'store')}>
+          <div className="workspace-list">
+            {status.stores.map((store) => (
+              <WorkspaceRow
+                key={store.store_id}
+                label={store.display_name}
+                meta={store.store_id}
+                value={pluralLabel(store.entity_count, 'entity')}
+                tone="ok"
+              />
+            ))}
+          </div>
+        </WorkspaceSection>
+      ) : null}
+      <StoreSetupPanel onCreated={onCreated} />
+    </>
+  )
+}
+
+function OnboardingDataStep({
+  onChanged,
+  onNext,
+}: {
+  onChanged: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Choose how your store sends data" count="one required">
+        <p className="workspace-empty">
+          Connect an ERP/POS system for a live feed, or import a validated CSV to start.
+          Either path is enough to complete this required step; you can add the other later.
+        </p>
+      </WorkspaceSection>
+      <ConnectorCredentialsPanel onChanged={onChanged} />
+      <CsvImportPanel onCommitted={onChanged} />
+      <div className="onboarding-step-actions">
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          Continue to devices
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingDevicesStep({
+  status,
+  selectedStoreId,
+  onStoreChange,
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  status: OnboardingStatus
+  selectedStoreId: string
+  onStoreChange: (storeId: string) => void
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Store for this device" count="optional">
+        <p className="workspace-empty">
+          Skip this step if the shop has no compatible camera, people counter, or sensor.
+          ShelfWise accepts structured derived events and never raw camera footage.
+        </p>
+        {status.stores.length ? (
+          <label className="login-field onboarding-store-picker">
+            <span>Store</span>
+            <select value={selectedStoreId} onChange={(event) => onStoreChange(event.target.value)}>
+              {status.stores.map((store) => (
+                <option key={store.store_id} value={store.store_id}>
+                  {store.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="login-error">Create a store before registering its devices.</p>
+        )}
+      </WorkspaceSection>
+      {selectedStoreId ? (
+        <EdgeDeviceRegistrationPanel storeId={selectedStoreId} onChanged={onChanged} />
+      ) : null}
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          {status.devices.active ? 'Continue' : 'Skip for now'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingPeopleStep({
+  hasAccounts,
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  hasAccounts: boolean
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Delegate access when the team is ready" count="optional">
+        <p className="workspace-empty">
+          A single owner can operate ShelfWise alone. Add named work accounts when managers,
+          inventory staff, analysts, or auditors need their own access.
+        </p>
+      </WorkspaceSection>
+      <PeopleAccessPanel onChanged={onChanged} />
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          {hasAccounts ? 'Continue' : 'Skip for now'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingReviewStep({
+  status,
+  onNavigate,
+}: {
+  status: OnboardingStatus
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  const storeNames = status.stores.map((store) => store.display_name).join(', ')
+  const connectedSystems = status.data.connector_systems.map(formatLabel).join(', ')
+  const dataDetail = connectedSystems
+    ? `Connected: ${connectedSystems}`
+    : status.data.has_imported_records
+      ? 'Validated CSV records have been imported.'
+      : 'Connect a system or import a validated CSV.'
+  return (
+    <WorkspaceSection
+      title={status.ready_for_operations ? 'Ready for store operations' : 'Required setup remains'}
+      count={status.ready_for_operations ? 'ready' : 'not ready'}
+    >
+      <div className="workspace-list">
+        <WorkspaceRow
+          label="Company profile"
+          detail={status.company.name || 'Save the business identity used throughout ShelfWise.'}
+          value={status.company.configured ? 'complete' : 'required'}
+          tone={status.company.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('company')}
+        />
+        <WorkspaceRow
+          label="Operational store"
+          detail={storeNames || 'Create at least one exact-store record.'}
+          value={status.stores.length ? pluralLabel(status.stores.length, 'store') : 'required'}
+          tone={status.stores.length ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('store')}
+        />
+        <WorkspaceRow
+          label="Store data"
+          detail={dataDetail}
+          value={status.data.configured ? 'complete' : 'required'}
+          tone={status.data.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('data')}
+        />
+        <WorkspaceRow
+          label="Camera and sensor devices"
+          detail="Optional for stores with compatible structured-event systems."
+          value={status.devices.active ? `${status.devices.active} active` : 'optional'}
+          tone={status.devices.active ? 'ok' : 'info'}
+          onSelect={() => onNavigate('devices')}
+        />
+        <WorkspaceRow
+          label="Work accounts"
+          detail="Optional until another member of staff needs access."
+          value={status.accounts.active ? `${status.accounts.active} active` : 'optional'}
+          tone={status.accounts.active ? 'ok' : 'info'}
+          onSelect={() => onNavigate('people')}
+        />
+      </div>
+      <p className={status.ready_for_operations ? 'onboarding-ready' : 'login-error'} role="status">
+        {status.ready_for_operations
+          ? 'Required setup is complete. Continue to Connections, Store twin, or People & access whenever you need to expand the configuration.'
+          : 'Complete every required item above. Optional devices and work accounts do not block the store.'}
+      </p>
+    </WorkspaceSection>
+  )
+}
+
+function OnboardingStepContent({
+  step,
+  status,
+  selectedStoreId,
+  onStoreChange,
+  onChanged,
+  onNavigate,
+}: {
+  step: OnboardingStepId
+  status: OnboardingStatus
+  selectedStoreId: string
+  onStoreChange: (storeId: string) => void
+  onChanged: () => void
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  switch (step) {
+    case 'company':
+      return <CompanyProfilePanel onSaved={() => { onChanged(); onNavigate('store') }} />
+    case 'store':
+      return <OnboardingStoreStep status={status} onCreated={(storeId) => {
+        onStoreChange(storeId)
+        onChanged()
+        onNavigate('data')
+      }} />
+    case 'data':
+      return <OnboardingDataStep onChanged={onChanged} onNext={() => onNavigate('devices')} />
+    case 'devices':
+      return <OnboardingDevicesStep
+        status={status}
+        selectedStoreId={selectedStoreId}
+        onStoreChange={onStoreChange}
+        onChanged={onChanged}
+        onBack={() => onNavigate('data')}
+        onNext={() => onNavigate('people')}
+      />
+    case 'people':
+      return <OnboardingPeopleStep
+        hasAccounts={status.accounts.active > 0}
+        onChanged={onChanged}
+        onBack={() => onNavigate('devices')}
+        onNext={() => onNavigate('review')}
+      />
+    case 'review':
+      return <OnboardingReviewStep status={status} onNavigate={onNavigate} />
+  }
+}
+
+function OnboardingProgress({
+  status,
+  step,
+  onNavigate,
+}: {
+  status: OnboardingStatus
+  step: OnboardingStepId
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  return (
+    <>
+      <div className="workspace-metrics">
+        <WorkspaceMetric
+          label="Required setup"
+          value={`${status.required_steps.completed}/${status.required_steps.total}`}
+          tone={status.ready_for_operations ? 'ok' : 'warn'}
+        />
+        <WorkspaceMetric label="Stores" value={String(status.stores.length)} />
+        <WorkspaceMetric
+          label="Data source"
+          value={status.data.configured ? 'connected' : 'required'}
+          tone={status.data.configured ? 'ok' : 'warn'}
+        />
+        <WorkspaceMetric
+          label="Operational state"
+          value={status.ready_for_operations ? 'ready' : 'setup'}
+          tone={status.ready_for_operations ? 'ok' : 'info'}
+        />
+      </div>
+      <nav className="onboarding-steps" aria-label="Setup steps">
+        {ONBOARDING_STEPS.map((item, index) => {
+          const isComplete = isOnboardingStepComplete(status, item.id)
+          return (
+            <button
+              key={item.id}
+              className={`onboarding-step${step === item.id ? ' is-current' : ''}${isComplete ? ' is-complete' : ''}`}
+              type="button"
+              aria-current={step === item.id ? 'step' : undefined}
+              onClick={() => onNavigate(item.id)}
+            >
+              <span>{isComplete ? 'Done' : index + 1}</span>
+              <strong>{item.label}</strong>
+              <small>{item.optional ? 'optional' : isComplete ? 'complete' : 'required'}</small>
+            </button>
+          )
+        })}
+      </nav>
+    </>
+  )
+}
+
+/** Guided first-store setup backed by GET /onboarding/status.
+ *
+ * Progress is rebuilt from durable server stores every time this screen opens. The browser
+ * cannot mark a step complete on its own, and optional hardware/team steps never block a
+ * small owner-operated shop from becoming ready.
+ */
+function OnboardingWizard() {
+  const [status, setStatus] = useState<OnboardingStatus | null>(null)
+  const [step, setStep] = useState<OnboardingStepId>('company')
+  const [selectedStoreId, setSelectedStoreId] = useState('')
+  const [loadState, setLoadState] = useState<LoadState>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const initialStepSelected = useRef(false)
+
+  const refresh = useCallback(async () => {
+    setLoadState('loading')
+    setError(null)
+    try {
+      const nextStatus = await fetchJson<OnboardingStatus>(
+        '/onboarding/status',
+        {},
+        new AbortController().signal,
+      )
+      setStatus(nextStatus)
+      if (!initialStepSelected.current) {
+        setStep(nextStatus.required_steps.next)
+        initialStepSelected.current = true
+      }
+      setLoadState('ready')
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError))
+      setLoadState('error')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    if (!status?.stores.length) {
+      setSelectedStoreId('')
+      return
+    }
+    if (!status.stores.some((store) => store.store_id === selectedStoreId)) {
+      setSelectedStoreId(status.stores[0].store_id)
+    }
+  }, [selectedStoreId, status?.stores])
+
+  const changed = () => {
+    void refresh()
+  }
+
+  if (loadState === 'loading' && !status) {
+    return <WorkspaceSection title="Loading setup progress"><WorkspaceEmpty>Reading the current tenant configuration…</WorkspaceEmpty></WorkspaceSection>
+  }
+  if (loadState === 'error' && !status) {
+    return (
+      <WorkspaceSection title="Setup progress unavailable">
+        <p className="login-error">{error || 'The setup status could not be loaded.'}</p>
+        <button className="btn btn-secondary" type="button" onClick={() => void refresh()}>Retry</button>
+      </WorkspaceSection>
+    )
+  }
+  if (!status) return null
+
+  return (
+    <>
+      <OnboardingProgress status={status} step={step} onNavigate={setStep} />
+      {error ? <p className="login-error">Progress refresh failed: {error}</p> : null}
+      <OnboardingStepContent
+        step={step}
+        status={status}
+        selectedStoreId={selectedStoreId}
+        onStoreChange={setSelectedStoreId}
+        onChanged={changed}
+        onNavigate={setStep}
+      />
+    </>
+  )
 }
 
 // Shown only when the backend is configured for real client auth

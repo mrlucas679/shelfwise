@@ -119,7 +119,7 @@ def test_connection_test_reports_ok_with_unsaved_fields(
 ) -> None:
     _jwt_mode(monkeypatch)
 
-    async def fake_fetch_page(self, cursor):  # noqa: ARG001 - matches PollingConnector shape
+    async def fake_fetch_page(self, cursor):
         return [], None
 
     monkeypatch.setattr(
@@ -148,7 +148,7 @@ def test_connection_test_reports_auth_error_without_saving_bad_credentials(
 ) -> None:
     _jwt_mode(monkeypatch)
 
-    async def failing_fetch_page(self, cursor):  # noqa: ARG001
+    async def failing_fetch_page(self, cursor):
         request = httpx.Request("GET", "https://sap.example.com")
         response = httpx.Response(401, request=request)
         raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
@@ -176,7 +176,7 @@ def test_connection_test_uses_stored_credentials_when_no_fields_posted(
 ) -> None:
     _jwt_mode(monkeypatch)
 
-    async def fake_fetch_page(self, cursor):  # noqa: ARG001
+    async def fake_fetch_page(self, cursor):
         return [], None
 
     monkeypatch.setattr(
