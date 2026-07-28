@@ -1,5 +1,57 @@
 # HANDOFF — current continuation state as of 2026-07-28
 
+## Self-serve retailer webhook endpoints — BUILT, 2026-07-28
+
+Closes the last connector gap that still required a developer. The 2026-07-23 credential
+work explicitly recorded its own exclusion: "Webhook-based systems (Shopify, Square,
+Lightspeed, Yoco) still require operator-side configuration - they authenticate via a shared
+webhook secret, not a stored credential a store owner enters themselves." Because
+`/connectors/{system}/intake` is gated by `INGEST_AUTH_DEP` (the operator's shared ingest API
+key), a shop owner could self-serve connect an ERP but **not** their own till or online store.
+
+Same shape as the two previous real gaps found this campaign (connector credentials, edge
+device registry): the HMAC machinery already existed and was correct, but had no self-serve
+front door.
+
+**Built:**
+- `shelfwise_connectors/webhook_endpoints.py` — per-tenant, per-system endpoint identity with
+  an encrypted-at-rest signing secret (same `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` mechanism as
+  connector credentials and edge devices), memory + Postgres, in the central `schema.sql`.
+  Deliberately **not** RLS-scoped, for exactly the documented edge-device reason:
+  `get_active(endpoint_id)` is what resolves *which* tenant an unauthenticated delivery belongs
+  to, before any tenant is known, so binding a tenant to find the tenant is circular and RLS
+  would match zero rows and permanently break delivery. Tenant scoping for list/revoke is
+  enforced with explicit application-layer predicates instead.
+- `routes_webhook_endpoints.py` — owner-only provision/list/revoke, plus
+  `POST /connectors/webhook/{endpoint_id}`, which authenticates on the tenant's own signature
+  alone and carries no operator API key. Deliveries run through the *same*
+  `_process_inbound_record` pipeline as the keyed intake route (injected, not imported), so
+  dedup, validation, and projection behaviour are identical.
+- `WebhookEndpointsPanel` in the console, in both the Connections workspace and the guided
+  setup's data step. The owner picks a system, gets a delivery URL and signing secret shown
+  exactly once, and pastes them into that retailer's webhook settings.
+
+**Security properties under test** (`tests/test_webhook_endpoints.py`, 10 tests): a tampered
+body no longer matches its signature; a revoked endpoint stops accepting previously valid
+deliveries; one tenant can neither list nor revoke another's endpoint; a delivery payload
+cannot name the tenant it lands in (attribution comes from the endpoint, not the body); an
+unknown endpoint id is indistinguishable from a bad signature, so the route cannot be used to
+probe which ids exist; poll-based systems are refused an endpoint they could never deliver to.
+
+Verification on this tree:
+
+- `932 passed, 21 skipped` — complete Python suite.
+- Ruff clean; frontend TypeScript check and production build clean.
+- Capability contract: 248 capabilities,
+  `sha256:4572676304541c4f4e3fb104515af9195c8fa10a4c3620c4ccaa597f2bd5ca43`.
+- Playwright **11/11** on isolated ports 5187/8017, including a new browser test that drives
+  the real provisioning route end to end.
+
+**Still not built, stated plainly:** raw camera video ingestion and computer vision; outbound
+write-back to a source POS/ERP; and self-serve *deployment* (an operator still stands up the
+instance). What is now true is narrower and real: a store owner can connect every one of the
+nine supported source systems themselves, from the product, with no developer.
+
 ## Plans 013-016 — BUILT and gate-verified, 2026-07-28
 
 The four remaining IN PROGRESS plans are implemented and their done criteria are met:

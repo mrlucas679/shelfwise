@@ -1293,6 +1293,7 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Tenant profile', method: 'GET', path: '/tenants/me', detail: 'Current tenant/store profile and connector policy.' },
   { label: 'Inventory positions', method: 'GET', path: '/inventory/positions', detail: 'Tenant shelf, backroom, bin, quarantine, and returns ledger.' },
   { label: 'Connector catalogue', method: 'GET', path: '/connectors/systems', detail: 'Supported source-system connector capabilities.' },
+  { label: 'Tenant webhook endpoints', method: 'GET', path: '/connectors/webhook-endpoints', detail: 'This tenant\'s provisioned retailer webhook endpoints; signing secrets are never returned.' },
   { label: 'Tenant connectors', method: 'GET', path: '/connectors/me', detail: 'Connector status for the current tenant.' },
   { label: 'Inbound records', method: 'GET', path: '/connectors/inbound-records', detail: 'Connector intake and validation records.' },
   { label: 'Model runs', method: 'GET', path: '/mlops/model-runs', detail: 'Inference run ledger.' },
@@ -1343,6 +1344,9 @@ const GATED_ENDPOINTS = [
   { label: 'Connector credential store', method: 'POST', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Owner-only: store this tenant\'s own encrypted ERP credentials, used in place of the shared env-var default.' },
   { label: 'Connector credential delete', method: 'POST', path: '/connectors/{system}/credentials/delete', group: 'connections', detail: 'Owner-only: remove this tenant\'s stored credentials, reverting that system to the shared env-var default.' },
   { label: 'Connector credential test', method: 'POST', path: '/connectors/{system}/credentials/test', group: 'connections', detail: 'Owner-only: live-probe a poll-based system with posted or stored credentials before relying on them.' },
+  { label: 'Provision webhook endpoint', method: 'POST', path: '/connectors/{system}/webhook-endpoint', group: 'connections', detail: 'Owner-only: mint this tenant\'s own signing secret for a retailer webhook; returned exactly once.' },
+  { label: 'Revoke webhook endpoint', method: 'POST', path: '/connectors/webhook-endpoints/{endpoint_id}/revoke', group: 'connections', detail: 'Owner-only: disable one of this tenant\'s provisioned retailer webhook endpoints.' },
+  { label: 'Tenant webhook delivery', method: 'POST', path: '/connectors/webhook/{endpoint_id}', group: 'connections', detail: 'Retailer delivery authenticated by this tenant\'s signature alone - no operator API key.' },
   { label: 'CSV import preview', method: 'POST', path: '/intake/csv/preview', group: 'connections', detail: 'Dry-run a client CSV: inferred column mapping and per-row validation, no writes.' },
   { label: 'CSV import commit', method: 'POST', path: '/intake/csv/commit', group: 'connections', detail: 'Idempotent CSV import through the connector pipeline; invalid rows quarantine with provenance.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
@@ -3273,6 +3277,7 @@ function WorkspaceScreen({
       </div>
       <CompanyProfilePanel />
       <ConnectorCredentialsPanel />
+      <WebhookEndpointsPanel />
       <CsvImportPanel />
       <WorkspaceSection title="Connector catalogue" count={pluralLabel(connectorRows.length, 'system')}>
         <div className="workspace-list">
@@ -3992,6 +3997,162 @@ function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
   </>
 }
 
+type WebhookEndpointRow = { endpoint_id: string; system: string; active: boolean }
+type ProvisionedWebhookEndpoint = {
+  endpoint_id: string
+  system: string
+  signing_secret: string
+  delivery_url: string
+  signature_header: string
+}
+
+/** Self-serve "connect a till or online store" panel for the signature-authenticated
+ * systems (Shopify, Square, Lightspeed, Yoco). These do not store a credential ShelfWise
+ * replays - the retailer signs each delivery - so an owner provisions their own endpoint
+ * here and pastes the URL and secret into that retailer's webhook settings. Before this
+ * existed, connecting one of these required an operator to configure the shared ingest
+ * API key, which is exactly the developer step a store owner should not need. The signing
+ * secret is displayed once and never returned again by any route. */
+function WebhookEndpointsPanel({ onChanged }: { onChanged?: () => void } = {}) {
+  const [endpoints, setEndpoints] = useState<WebhookEndpointRow[]>([])
+  const [systems, setSystems] = useState<string[]>([])
+  const [selected, setSelected] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [justProvisioned, setJustProvisioned] = useState<ProvisionedWebhookEndpoint | null>(null)
+
+  const refresh = useCallback(() => {
+    const controller = new AbortController()
+    fetchJson<{ endpoints?: WebhookEndpointRow[]; supported_systems?: string[] }>(
+      '/connectors/webhook-endpoints',
+      {},
+      controller.signal,
+    )
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        setEndpoints(Array.isArray(payload.endpoints) ? payload.endpoints : [])
+        const supported = Array.isArray(payload.supported_systems) ? payload.supported_systems : []
+        setSystems(supported)
+        setSelected((current) => current || supported[0] || '')
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => refresh(), [refresh])
+
+  const provision = async () => {
+    if (!selected) return
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      const payload = await fetchJson<ProvisionedWebhookEndpoint>(
+        `/connectors/${selected}/webhook-endpoint`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+        controller.signal,
+      )
+      setJustProvisioned(payload)
+      refresh()
+      onChanged?.()
+    } catch (provisionError) {
+      setError(provisionError instanceof Error ? provisionError.message : String(provisionError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async (endpointId: string) => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/connectors/webhook-endpoints/${encodeURIComponent(endpointId)}/revoke`,
+        { method: 'POST' },
+        controller.signal,
+      )
+      if (justProvisioned?.endpoint_id === endpointId) setJustProvisioned(null)
+      refresh()
+      onChanged?.()
+    } catch (revokeError) {
+      setError(revokeError instanceof Error ? revokeError.message : String(revokeError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect a till or online store" count={pluralLabel(endpoints.length, 'endpoint')}>
+      <p className="workspace-empty">
+        Shopify, Square, Lightspeed, and Yoco send you sales and stock updates instead of
+        storing a key here. Create an endpoint below, then paste the address and signing
+        secret into that system's webhook settings. The secret is shown once and cannot be
+        read again - if you lose it, create a new endpoint and revoke the old one.
+      </p>
+      {error ? <p className="login-error">{error}</p> : null}
+      {justProvisioned ? (
+        <div className="connector-credential-form">
+          <p className="workspace-empty">
+            <strong>Save these now - the signing secret will not be shown again.</strong>
+          </p>
+          <label className="login-field">
+            <span>Webhook address</span>
+            <input type="text" readOnly value={justProvisioned.delivery_url} />
+          </label>
+          <label className="login-field">
+            <span>Signature header</span>
+            <input type="text" readOnly value={justProvisioned.signature_header} />
+          </label>
+          <label className="login-field">
+            <span>Signing secret</span>
+            <input type="text" readOnly value={justProvisioned.signing_secret} />
+          </label>
+          <div className="connector-credential-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => setJustProvisioned(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="workspace-list connector-credentials">
+        {endpoints.map((endpoint) => (
+          <div className="connector-credential-row" key={endpoint.endpoint_id}>
+            <WorkspaceRow
+              label={formatLabel(endpoint.system)}
+              meta={endpoint.endpoint_id}
+              value={endpoint.active ? 'active' : 'revoked'}
+              tone={endpoint.active ? 'ok' : undefined}
+            />
+            {endpoint.active ? (
+              <div className="connector-credential-actions" style={{ padding: '0 2px 12px' }}>
+                <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => revoke(endpoint.endpoint_id)}>
+                  Revoke
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div className="connector-credential-form">
+        <label className="login-field">
+          <span>System</span>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={busy}>
+            {systems.map((system) => (
+              <option key={system} value={system}>{formatLabel(system)}</option>
+            ))}
+          </select>
+        </label>
+        <div className="connector-credential-actions">
+          <button className="btn btn-primary" type="button" disabled={busy || !selected} onClick={provision}>
+            {busy ? 'Creating…' : 'Create endpoint'}
+          </button>
+        </div>
+      </div>
+    </WorkspaceSection>
+  )
+}
+
 function CsvImportPanel({ onCommitted }: { onCommitted?: () => void } = {}) {
   const [kind, setKind] = useState('products')
   const [csvText, setCsvText] = useState('')
@@ -4182,6 +4343,7 @@ function OnboardingDataStep({
         </p>
       </WorkspaceSection>
       <ConnectorCredentialsPanel onChanged={onChanged} />
+      <WebhookEndpointsPanel onChanged={onChanged} />
       <CsvImportPanel onCommitted={onChanged} />
       <div className="onboarding-step-actions">
         <button className="btn btn-primary" type="button" onClick={onNext}>

@@ -116,6 +116,8 @@ from .routes_onboarding import router as onboarding_router
 from .routes_reports import router as reports_router
 from .routes_scenarios import router as scenarios_router
 from .routes_twin import router as twin_router
+from .routes_webhook_endpoints import bind_record_processor
+from .routes_webhook_endpoints import router as webhook_endpoints_router
 from .state import (
     account_store,  # noqa: F401  (re-exported: tests/conftest.py imports it from here)
     candidate_store,
@@ -240,6 +242,7 @@ app.include_router(connector_credentials_router)
 app.include_router(mlops_router)
 app.include_router(onboarding_router)
 app.include_router(reports_router)
+app.include_router(webhook_endpoints_router)
 app.include_router(scenarios_router)
 
 try:
@@ -1561,6 +1564,13 @@ def _process_inbound_record(record: Any) -> dict[str, Any]:
         "event": pipeline["event"],
         "pipeline": pipeline,
     }
+
+
+# Self-serve tenant webhooks run every delivery through this exact pipeline, so a retailer
+# posting to a tenant endpoint gets identical dedup, validation, and projection behaviour to
+# the operator-keyed intake route. Injected rather than imported to keep the router free of
+# an app.py dependency.
+bind_record_processor(_process_inbound_record)
 
 
 MAX_CSV_COMMIT_ROWS = 1_000

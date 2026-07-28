@@ -231,3 +231,34 @@ test('a store owner can self-serve register a camera/sensor device credential', 
   await panel.getByRole('button', { name: 'Revoke' }).click()
   await expect(panel.getByText('Revoked', { exact: true })).toBeVisible()
 })
+
+test('a store owner can self-serve connect a till through a signed webhook endpoint', async ({
+  page,
+}) => {
+  // The other half of "connect your own systems without a developer". Poll-based ERPs use
+  // the credential panel; Shopify/Square/Lightspeed/Yoco sign their deliveries instead, and
+  // previously needed an operator to wire the shared ingest API key. This drives the real
+  // provisioning route (POST /connectors/{system}/webhook-endpoint) end to end.
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Connections/ }).click()
+
+  const panel = page.locator('.workspace-section', { hasText: 'Connect a till or online store' })
+  await expect(panel).toBeVisible()
+
+  await panel.getByRole('button', { name: 'Create endpoint' }).click()
+
+  // The signing secret and delivery address are shown exactly once, at creation.
+  const urlField = panel.getByLabel('Webhook address')
+  await expect(urlField).toBeVisible()
+  const deliveryUrl = await urlField.inputValue()
+  expect(deliveryUrl).toContain('/connectors/webhook/whep_')
+  const secretField = panel.getByLabel('Signing secret')
+  expect((await secretField.inputValue()).length).toBeGreaterThan(0)
+
+  await panel.getByRole('button', { name: 'Done' }).click()
+  await expect(panel.getByText('active', { exact: true }).first()).toBeVisible()
+
+  // Revoking must not require re-reading the secret, and keeps this test repeatable.
+  await panel.getByRole('button', { name: 'Revoke' }).first().click()
+  await expect(panel.getByText('revoked', { exact: true }).first()).toBeVisible()
+})

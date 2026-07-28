@@ -83,6 +83,17 @@ from .inbound_store import (
 from .normalize import inventory_to_event, record_to_event
 from .provenance import InboundRecord, ValidationResult, raw_payload_hash
 from .validation import validate_expiry, validate_inventory, validate_product, validate_sales
+from .webhook_endpoints import (
+    WEBHOOK_SYSTEMS,
+    InMemoryWebhookEndpointRegistry,
+    PostgresWebhookEndpointRegistry,
+    WebhookEndpoint,
+    WebhookEndpointError,
+    WebhookSystemNotSupported,
+    create_webhook_endpoint_registry,
+    new_endpoint_credentials,
+    resolve_webhook_system,
+)
 from .writeback import PostgresTaskWriteBackSink, TaskWriteBackSink, create_writeback_sink
 
 __all__ = [
@@ -90,6 +101,7 @@ __all__ = [
     "CSV_INTAKE_KINDS",
     "MAX_WEBHOOK_BYTES",
     "TESTABLE_SYSTEMS",
+    "WEBHOOK_SYSTEMS",
     "ConnectionTestResult",
     "ConnectorCapability",
     "ConnectorCredentialError",
@@ -105,6 +117,7 @@ __all__ = [
     "InMemoryCursorStore",
     "InMemoryInboundRecordStore",
     "InMemoryWebhookDedupStore",
+    "InMemoryWebhookEndpointRegistry",
     "InboundRecord",
     "InventoryState",
     "LightspeedSaleWebhookReceiver",
@@ -114,6 +127,7 @@ __all__ = [
     "PostgresCursorStore",
     "PostgresInboundRecordStore",
     "PostgresTaskWriteBackSink",
+    "PostgresWebhookEndpointRegistry",
     "ProductMaster",
     "QuarantineVerdict",
     "SalesLine",
@@ -126,7 +140,10 @@ __all__ = [
     "SysproInventoryConnector",
     "TaskWriteBackSink",
     "ValidationResult",
+    "WebhookEndpoint",
+    "WebhookEndpointError",
     "WebhookReceiver",
+    "WebhookSystemNotSupported",
     "YocoCheckoutWebhookReceiver",
     "build_records",
     "build_test_connector",
@@ -134,6 +151,7 @@ __all__ = [
     "create_connector_credential_store",
     "create_cursor_store",
     "create_inbound_record_store",
+    "create_webhook_endpoint_registry",
     "create_writeback_sink",
     "decrypt_credential_fields",
     "encrypt_credential_fields",
@@ -150,6 +168,7 @@ __all__ = [
     "map_yoco_checkout",
     "neutralise_formula",
     "neutralise_formula_text",
+    "new_endpoint_credentials",
     "parse_gs1",
     "preview_csv",
     "quarantine_intake",
@@ -157,6 +176,7 @@ __all__ = [
     "raw_payload_hash",
     "record_to_event",
     "resolve_connector_credentials",
+    "resolve_webhook_system",
     "test_connection",
     "validate_expiry",
     "validate_inventory",

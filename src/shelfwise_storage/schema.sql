@@ -97,6 +97,21 @@ create table if not exists shelfwise_edge_devices (
 create index if not exists idx_shelfwise_edge_devices_tenant_store
 on shelfwise_edge_devices (tenant_id, store_id, device_id);
 
+-- Webhook endpoint identity is intentionally not tenant-RLS-scoped, for the same reason as
+-- the edge device registry above: an unauthenticated retailer delivery must resolve its
+-- tenant from an opaque endpoint_id before any tenant is known. Tenant-scoped list/revoke
+-- operations enforce tenant_id in their application queries.
+create table if not exists shelfwise_webhook_endpoints (
+    endpoint_id text primary key,
+    tenant_id text not null,
+    system text not null,
+    encrypted_secret text not null,
+    active boolean not null default true,
+    created_at timestamptz not null default now()
+);
+create index if not exists idx_shelfwise_webhook_endpoints_tenant
+on shelfwise_webhook_endpoints (tenant_id, endpoint_id);
+
 create table if not exists shelfwise_open_orders (
     tenant_id text not null,
     data_domain text not null default 'operational_twin',

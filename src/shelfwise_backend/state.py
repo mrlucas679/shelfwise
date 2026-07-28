@@ -14,6 +14,7 @@ from shelfwise_connectors import (
     create_connector_credential_store,
     create_cursor_store,
     create_inbound_record_store,
+    create_webhook_endpoint_registry,
     create_writeback_sink,
 )
 from shelfwise_inventory import create_inventory_position_store
@@ -76,6 +77,7 @@ writeback_sink = create_writeback_sink()
 inbound_record_store = create_inbound_record_store()
 connector_cursor_store = create_cursor_store()
 connector_credential_store = create_connector_credential_store()
+webhook_endpoint_registry = create_webhook_endpoint_registry()
 product_catalog_store = create_product_catalog_store()
 candidate_store = create_candidate_store()
 open_order_store = create_open_order_store()

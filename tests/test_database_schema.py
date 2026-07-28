@@ -146,6 +146,32 @@ def test_compose_init_schema_includes_edge_device_registry() -> None:
     assert "alter table shelfwise_edge_devices force row level security" not in normalized
 
 
+def test_compose_init_schema_includes_webhook_endpoint_registry() -> None:
+    """Self-serve webhook endpoints must exist in production migrations, not only locally.
+
+    Same class of drift the edge-device registry hit: a module-local auto-schema is invisible
+    to a production deployment that disables runtime DDL, which would silently break every
+    tenant-provisioned retailer webhook on first deploy.
+    """
+    schema = (ROOT / "src" / "shelfwise_storage" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(schema.split())
+
+    assert "create table if not exists shelfwise_webhook_endpoints" in normalized
+    for column in (
+        "endpoint_id text primary key",
+        "tenant_id text not null",
+        "system text not null",
+        "encrypted_secret text not null",
+        "active boolean not null default true",
+    ):
+        assert column in normalized
+    # Resolving a tenant from an opaque endpoint id binds no tenant, so RLS would match
+    # zero rows and permanently break delivery. Application-layer predicates scope instead.
+    assert "alter table shelfwise_webhook_endpoints force row level security" not in normalized
+
+
 def test_model_run_schema_migrates_telemetry_columns_before_domain_index() -> None:
     schema = (ROOT / "src" / "shelfwise_storage" / "schema.sql").read_text(
         encoding="utf-8"

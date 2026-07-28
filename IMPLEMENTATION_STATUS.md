@@ -5,16 +5,25 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **921 passed / 21 environment-gated skips**;
+Branch: `developers` · Final local gates: **932 passed / 21 environment-gated skips**;
 Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean;
-capability manifest **244 capabilities**, contract-verified
-(`sha256:4f39cff65...`); Playwright golden path **10/10 passed** against isolated disposable
+capability manifest **248 capabilities**, contract-verified
+(`sha256:457267630...`); Playwright golden path **11/11 passed** against isolated disposable
 ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
 installed frontend toolchain ran these gates directly.
 GitHub CI on implementation commit `e656d1d` passed **927 tests / 1 skip** with fresh
 Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
 shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
 credentials; this remains explicitly external rather than being inferred from the green build.
+
+## 2026-07-28 self-serve connection completeness
+
+- ✅ All nine supported source systems are now owner-connectable from the product with no
+  developer step. Poll-based ERPs use stored credentials with a live connection test;
+  Shopify, Square, Lightspeed, and Yoco use per-tenant signed webhook endpoints provisioned
+  in the console, removing the operator-held shared ingest key from the connection path.
+- ✅ Webhook endpoint secrets are encrypted at rest, returned exactly once, revocable, and
+  tenant-isolated; delivery attribution comes from the endpoint identity, never the payload.
 
 ## 2026-07-28 product operations closure (plans 013-016)
 
