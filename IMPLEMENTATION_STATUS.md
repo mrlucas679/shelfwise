@@ -11,7 +11,7 @@ capability manifest **241 capabilities**, contract-verified
 (`sha256:3697ed095...`); Playwright golden path **10/10 passed** against isolated disposable
 ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
 installed frontend toolchain ran these gates directly.
-GitHub CI on implementation commit `2dc89b4` passed **912 tests / 1 skip** with fresh
+GitHub CI on implementation commit `e656d1d` passed **927 tests / 1 skip** with fresh
 Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
 shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
 credentials; this remains explicitly external rather than being inferred from the green build.

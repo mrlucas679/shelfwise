@@ -35,10 +35,11 @@ Verification on the final local tree:
 - Playwright: 10/10 passed against isolated ShelfWise ports 5187/8017, including activation and
   first-owner setup screens plus the existing onboarding, HITL, chat, connector, and device paths.
 
-Exact-head GitHub Actions remains the handoff gate after this tree is pushed. CI owns fresh
-Postgres/Redis, wheel, production-image, and deployment-shakedown proof; live MI300X/Fireworks,
-SMTP delivery, and retailer-sandbox traffic require external credentials and must not be inferred
-from local or CI success.
+Exact-head GitHub Actions passed on implementation commit `e656d1d`: both push and pull-request
+CI plus both capability-contract runs completed successfully. CI exercised 927 tests with fresh
+Postgres/Redis (1 environment-gated skip), the distributable wheel, production Compose topology,
+and deployment shakedown. Live MI300X/Fireworks, SMTP delivery, and retailer-sandbox traffic
+require external credentials and must not be inferred from local or CI success.
 
 ## Guided first-store onboarding — BUILT and browser-verified, 2026-07-28
 
