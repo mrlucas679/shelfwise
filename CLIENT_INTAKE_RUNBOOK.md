@@ -1,10 +1,11 @@
 # Client Intake Runbook — Taking a Real Shop Live on a Dedicated Stack
 
 Date: 2026-07-28. Deployment model: **one dedicated stack per client** (owner decision,
-2026-07-23). The client's owner login IS the stack's configured company account; the
-multi-tenant plumbing stays internal until there are enough clients to justify shared
-hosting. Every step below is an operator action against software that already exists;
-where a step still requires a purchase, it says so explicitly.
+2026-07-23). The first owner is created through the browser's one-time platform-authorized
+setup; environment-based owner credentials now exist only for idempotent legacy migration
+or explicitly enabled emergency recovery. Multi-tenant plumbing stays internal until there
+are enough clients to justify shared hosting. Every step below is an operator action against
+software that already exists; where a step still requires a purchase, it says so explicitly.
 
 Target: **first useful recommendation within 48 hours of receiving the client's data.**
 Any step that fights you here is a product bug — file it, fix it in the product, keep
@@ -34,32 +35,38 @@ this runbook shrinking.
      stack, used by every store and the connector poll loop.
 4. Mint secrets (unique per client, never reused across stacks):
    - `TENANT_AUTH_SECRET` (JWT signing), `API_KEY` (write-path guard),
-     `SHELFWISE_WORKER_API_KEY`.
-5. Configure the owner login (`.env.example` lines 184-190):
-   - `SHELFWISE_LOGIN_EMAIL=<owner's email>`
-   - `SHELFWISE_LOGIN_PASSWORD_HASH` via the documented scrypt one-liner, entered by
-     the owner or set to a first-login temporary value they change with us on a call.
+     `SHELFWISE_WORKER_API_KEY`, and a one-time `SHELFWISE_PLATFORM_BOOTSTRAP_KEY`.
+5. Configure account delivery:
+   - `SHELFWISE_PUBLIC_APP_URL`, `SHELFWISE_SMTP_HOST`, `SHELFWISE_SMTP_FROM`, and
+     the SMTP port/credentials required by the selected mail service.
+   - ShelfWise uses standard SMTP and does not require a code dependency on one vendor.
+     Until delivery is configured, invitations and recovery fail closed before claiming
+     that email was sent.
 6. Configure inference: `LLM_PROVIDER`, `LLM_*_BASE_URL/API_KEY/MODEL` per the
    production profile (`vllm_mi300x` identity or the deliberate fallback).
 7. `docker compose -f docker-compose.production.yml up -d` — the migrate job applies
    idempotent migrations; verify `/health` and `/readiness` report every lifespan
    service green.
+8. Open the application, choose **Set up first company owner**, and give the authorized
+   owner the one-time bootstrap key out of band. Confirm a second bootstrap attempt is
+   rejected. Remove or rotate the bootstrap key after the owner exists.
 
 ## 2. Complete the in-product Setup guide
 
 The normal client path is now **System → Setup guide**. It resumes from server state and leads
 the owner through company identity, store creation, and one required data source. The owner may
 connect an ERP with encrypted credentials or choose Products, Stock, Expiry, or Sales CSV,
-preview the inferred mapping and validation result, then import the approved file. Devices and
-named work accounts are offered in the same flow but are optional. Owners do not need curl, a
-database login, or an environment-file edit.
+preview the inferred mapping and validation result, then import the approved file. In **People
+& access**, owners invite executives, managers, inventory staff, analysts, and auditors by real
+work identity and position. Each worker receives a single-use activation link and chooses their
+own password. Owners do not need curl, a database login, or an environment-file edit.
 
 Verify `GET /onboarding/status` reports `ready_for_operations: true` before leaving setup. The
 API details below remain the recovery/automation contract, not the required client workflow.
 
-The API is the product path: `POST /intake/csv/preview` then `POST /intake/csv/commit`
-(ingest-role key or owner JWT). Order matters — products first so identity resolution
-exists before stock and sales arrive.
+The browser is the product path. `POST /intake/csv/preview` then `POST /intake/csv/commit`
+remain the recovery/automation contract (ingest-role key or owner JWT). Order matters —
+products first so identity resolution exists before stock and sales arrive.
 
 For each file, in this order — `products`, `stock`, `expiry`, `sales`:
 

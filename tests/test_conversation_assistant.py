@@ -33,6 +33,10 @@ from shelfwise_backend.conversation_routing import (
     RouteReason,
     choose_conversation_route,
 )
+from shelfwise_backend.retrieval_planning import (
+    build_retrieval_receipt,
+    plan_retrieval,
+)
 from shelfwise_backend.tenant import encode_hs256_token
 from shelfwise_backend.tools.mcp_surface import PlatformTool
 from shelfwise_mlops import EvaluationRecord, InMemoryEvaluationRegistry
@@ -137,6 +141,63 @@ def test_routing_is_deterministic_and_auditable(request_kwargs, tier, reason) ->
     assert route.tier is tier
     assert route.reason is reason
     assert route.to_dict()["policy_version"] == "conversation-route-v1"
+
+
+def test_account_help_does_not_load_operational_evidence() -> None:
+    plan = plan_retrieval("How do I reset my password?", has_conversation=False)
+
+    assert plan.partitions == ()
+    receipt = build_retrieval_receipt(plan, {})
+    assert receipt["counts"] == {}
+    assert receipt["insufficient_evidence"] is False
+    assert set(receipt["omissions"]) == {
+        "live_facts",
+        "decisions",
+        "learning",
+        "traces",
+        "conversation_memory",
+        "skills",
+    }
+
+
+def test_operational_question_selects_bounded_fact_and_skill_partitions() -> None:
+    plan = plan_retrieval(
+        "How much yoghurt stock is on hand?",
+        has_conversation=False,
+    )
+
+    assert plan.partitions == ("live_facts", "skills")
+    assert plan.max_followups == 1
+    receipt = build_retrieval_receipt(plan, {"live_facts": {}, "skills": []})
+    assert receipt["insufficient_evidence"] is True
+    assert receipt["follow_up"]["allowed"] is True
+    assert receipt["follow_up"]["used"] == 0
+
+
+def test_conflicting_retrieval_evidence_is_visible_and_routes_strong() -> None:
+    plan = plan_retrieval("Why is this decision pending?", has_conversation=False)
+    receipt = build_retrieval_receipt(
+        plan,
+        {
+            "live_facts": {"source_conflict": True},
+            "decisions": [{"id": "dec_1", "status": "pending"}],
+            "skills": [{"id": "decision-explanation"}],
+        },
+    )
+    route = choose_conversation_route(
+        ConversationRouteRequest(
+            domains=("inventory",),
+            risk_tier=plan.risk_tier,
+            asks_for_scenario=False,
+            has_source_conflict=bool(receipt["conflicts"]),
+            has_memory_conflict=False,
+            insufficient_evidence=bool(receipt["insufficient_evidence"]),
+        )
+    )
+
+    assert receipt["conflicts"]
+    assert route.tier is ConversationTier.STRONG
+    assert route.reason is RouteReason.STRONG_SOURCE_CONFLICT
 
 
 # --- hierarchical conversation memory ------------------------------------------------
@@ -469,6 +530,13 @@ def test_chat_carries_memory_route_and_context_receipts_end_to_end(monkeypatch) 
         "final_answer_schema",
     } <= set(meta["context_receipt"]["section_tokens"])
     assert meta.get("skills"), "a stock question must discover the stock skill"
+    assert meta["retrieval_plan"]["policy_version"] == "retrieval-plan-v1"
+    assert meta["retrieval_receipt"]["selected_partitions"] == [
+        "live_facts",
+        "conversation_memory",
+        "skills",
+    ]
+    assert meta["retrieval_receipt"]["follow_up"]["maximum"] == 1
 
     summary = conversation_memory_store.active_summary(
         tenant_id="assistant_test_tenant",

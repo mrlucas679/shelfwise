@@ -5,13 +5,12 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **892 passed / 21 environment-gated skips**;
-Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (287 modules);
-capability manifest **231 capabilities**, contract-verified
-(`sha256:704b122af...`); Playwright golden path **8/8 passed** against isolated disposable
-ShelfWise servers. The machine's project `.venv` launcher currently targets a removed
-uv-managed interpreter, so these gates used the installed Hermes Python environment and
-bundled Node runtime; see the 2026-07-28 HANDOFF entry for the exact proof boundary.
+Branch: `developers` · Final local gates: **907 passed / 21 environment-gated skips**;
+Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (288 modules);
+capability manifest **241 capabilities**, contract-verified
+(`sha256:3697ed095...`); Playwright golden path **10/10 passed** against isolated disposable
+ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
+installed frontend toolchain ran these gates directly.
 GitHub CI on implementation commit `2dc89b4` passed **912 tests / 1 skip** with fresh
 Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
 shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
@@ -26,8 +25,14 @@ credentials; this remains explicitly external rather than being inferred from th
 - ✅ Guided CSV preview/commit and encrypted ERP credential flows are available directly in
   onboarding; committed data or a configured connector satisfies the required data-source gate.
 - ✅ Named work accounts include first name, surname, work position, email, password, and
-  bounded operational role. Owners can create, change role, deactivate, and reactivate accounts;
-  staff sign in through the normal login path.
+  bounded operational role. A one-time platform key bootstraps the first opaque-ID owner;
+  owners invite staff by email, change roles, deactivate/reactivate, resend invitations, and
+  initiate recovery. Staff activate and choose their own password in the browser.
+- ✅ Signed invitation/reset tokens are expiring and single-use, only digests are stored,
+  account audit events contain identity IDs rather than PII, and role/password/activity changes
+  atomically advance the account session version so earlier workforce JWTs stop working.
+- ✅ Configured legacy-owner credentials migrate idempotently into the durable account store;
+  steady-state fallback is disabled unless emergency recovery is explicitly enabled.
 - ✅ Browser regressions cover full onboarding, connector connection, and device registration.
 - ✅ Runtime endpoint precedence and strict company-profile write payload bugs found during
   real browser execution are fixed.
@@ -69,11 +74,13 @@ references and regression tests for each):
   only because this pass insisted on booting the real server rather than trusting test output
   alone.
 
-**Two large, honestly-scoped items remain genuinely open**, not fixed and not fabricated as
-fixed: the "open order" store's naming still implies a full PO create/approve/send lifecycle
-it doesn't have (it's a shipment-receiving ledger); and there is no live POS/cashier
-stock-decrement path anywhere in the codebase (confirmed absent by a full-tree search, not
-assumed) - both documented precisely in HANDOFF.md for whoever picks them up next.
+The two application gaps previously called open are now reconciled. The receiving ledger no
+longer claims to create, approve, or transmit purchase orders. Normalized operational
+`STOCK_UPDATE` and POS `SALE` events now update the tenant inventory-position ledger through an
+idempotent projection receipt: replay cannot double-decrement, overselling cannot make stock
+negative, missing baselines and unsupported fractional units remain visible failure receipts,
+and simulation events cannot enter the operational ledger. Live connector acceptance still
+requires a real retailer sandbox and credentials; that external proof is not inferred locally.
 
 **Every feature enabled by the supported application deployment profiles is implemented and
 covered by the applicable local or CI gate.** The six capability records marked `partial` are
@@ -142,6 +149,11 @@ not an oversight).
 - ✅ **Deterministic tier routing** (`conversation_routing.py`): routine/strong route computed
   from pre-inference facts, saved as an auditable `conversation-route-v1` receipt on every
   answer's metadata.
+- ✅ **Bounded adaptive evidence planning** (`retrieval_planning.py`): intent/risk signals select
+  live facts, decisions, learning, traces, conversation memory, and promoted skills before state
+  is read. The `retrieval-plan-v1` receipt records counts, omissions, freshness, conflicts,
+  inadequacy, and a hard maximum of one follow-up. Conflicting/inadequate evidence selects the
+  strong tier; account/help questions do not load operational state.
 - ✅ **Token-accounted context receipts** (`context_budget.py`): per-section token accounting
   validated against the 8,192-token allocation BEFORE network I/O; receipt on every answer.
 - ✅ Grounded agentic chat: real read-only platform tools, conclusions must cite tool numbers,
@@ -296,8 +308,9 @@ not an oversight).
   owner account with stdlib scrypt (honest 503 unconfigured, uniform 401 on failure with no
   field oracle, constant-shape comparison) and mints the exact owner-role JWT session cookie
   the platform already verifies everywhere.
-- ✅ Per-person work accounts: owner-provisioned names, surname, position, email, password,
-  role changes, deactivation/reactivation, tenant-scoped storage, and normal login. Personalized
+- ✅ Per-person work accounts: first-owner setup, owner-issued invitations, activation, normal
+  login, forced temporary-password replacement, forgot/reset, role changes, session-aware
+  deactivation/reactivation, identity-only audit, and tenant-scoped storage. Personalized
   per-role queue routing remains a product refinement, not an account-creation gap.
 
 ## 10. Simulation, evaluation, and observability — ✅

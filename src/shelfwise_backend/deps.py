@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from dataclasses import replace
 
 from fastapi import Depends, Header, HTTPException, Request
 
@@ -115,10 +116,7 @@ def _tenant_id_from_request(request: Request) -> str:
     if _auth_mode() != "jwt":
         return default_tenant_context().tenant_id
     try:
-        return verify_bearer_token(
-            _request_authorization(request),
-            secret=os.getenv("TENANT_AUTH_SECRET", ""),
-        ).tenant_id
+        return _verified_tenant_context(_request_authorization(request)).tenant_id
     except ValueError:
         return _UNAUTHENTICATED_TENANT_ID
 
@@ -152,12 +150,39 @@ def current_tenant_context(
     if mode != "jwt":
         raise HTTPException(status_code=500, detail="Unsupported auth mode")
     try:
-        return verify_bearer_token(
-            _request_authorization(request, authorization),
-            secret=os.getenv("TENANT_AUTH_SECRET", ""),
-        )
+        context = _verified_tenant_context(_request_authorization(request, authorization))
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="Invalid tenant token") from exc
+    if (
+        context.session_version is not None
+        and request.url.path != "/auth/change-password"
+        and context.password_change_required
+    ):
+        raise HTTPException(status_code=403, detail="Password change is required")
+    return context
+
+
+def _verified_tenant_context(authorization: str | None) -> TenantContext:
+    """Verify signature and, for workforce sessions, current account revocation state."""
+    context = verify_bearer_token(
+        authorization,
+        secret=os.getenv("TENANT_AUTH_SECRET", ""),
+    )
+    if context.session_version is None:
+        return context
+    from .state import account_store
+
+    account = account_store.get_by_id(context.tenant_id, context.user_id)
+    if (
+        not account
+        or not account.get("active")
+        or int(account.get("session_version", -1)) != context.session_version
+    ):
+        raise ValueError("account session is no longer current")
+    return replace(
+        context,
+        password_change_required=bool(account.get("must_change_password")),
+    )
 
 
 CURRENT_TENANT_DEP = Depends(current_tenant_context)

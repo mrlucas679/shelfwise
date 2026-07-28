@@ -517,6 +517,14 @@ create table if not exists shelfwise_inventory_positions (
 create index if not exists idx_shelfwise_inventory_positions_tenant_sku
 on shelfwise_inventory_positions (tenant_id, sku, location_type);
 
+create table if not exists shelfwise_inventory_projection_receipts (
+    tenant_id text not null,
+    event_id text not null,
+    payload jsonb not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, event_id)
+);
+
 create table if not exists shelfwise_world_snapshot (
     tenant_id text primary key,
     seed integer not null,
@@ -845,6 +853,15 @@ create policy shelfwise_inventory_positions_tenant_isolation on shelfwise_invent
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));
 
+alter table shelfwise_inventory_projection_receipts enable row level security;
+alter table shelfwise_inventory_projection_receipts force row level security;
+drop policy if exists shelfwise_inventory_projection_receipts_tenant_isolation
+on shelfwise_inventory_projection_receipts;
+create policy shelfwise_inventory_projection_receipts_tenant_isolation
+on shelfwise_inventory_projection_receipts
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
 alter table shelfwise_world_snapshot enable row level security;
 alter table shelfwise_world_snapshot force row level security;
 drop policy if exists shelfwise_world_snapshot_tenant_isolation
@@ -928,5 +945,19 @@ alter table shelfwise_work_accounts enable row level security;
 alter table shelfwise_work_accounts force row level security;
 drop policy if exists shelfwise_work_accounts_tenant_isolation on shelfwise_work_accounts;
 create policy shelfwise_work_accounts_tenant_isolation on shelfwise_work_accounts
+using (tenant_id = current_setting('app.tenant_id', true))
+with check (tenant_id = current_setting('app.tenant_id', true));
+
+create table if not exists shelfwise_account_audit (
+    tenant_id text not null,
+    event_id text not null,
+    payload jsonb not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, event_id)
+);
+alter table shelfwise_account_audit enable row level security;
+alter table shelfwise_account_audit force row level security;
+drop policy if exists shelfwise_account_audit_tenant_isolation on shelfwise_account_audit;
+create policy shelfwise_account_audit_tenant_isolation on shelfwise_account_audit
 using (tenant_id = current_setting('app.tenant_id', true))
 with check (tenant_id = current_setting('app.tenant_id', true));

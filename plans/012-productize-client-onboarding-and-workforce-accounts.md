@@ -9,7 +9,7 @@
 
 ## Status
 
-- **State**: IN PROGRESS (Phases 1-4 partially implemented, 2026-07-24)
+- **State**: IMPLEMENTED (Phases 1-5 completed, 2026-07-28)
 - **Priority**: P1
 - **Effort**: L (deliver in the phases below; do not attempt one giant PR)
 - **Risk**: HIGH (authentication, authorization, tenant data, and production onboarding)
@@ -28,17 +28,18 @@ while retaining current JWT/RLS/HITL protections and the existing connections UI
 
 ## Current state
 
-- `src/shelfwise_storage/accounts.py` now provides memory and Postgres workforce-account stores;
-  `shelfwise_work_accounts` has central-schema RLS. `app.py` accepts active work-account login
-  before retaining the configured owner as a recovery bootstrap. Owner-only `/accounts` list/create
-  APIs exist, but invitations, deactivation, recovery, and platform-admin bootstrap do not yet.
+- `src/shelfwise_storage/accounts.py` provides memory and Postgres workforce-account stores,
+  session versions, single-use token digests, and identity-only account audits. Both account
+  tables have central-schema RLS. `routes_accounts.py` owns one-time platform bootstrap,
+  idempotent legacy-owner migration, active account login, invitation activation, recovery,
+  role changes, deactivation/reactivation, last-owner protection, and session invalidation.
 - `src/shelfwise_backend/tenant.py` defines the existing work roles: `owner`, `executive`,
   `manager`, `inventory`, `analyst`, `auditor`. Reuse these names; do not introduce gaming roles.
 - `src/shelfwise_storage/tenant_profiles.py` persists tenant business profiles with Postgres RLS;
   it is a suitable adjacent pattern for a tenant-scoped account store, not a substitute for one.
-- `frontend/src/App.tsx` now has People & access (account list/create), Connections CSV preview/
-  import, existing connector credentials, and Store Twin self-service store setup. These are
-  working initial UI flows, not substitutes for invitation activation or full onboarding status.
+- `frontend/src/App.tsx` has first-owner setup, sign-in, activation, reset, forced-password-change,
+  People & access invitations/recovery, Connections CSV preview/import, connector credentials,
+  persistent guided onboarding, and Store Twin self-service setup.
 - `CLIENT_INTAKE_RUNBOOK.md` now names the browser UI as the normal path; API calls are recovery/
   automation interfaces.
 - `README.md:573-688` commits to an operational assistant with tenant/user isolation, bounded
@@ -67,8 +68,8 @@ raw camera/video ingestion, passwordless authentication, or reinforcement-learni
 
 ### Phase 1: Define the identities and bootstrap boundary
 
-**Progress:** tenant-scoped account persistence and work-account fields are implemented. The
-platform-admin and legacy-owner migration work below remains required.
+**Progress:** completed. One-time bootstrap and idempotent legacy migration now create durable
+opaque-ID owner accounts; configured credentials are not a steady-state account source.
 
 1. Add a durable tenant-scoped `UserAccount` store (memory/Postgres implementations, RLS,
    migration/schema contract) with opaque user ID, normalized email, given name, surname,
@@ -87,9 +88,9 @@ password hashes never appear in API responses, and legacy-owner migration is ide
 
 ### Phase 2: Build secure account and invitation APIs
 
-**Progress:** active work-account login; owner list/create; role change; deactivation; and
-reactivation are implemented with browser controls. Invitation activation, session invalidation,
-and recovery are still required.
+**Progress:** completed. Invitation and reset tokens are signed, expiring, stored only as digests,
+single use, and delivered through the provider-neutral SMTP contract. Account mutations advance
+the session version so previously issued workforce JWTs fail closed.
 
 1. Replace single-account login lookup with active account lookup, scrypt verification, and the
    existing strict HTTP-only JWT cookie. JWT claims remain tenant ID, user ID, role, and expiry.
@@ -111,10 +112,10 @@ and no password/token leakage.
 
 ### Phase 3: Build the browser-led workforce experience
 
-**Progress:** the owner-facing **People & access** workspace now lists staff and provides create,
-role-change, deactivate, and reactivate controls. The account form collects work email, first
-name, surname, work position, role, password, and confirmation. A dedicated invitation-activation
-screen remains required before a staff member can set their own first password.
+**Progress:** completed. Browser surfaces cover first-owner setup, sign-in, invitation activation,
+forgot/reset, forced password replacement, invitation resend, owner-initiated recovery, roles,
+deactivation, and reactivation. Workers choose their own passwords; owners never see invitation
+or recovery secrets.
 
 1. Replace the login-only surface with sign-in, invitation activation, first-owner setup, reset,
    and forced-password-change screens. Use plain operational wording and accessible field labels,
@@ -131,9 +132,9 @@ activation, role restrictions, deactivation login failure, and keyboard-only com
 
 ### Phase 4: Convert client intake into a guided setup workspace
 
-**Progress:** Connections now has company-profile, encrypted connector-credential, and CSV
-preview/import forms; Store Twin has self-service store setup with initial areas. Persistent
-onboarding progress and recovery state remain required.
+**Progress:** completed. The guided setup reads persistent server-derived status and supports
+company profile, store creation, CSV preview/commit, encrypted connector credentials, device and
+workforce optional steps, readiness, interruption/resume, and honest operator-assisted boundaries.
 
 1. Add a persistent onboarding checklist/status model per tenant/store with explicit states,
    evidence, resumability, and recovery guidance: company profile, owner/staff, data import,
@@ -153,6 +154,11 @@ are covered.
 
 ### Phase 5: Apply the RAG research as bounded adaptive evidence planning
 
+**Progress:** completed. `retrieval_planning.py` selects only the required evidence partitions
+before state construction and records counts, omissions, freshness, conflicts, inadequacy, and a
+maximum-one-follow-up policy. The receipt drives strong-tier routing for risk, conflicts, and
+insufficient evidence; account/help turns do not load operational state.
+
 1. Extract an auditable retrieval plan before chat state is built. It decides, from deterministic
    intent/risk/domain signals, whether to request live twin facts, decisions, learning, traces,
    conversation memory, and promoted skills. It must permit no more than one follow-up retrieval.
@@ -169,14 +175,14 @@ creates an escalation receipt; prompt budget remains under the existing ceiling.
 
 ## Done criteria
 
-- [ ] A platform administrator can create a client and first owner through supported product flows.
-- [ ] A client owner can create/invite/deactivate work accounts, with given name, surname, work
+- [x] A platform administrator can create a client and first owner through supported product flows.
+- [x] A client owner can create/invite/deactivate work accounts, with given name, surname, work
   position, email, and least-privilege role, entirely in the browser.
-- [ ] A new client can complete the supported onboarding path in the browser without technical
+- [x] A new client can complete the supported onboarding path in the browser without technical
   credentials, curl, direct database access, or environment-file edits.
-- [ ] Every account, invitation, onboarding, and retrieval boundary has tenant isolation,
+- [x] Every account, invitation, onboarding, and retrieval boundary has tenant isolation,
   failure-path tests, and an auditable receipt where appropriate.
-- [ ] Existing connector encryption, JWT cookie protections, RLS, Critic/Executive/HITL flow,
+- [x] Existing connector encryption, JWT cookie protections, RLS, Critic/Executive/HITL flow,
   and dedicated-stack deployment model remain intact.
 
 ## STOP conditions

@@ -25,6 +25,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_chat_memory_items": "tenant_id",
     "shelfwise_skill_manifests": "tenant_id",
     "shelfwise_inventory_positions": "tenant_id",
+    "shelfwise_inventory_projection_receipts": "tenant_id",
     "shelfwise_world_snapshot": "tenant_id",
     "shelfwise_candidates": "tenant_id",
     "shelfwise_candidate_history": "tenant_id",
@@ -39,6 +40,7 @@ TENANT_SCOPED_TABLES = {
     "shelfwise_twin_scenario_branches": "tenant_id",
     "shelfwise_twin_onboarding_manifests": "tenant_id",
     "shelfwise_work_accounts": "tenant_id",
+    "shelfwise_account_audit": "tenant_id",
 }
 
 

@@ -39,6 +39,7 @@ class ConversationRouteRequest:
     asks_for_scenario: bool
     has_source_conflict: bool
     has_memory_conflict: bool
+    insufficient_evidence: bool = False
     is_compaction: bool = False
     is_simple_followup: bool = False
 
@@ -69,6 +70,11 @@ def choose_conversation_route(request: ConversationRouteRequest) -> Conversation
         return ConversationRoute(
             ConversationTier.STRONG,
             RouteReason.STRONG_MEMORY_RECONCILIATION,
+        )
+    if request.insufficient_evidence:
+        return ConversationRoute(
+            ConversationTier.STRONG,
+            RouteReason.ESCALATED_INSUFFICIENT_EVIDENCE,
         )
     if request.asks_for_scenario:
         return ConversationRoute(ConversationTier.STRONG, RouteReason.STRONG_SCENARIO_REASONING)

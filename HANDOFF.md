@@ -1,5 +1,45 @@
 # HANDOFF — current continuation state as of 2026-07-28
 
+## Workforce productization, bounded retrieval, and POS inventory projection — BUILT, 2026-07-28
+
+Plan 012 is implemented against the existing dedicated-client architecture:
+
+- A platform-authorized, one-time browser bootstrap creates the configured client profile and
+  first opaque-ID owner. Configured legacy-owner credentials migrate idempotently and cannot
+  remain an implicit steady-state fallback unless emergency recovery is explicitly enabled.
+- Workforce accounts now have durable status, single-use invitation/reset digests, session
+  versions, and identity-only audit events in memory/Postgres stores with central-schema RLS.
+  Owner actions cover invitation/resend, role changes, recovery, deactivation/reactivation, and
+  last-owner/self-deactivation protection. Workers activate, reset, and replace temporary
+  passwords in the browser; role/password/activity changes invalidate earlier workforce JWTs.
+- Account email uses a provider-neutral standard SMTP contract. Missing delivery configuration
+  fails closed and tokens are carried in URL fragments, never returned by browser APIs or stored
+  as plaintext. A real mail account remains an operator credential boundary, not hidden software.
+- `retrieval_planning.py` builds a deterministic plan before chat state is read. Every answer
+  records selected partitions, counts, omissions, freshness, conflicts, inadequacy, and a hard
+  maximum-one-follow-up receipt. Support/account questions skip operational state; conflict,
+  risk, or inadequate evidence selects the actual strong model role.
+- Normalized operational stock updates and POS sales now project into the inventory ledger with
+  tenant-scoped replay receipts. Duplicate delivery cannot double-decrement, shortfalls never
+  make quantity negative, and missing baselines/fractional quantities remain visible receipts.
+  The existing Square, Shopify, Lightspeed, and Yoco paths supply these normalized events; live
+  retailer credentials are still required for external acceptance.
+
+Verification on the final local tree:
+
+- `907 passed, 21 skipped` — complete Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- Frontend TypeScript check and production build passed (288 modules).
+- Capability contract: 241 deterministic capabilities,
+  `sha256:3697ed095051760ab9146f1247320b68c175bfd4cc0b2abde5ca4a25aedc3f47`.
+- Playwright: 10/10 passed against isolated ShelfWise ports 5187/8017, including activation and
+  first-owner setup screens plus the existing onboarding, HITL, chat, connector, and device paths.
+
+Exact-head GitHub Actions remains the handoff gate after this tree is pushed. CI owns fresh
+Postgres/Redis, wheel, production-image, and deployment-shakedown proof; live MI300X/Fireworks,
+SMTP delivery, and retailer-sandbox traffic require external credentials and must not be inferred
+from local or CI success.
+
 ## Guided first-store onboarding — BUILT and browser-verified, 2026-07-28
 
 ShelfWise now has a resumable **Setup guide** in the product instead of requiring a new

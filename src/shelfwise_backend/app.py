@@ -50,7 +50,6 @@ from shelfwise_storage import (
     reset_tenant_context,
 )
 
-from .auth_credentials import login_credentials_valid, scrypt_password_hash
 from .cascade import (
     validate_inventory_exception,
     validate_recall_notice,
@@ -64,7 +63,11 @@ from .chat_context import (
 )
 from .connector_poll_service import ConnectorPollService
 from .conversation_memory import compact_conversation
-from .conversation_routing import ConversationRouteRequest, choose_conversation_route
+from .conversation_routing import (
+    ConversationRouteRequest,
+    ConversationTier,
+    choose_conversation_route,
+)
 from .decision_access import (
     decision_action,
     decision_belongs_to_other_tenant,
@@ -91,6 +94,7 @@ from .deps import (
     _request_timeout_seconds,
     _require_amd_inference,
     _tenant_id_from_request,
+    _verified_tenant_context,
     worker_internal_guard,
     write_limiter,  # noqa: F401  (re-exported: tests/conftest.py imports it from here)
     write_path_guard,
@@ -101,6 +105,8 @@ from .intelligence_api import router as intelligence_router
 from .model_runs import record_model_run
 from .operational_facts import MissingOperationalFacts
 from .product_catalog import product_attention_queue, search_product_catalog
+from .retrieval_planning import build_retrieval_receipt, plan_retrieval
+from .routes_accounts import router as accounts_router
 from .routes_catalog import router as catalog_router
 from .routes_connector_credentials import router as connector_credentials_router
 from .routes_connectors import router as connectors_router
@@ -109,7 +115,7 @@ from .routes_onboarding import router as onboarding_router
 from .routes_scenarios import router as scenarios_router
 from .routes_twin import router as twin_router
 from .state import (
-    account_store,
+    account_store,  # noqa: F401  (re-exported: tests/conftest.py imports it from here)
     candidate_store,
     cascade_worker,
     chat_store,
@@ -150,7 +156,6 @@ from .tenant import (
     TenantContext,
     default_tenant_context,
     encode_hs256_token,
-    verify_bearer_token,
 )
 from .tools.mcp_surface import build_live_twin_tools, build_platform_tools
 
@@ -226,6 +231,7 @@ app.add_middleware(
 )
 app.include_router(intelligence_router)
 app.include_router(twin_router)
+app.include_router(accounts_router)
 app.include_router(catalog_router)
 app.include_router(connectors_router)
 app.include_router(connector_credentials_router)
@@ -348,170 +354,6 @@ def _public_demo_sessions_enabled() -> bool:
     }
 
 
-class LoginBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    email: str = Field(min_length=3, max_length=200)
-    password: str = Field(min_length=1, max_length=500)
-
-
-class CreateWorkAccountBody(BaseModel):
-    """Owner-provisioned work account; role is validated against the domain enum."""
-
-    model_config = ConfigDict(extra="forbid")
-    email: str = Field(min_length=3, max_length=200)
-    given_name: str = Field(min_length=1, max_length=100)
-    surname: str = Field(min_length=1, max_length=100)
-    position: str = Field(min_length=1, max_length=120)
-    role: Role
-    password: str = Field(min_length=12, max_length=500)
-
-
-class ChangeWorkAccountRoleBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Role
-
-
-@app.post("/auth/login", dependencies=[WRITE_LIMIT_DEP])
-def company_login(body: LoginBody) -> JSONResponse:
-    """Company-account login: verify the configured owner account, mint the JWT session.
-
-    Real credential verification with stdlib scrypt (no new dependencies): the deployment
-    configures SHELFWISE_LOGIN_EMAIL and SHELFWISE_LOGIN_PASSWORD_HASH (format
-    "scrypt$<salt_hex>$<hash_hex>"; generation one-liner documented in .env.example).
-    Unconfigured deployments answer an honest 503, never an open door; failures are a
-    uniform 401 with no oracle about which field was wrong. The minted session is the
-    exact owner-role JWT cookie the rest of the platform already trusts and verifies.
-    """
-    secret = os.getenv("TENANT_AUTH_SECRET", "")
-    tenant_id = default_tenant_context().tenant_id
-    account = account_store.get_by_email(tenant_id, body.email)
-    if account is not None:
-        if not account["active"] or not _login_credentials_valid(
-            email=body.email, password=body.password, configured_email=account["email"],
-            configured_hash=account["password_hash"],
-        ):
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        return _account_session_response(
-            TenantContext(tenant_id=tenant_id, user_id=account["id"], role=Role(account["role"])),
-            secret=secret,
-        )
-    configured_email = os.getenv("SHELFWISE_LOGIN_EMAIL", "").strip().lower()
-    configured_hash = os.getenv("SHELFWISE_LOGIN_PASSWORD_HASH", "").strip()
-    if not secret or not configured_email or not configured_hash:
-        raise HTTPException(status_code=503, detail="Company login is not configured")
-    if not _login_credentials_valid(
-        email=body.email,
-        password=body.password,
-        configured_email=configured_email,
-        configured_hash=configured_hash,
-    ):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    ctx = TenantContext(
-        tenant_id=default_tenant_context().tenant_id,
-        user_id=configured_email,
-        role=Role.OWNER,
-    )
-    return _account_session_response(ctx, secret=secret)
-
-
-def _account_session_response(ctx: TenantContext, *, secret: str) -> JSONResponse:
-    """Mint the standard strict browser session for an authenticated workforce account."""
-    lifetime = _env_positive_int("SHELFWISE_LOGIN_SESSION_SECONDS", 43_200)
-    token = encode_hs256_token(
-        {**ctx.to_dict(), "exp": int(datetime.now(UTC).timestamp()) + lifetime},
-        secret=secret,
-    )
-    response = JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=lifetime,
-        httponly=True,
-        secure=_cookie_secure_setting(),
-        samesite="strict",
-        path="/",
-    )
-    return response
-
-
-@app.get("/accounts")
-def list_work_accounts(ctx: TenantContext = OWNER_AUTH_DEP) -> dict[str, object]:
-    """List non-secret staff account records for the signed-in owner."""
-    return {"accounts": account_store.list(ctx.tenant_id)}
-
-
-@app.post("/accounts", dependencies=[WRITE_LIMIT_DEP])
-def create_work_account(
-    body: CreateWorkAccountBody,
-    ctx: TenantContext = OWNER_AUTH_DEP,
-) -> dict[str, object]:
-    """Create a least-privilege staff account within the owner's tenant."""
-    if body.role is Role.OWNER:
-        raise HTTPException(
-            status_code=422,
-            detail="Create additional owners through a recovery flow",
-        )
-    try:
-        account = account_store.create(
-            {
-                "tenant_id": ctx.tenant_id,
-                "email": body.email,
-                "given_name": body.given_name,
-                "surname": body.surname,
-                "position": body.position,
-                "role": body.role.value,
-                "password_hash": _scrypt_password_hash(body.password),
-            }
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"account": account}
-
-
-@app.post("/accounts/{account_id}/deactivate", dependencies=[WRITE_LIMIT_DEP])
-def deactivate_work_account(
-    account_id: str,
-    ctx: TenantContext = OWNER_AUTH_DEP,
-) -> dict[str, object]:
-    """Remove a staff account's ability to sign in without deleting its audit identity."""
-    account = account_store.set_active(ctx.tenant_id, account_id, active=False)
-    if account is None:
-        raise HTTPException(status_code=404, detail="Work account not found")
-    return {"account": account}
-
-
-@app.post("/accounts/{account_id}/reactivate", dependencies=[WRITE_LIMIT_DEP])
-def reactivate_work_account(
-    account_id: str,
-    ctx: TenantContext = OWNER_AUTH_DEP,
-) -> dict[str, object]:
-    """Restore an existing staff account without recreating its identity."""
-    account = account_store.set_active(ctx.tenant_id, account_id, active=True)
-    if account is None:
-        raise HTTPException(status_code=404, detail="Work account not found")
-    return {"account": account}
-
-
-@app.post("/accounts/{account_id}/role", dependencies=[WRITE_LIMIT_DEP])
-def change_work_account_role(
-    account_id: str,
-    body: ChangeWorkAccountRoleBody,
-    ctx: TenantContext = OWNER_AUTH_DEP,
-) -> dict[str, object]:
-    """Change a staff role without creating a duplicate account."""
-    if body.role is Role.OWNER:
-        raise HTTPException(status_code=422, detail="Use a dedicated owner recovery flow")
-    account = account_store.set_role(ctx.tenant_id, account_id, role=body.role.value)
-    if account is None:
-        raise HTTPException(status_code=404, detail="Work account not found")
-    return {"account": account}
-
-
-_scrypt_password_hash = scrypt_password_hash
-_login_credentials_valid = login_credentials_valid
-
-
 @app.post("/auth/session", dependencies=[WRITE_LIMIT_DEP])
 def create_public_demo_session(request: Request) -> JSONResponse:
     """Issue one opaque browser identity for a same-origin public demonstration."""
@@ -523,8 +365,11 @@ def create_public_demo_session(request: Request) -> JSONResponse:
     existing = _request_authorization(request)
     if existing:
         try:
-            ctx = verify_bearer_token(existing, secret=secret)
-            return JSONResponse({"session": ctx.to_dict(), "mode": "jwt"})
+            ctx = _verified_tenant_context(existing)
+            session: dict[str, object] = ctx.to_dict()
+            if ctx.session_version is not None:
+                session["must_change_password"] = ctx.password_change_required
+            return JSONResponse({"session": session, "mode": "jwt"})
         except ValueError:
             pass
     if not _public_demo_sessions_enabled():
@@ -1331,25 +1176,49 @@ def _new_chat_response(
     conversation_id: str,
     message_id: str,
 ) -> PlainTextResponse:
-    live_twin_context = twin_service.live_context(ctx.tenant_id)
     chat_domain = body.data_domain or _chat_data_domain()
     use_live_twin = chat_domain == "operational_twin"
-    decisions = tenant_scoped_decisions(ctx, data_domain=chat_domain)
-    pending_count = sum(1 for item in decisions if item.get("status") == "pending")
-    resolved_count = len(decisions) - pending_count
-    thresholds = learning_store.thresholds(
+    conversation = chat_store.get(
         tenant_id=ctx.tenant_id,
-        data_domain=chat_domain,
+        user_id=ctx.user_id,
+        conversation_id=conversation_id,
     )
-    state = {
-        "decision_summary": {
+    retrieval_plan = plan_retrieval(
+        body.question,
+        has_conversation=conversation is not None,
+    )
+    selected_partitions = set(retrieval_plan.partitions)
+    state: dict[str, Any] = {}
+    evidence: dict[str, object] = {}
+
+    if "live_facts" in selected_partitions:
+        live_facts = (
+            twin_service.live_context(ctx.tenant_id)
+            if use_live_twin
+            else world_facts.get_store_intelligence(ctx.tenant_id)
+        )
+        state["live_twin_context" if use_live_twin else "store_intelligence"] = live_facts
+        evidence["live_facts"] = live_facts
+
+    selected_decisions: list[dict[str, Any]] = []
+    if "decisions" in selected_partitions:
+        decisions = tenant_scoped_decisions(ctx, data_domain=chat_domain)
+        pending_count = sum(1 for item in decisions if item.get("status") == "pending")
+        selected_decisions = _bounded_chat_decisions(decisions, question=body.question)
+        state["decision_summary"] = {
             "total": len(decisions),
             "pending": pending_count,
-            "resolved": resolved_count,
-        },
-        "decisions": _bounded_chat_decisions(decisions, question=body.question),
-        "learning": {
-            "threshold_count": len(thresholds),
+            "resolved": len(decisions) - pending_count,
+        }
+        state["decisions"] = selected_decisions
+        evidence["decisions"] = selected_decisions
+
+    if "learning" in selected_partitions:
+        thresholds = learning_store.thresholds(
+            tenant_id=ctx.tenant_id,
+            data_domain=chat_domain,
+        )
+        learning_evidence = {
             "thresholds": _bounded_chat_thresholds(
                 thresholds,
                 question=body.question,
@@ -1362,27 +1231,29 @@ def _new_chat_response(
                 ),
                 question=body.question,
             ),
-        },
-        "traces": [
+        }
+        state["learning"] = {
+            "threshold_count": len(thresholds),
+            **learning_evidence,
+        }
+        evidence["learning"] = learning_evidence
+
+    if "traces" in selected_partitions:
+        selected_traces = [
             _compact_chat_trace(item)
             for item in trace_registry.list(
                 tenant_id=ctx.tenant_id,
                 data_domain=chat_domain,
             )[:_CHAT_TRACE_LIMIT]
-        ],
-        "live_twin_context": live_twin_context if use_live_twin else None,
-        "store_intelligence": (
-            None if use_live_twin else world_facts.get_store_intelligence(ctx.tenant_id)
-        ),
-    }
-    conversation = chat_store.get(
-        tenant_id=ctx.tenant_id,
-        user_id=ctx.user_id,
-        conversation_id=conversation_id,
-    )
+        ]
+        state["traces"] = selected_traces
+        evidence["traces"] = selected_traces
+
     conversation_summary = None
-    if conversation:
-        state["conversation_history"] = _bounded_chat_history(conversation["messages"])
+    if conversation and "conversation_memory" in selected_partitions:
+        history = _bounded_chat_history(conversation["messages"])
+        state["conversation_history"] = history
+        evidence["conversation_memory"] = history
         # Hierarchical memory (plan Section 37/41): everything older than the recent
         # window is compacted into a durable, provenance-tracked rolling summary instead
         # of silently falling off the end of a bare sliding window - a long
@@ -1401,14 +1272,18 @@ def _new_chat_response(
 
     # Progressive skill discovery (plan Section 39/41): the model sees only the promoted
     # skills relevant to THIS question, never the whole tool surface.
-    discovered_skills = discover_skills(
-        skill_registry,
-        question=body.question,
-        role=str(getattr(ctx, "role", "") or "manager"),
-        tenant_id=ctx.tenant_id,
+    discovered_skills = (
+        discover_skills(
+            skill_registry,
+            question=body.question,
+            role=str(getattr(ctx, "role", "") or "manager"),
+            tenant_id=ctx.tenant_id,
+        )
+        if "skills" in selected_partitions
+        else []
     )
     if discovered_skills:
-        state["skill_catalogue"] = [
+        skill_catalogue = [
             {
                 "id": manifest.id,
                 "name": manifest.name,
@@ -1417,22 +1292,33 @@ def _new_chat_response(
             }
             for manifest in discovered_skills
         ]
+        state["skill_catalogue"] = skill_catalogue
+        evidence["skills"] = skill_catalogue
+    elif "skills" in selected_partitions:
+        evidence["skills"] = []
+
+    retrieval_receipt = build_retrieval_receipt(retrieval_plan, evidence)
 
     # Deterministic tier routing (plan Section 41.1): the route is computed from facts
     # known before inference and saved as an auditable receipt on the answer metadata.
     conversation_route = choose_conversation_route(
         ConversationRouteRequest(
             domains=tuple({manifest.domain_owner for manifest in discovered_skills}),
-            risk_tier="low",
+            risk_tier=retrieval_plan.risk_tier,
             asks_for_scenario=_question_asks_for_scenario(body.question),
-            has_source_conflict=False,
+            has_source_conflict=bool(retrieval_receipt["conflicts"]),
             has_memory_conflict=False,
+            insufficient_evidence=bool(retrieval_receipt["insufficient_evidence"]),
             is_simple_followup=bool(conversation) and len(body.question) <= 80,
         )
     )
 
     client = OpenAICompatibleInferenceClient(
         recorder=lambda payload: record_model_run({**payload, "data_domain": chat_domain})
+    )
+    operational_tools_enabled = bool(
+        selected_partitions
+        & {"live_facts", "decisions", "learning", "traces", "skills"}
     )
     _require_amd_inference()
     correlation_id = f"chat:{conversation_id}:{message_id}"
@@ -1444,21 +1330,29 @@ def _new_chat_response(
             tenant_id=ctx.tenant_id,
             correlation_id=correlation_id,
             live_required=body.live_required or _is_production_deployment(),
-            decisions=decision_store,
-            memory=learning_store,
+            decisions=decision_store if operational_tools_enabled else None,
+            memory=learning_store if operational_tools_enabled else None,
             facts=world_facts,
-            twin=twin_service if use_live_twin else None,
+            twin=twin_service if use_live_twin and "live_facts" in selected_partitions else None,
             audit=tool_audit,
             selected_memory_ids=(
                 (conversation_summary.id,) if conversation_summary is not None else ()
             ),
             selected_skill_ids=tuple(manifest.id for manifest in discovered_skills),
+            model_role=(
+                "executive"
+                if conversation_route.tier is ConversationTier.STRONG
+                else "chat"
+            ),
+            operational_tools_enabled=operational_tools_enabled,
         )
     except InferenceError as exc:
         raise HTTPException(status_code=503, detail="Live chat inference failed") from exc
     _meta["correlation_id"] = correlation_id
     _meta["data_domain"] = chat_domain
     _meta["conversation_route"] = conversation_route.to_dict()
+    _meta["retrieval_plan"] = retrieval_plan.to_dict()
+    _meta["retrieval_receipt"] = retrieval_receipt
     if discovered_skills:
         _meta["skills"] = [manifest.id for manifest in discovered_skills]
     if conversation_summary is not None:

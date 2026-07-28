@@ -11,6 +11,7 @@ import {
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { LoginScreen as WorkforceLoginScreen } from './LoginScreen'
 import { applyTheme, currentTheme, type Theme } from './theme'
 
 // ---------------------------------------------------------------------------
@@ -337,6 +338,15 @@ type StoredChatMessage = {
 type ChatConversation = ConversationSummary & { messages?: StoredChatMessage[] }
 type AgenticRunStatus = { state: 'running' | 'ok' | 'error'; detail: string }
 type UiIconName = 'attach' | 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
+type AuthSessionPayload = {
+  session?: {
+    tenant_id?: string
+    user_id?: string
+    role?: string
+    must_change_password?: boolean
+  }
+  mode?: string
+}
 
 declare global {
   interface Window {
@@ -411,8 +421,8 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
   }
   throw new Error(`Could not reach ${path}. ${lastError}`)
 }
-async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
-  await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
+async function ensureBrowserSession(signal: AbortSignal): Promise<AuthSessionPayload> {
+  return fetchJson<AuthSessionPayload>('/auth/session', { method: 'POST' }, signal)
 }
 // Real client deployments run SHELFWISE_AUTH_MODE=jwt with public demo sessions correctly
 // disabled - /auth/session then answers 401 for a browser with no session cookie yet, and
@@ -421,8 +431,8 @@ async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
 function isUnauthorizedError(error: unknown): boolean {
   return error instanceof Error && /\b401\b/.test(error.message)
 }
-async function postLogin(email: string, password: string, signal: AbortSignal): Promise<void> {
-  await fetchJson<JsonObject>(
+async function postLogin(email: string, password: string, signal: AbortSignal): Promise<AuthSessionPayload> {
+  return fetchJson<AuthSessionPayload>(
     '/auth/login',
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) },
     signal,
@@ -1279,10 +1289,20 @@ const OPERATION_READ_ENDPOINTS = [
 
 const GATED_ENDPOINTS = [
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
+  { label: 'Account setup status', method: 'GET', path: '/auth/setup-status', group: 'operations', detail: 'Reports whether this dedicated client workspace still needs its first owner.' },
+  { label: 'First company owner', method: 'POST', path: '/platform/bootstrap', group: 'operations', detail: 'One-time platform-authorized company and owner bootstrap.' },
   { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/delta*/answer/done); the validated answer is delivered incrementally, not as live provider tokens.' },
   { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
+  { label: 'Activate invitation', method: 'POST', path: '/auth/activate', group: 'operations', detail: 'Consumes one signed, expiring workforce invitation and starts a session.' },
+  { label: 'Request password reset', method: 'POST', path: '/auth/password-reset/request', group: 'operations', detail: 'Sends a generic password-recovery response without disclosing account existence.' },
+  { label: 'Complete password reset', method: 'POST', path: '/auth/password-reset/consume', group: 'operations', detail: 'Consumes a single-use reset and invalidates earlier account sessions.' },
+  { label: 'Change own password', method: 'POST', path: '/auth/change-password', group: 'operations', detail: 'Replaces a temporary or current password and invalidates earlier sessions.' },
   { label: 'List work accounts', method: 'GET', path: '/accounts', group: 'operations', detail: 'Owner-only: list store work accounts without password data.' },
   { label: 'Create work account', method: 'POST', path: '/accounts', group: 'operations', detail: 'Owner-only: create a named staff account with a work role and position.' },
+  { label: 'Invite work account', method: 'POST', path: '/accounts/invitations', group: 'operations', detail: 'Owner-only: email a single-use activation link without choosing the worker’s password.' },
+  { label: 'Account audit', method: 'GET', path: '/accounts/audit', group: 'operations', detail: 'Owner-only: identity-only account lifecycle audit records.' },
+  { label: 'Resend work-account invitation', method: 'POST', path: '/accounts/{account_id}/invitation', group: 'operations', detail: 'Owner-only: replace and resend a pending invitation token.' },
+  { label: 'Send work-account recovery', method: 'POST', path: '/accounts/{account_id}/password-reset', group: 'operations', detail: 'Owner-only: send recovery without learning or setting the worker’s password.' },
   { label: 'Change work-account role', method: 'POST', path: '/accounts/{account_id}/role', group: 'operations', detail: 'Owner-only: change a staff member’s operational role without duplicating their account.' },
   { label: 'Deactivate work account', method: 'POST', path: '/accounts/{account_id}/deactivate', group: 'operations', detail: 'Owner-only: remove a staff account’s ability to sign in while retaining its audit identity.' },
   { label: 'Reactivate work account', method: 'POST', path: '/accounts/{account_id}/reactivate', group: 'operations', detail: 'Owner-only: restore a previously deactivated staff account.' },
@@ -3684,8 +3704,19 @@ function isOverlayViewport(): boolean {
 // Login
 // ---------------------------------------------------------------------------
 function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
-  const [form, setForm] = useState({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
-  const [accounts, setAccounts] = useState<Array<{ id: string; email: string; given_name: string; surname: string; position: string; role: string; active: boolean }>>([])
+  type WorkAccount = {
+    id: string
+    email: string
+    given_name: string
+    surname: string
+    position: string
+    role: string
+    active: boolean
+    status?: string
+  }
+  const emptyForm = { email: '', given_name: '', surname: '', position: '', role: 'manager' }
+  const [form, setForm] = useState(emptyForm)
+  const [accounts, setAccounts] = useState<WorkAccount[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -3697,23 +3728,18 @@ function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
   }, [])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (form.password !== form.password_confirmation) {
-      setNotice('The password confirmation does not match.')
-      return
-    }
     setBusy(true); setNotice(null)
     try {
-      const { password_confirmation: _, ...accountForm } = form
-      const payload = await fetchJson<{ account: (typeof accounts)[number] }>(
-        '/accounts',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accountForm) },
+      const payload = await fetchJson<{ account: WorkAccount }>(
+        '/accounts/invitations',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) },
         new AbortController().signal,
       )
       setAccounts((current) => [...current, payload.account].sort((a, b) => a.surname.localeCompare(b.surname)))
-      setNotice(`${form.given_name} ${form.surname} can now sign in with their work account.`)
-      setForm({ email: '', given_name: '', surname: '', position: '', role: 'manager', password: '', password_confirmation: '' })
+      setNotice(`Invitation sent to ${form.given_name} ${form.surname}.`)
+      setForm(emptyForm)
       onChanged?.()
-    } catch { setNotice('The account could not be created. Check the details and try again.') }
+    } catch { setNotice('The invitation could not be delivered. Check the email setup and try again.') }
     finally { setBusy(false) }
   }
   const deactivate = async (accountId: string) => {
@@ -3739,7 +3765,7 @@ function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
   }
   const changeRole = async (accountId: string, role: string) => {
     try {
-      const payload = await fetchJson<{ account: (typeof accounts)[number] }>(
+      const payload = await fetchJson<{ account: WorkAccount }>(
         `/accounts/${encodeURIComponent(accountId)}/role`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) },
         new AbortController().signal,
@@ -3748,17 +3774,52 @@ function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
       onChanged?.()
     } catch { setNotice('The work role could not be changed. Try again.') }
   }
+  const sendRecovery = async (accountId: string, invitation = false) => {
+    try {
+      await fetchJson(
+        `/accounts/${encodeURIComponent(accountId)}/${invitation ? 'invitation' : 'password-reset'}`,
+        { method: 'POST' },
+        new AbortController().signal,
+      )
+      setNotice(invitation ? 'A new invitation was sent.' : 'A password-reset link was sent.')
+    } catch {
+      setNotice('The email could not be delivered. Check the email service and try again.')
+    }
+  }
   return <>
     <WorkspaceSection title="Store work accounts" count={accounts.length ? pluralLabel(accounts.length, 'account') : undefined}>
-      {accounts.length ? <div className="workspace-list">{accounts.map((account) => <div key={account.id}><WorkspaceRow label={`${account.given_name} ${account.surname}`} meta={`${account.position} · ${account.email}`} value={account.role} tone={account.active ? 'ok' : 'warn'} />{account.active ? <><label className="login-field"><span>Work role</span><select value={account.role} onChange={(e) => changeRole(account.id, e.target.value)}>{['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}</select></label><button className="btn" type="button" onClick={() => deactivate(account.id)}>Deactivate access</button></> : <button className="btn btn-primary" type="button" onClick={() => reactivate(account.id)}>Reactivate access</button>}</div>)}</div> : <WorkspaceEmpty>No staff accounts have been created yet.</WorkspaceEmpty>}
+      <p className="muted">Executives review outcomes; managers run store work; inventory staff manage stock; analysts inspect evidence; auditors have oversight access.</p>
+      {accounts.length ? <div className="workspace-list">{accounts.map((account) => {
+        const invited = account.status === 'invited'
+        return <div key={account.id}>
+          <WorkspaceRow
+            label={`${account.given_name} ${account.surname}`}
+            meta={`${account.position} · ${account.email}`}
+            value={`${account.role} · ${account.status ?? (account.active ? 'active' : 'inactive')}`}
+            tone={account.active ? 'ok' : 'warn'}
+          />
+          {account.role !== 'owner' && !invited ? <label className="login-field">
+            <span>Work role</span>
+            <select value={account.role} onChange={(e) => void changeRole(account.id, e.target.value)}>
+              {['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}
+            </select>
+          </label> : null}
+          {invited ? <button className="btn btn-secondary" type="button" onClick={() => void sendRecovery(account.id, true)}>Resend invitation</button> : null}
+          {account.active && account.role !== 'owner' ? <>
+            <button className="btn btn-secondary" type="button" onClick={() => void sendRecovery(account.id)}>Send password reset</button>
+            <button className="btn" type="button" onClick={() => void deactivate(account.id)}>Deactivate access</button>
+          </> : null}
+          {!account.active && !invited ? <button className="btn btn-primary" type="button" onClick={() => void reactivate(account.id)}>Reactivate access</button> : null}
+        </div>
+      })}</div> : <WorkspaceEmpty>No staff accounts have been invited yet.</WorkspaceEmpty>}
     </WorkspaceSection>
-    <WorkspaceSection title="Create work account">
+    <WorkspaceSection title="Invite a colleague">
     <form className="login-card" onSubmit={submit}>
-      <p className="muted">Create an account for a person who works in this store. Their role controls what they can do.</p>
-      {(['given_name', 'surname', 'position', 'email', 'password', 'password_confirmation'] as const).map((field) => <label className="login-field" key={field}><span>{field === 'given_name' ? 'First name' : field === 'surname' ? 'Surname' : field === 'position' ? 'Work position' : field === 'email' ? 'Work email' : field === 'password' ? 'Temporary password' : 'Confirm password'}</span><input type={field.includes('password') ? 'password' : field === 'email' ? 'email' : 'text'} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required /></label>)}
+      <p className="muted">They will receive a single-use link and choose their own password. Invitation secrets are never shown here.</p>
+      {(['given_name', 'surname', 'position', 'email'] as const).map((field) => <label className="login-field" key={field}><span>{field === 'given_name' ? 'First name' : field === 'surname' ? 'Surname' : field === 'position' ? 'Work position' : 'Work email'}</span><input type={field === 'email' ? 'email' : 'text'} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required /></label>)}
       <label className="login-field"><span>Store role</span><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}</select></label>
       {notice ? <p className="login-error">{notice}</p> : null}
-      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
+      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Sending…' : 'Send invitation'}</button>
     </form>
     </WorkspaceSection>
   </>
@@ -4286,73 +4347,13 @@ function OnboardingWizard() {
   )
 }
 
-// Shown only when the backend is configured for real client auth
-// (SHELFWISE_AUTH_MODE=jwt, public demo sessions disabled) and this browser has no valid
-// session cookie yet - the owner's actual entry point into a real deployment, not a demo
-// gate. See ensureBrowserSession/isUnauthorizedError above for how this state is reached.
-function LoginScreen({
-  onLogin,
-  error,
-  busy,
-}: {
-  onLogin: (email: string, password: string) => void
-  error: string | null
-  busy: boolean
-}) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    if (!email.trim() || !password || busy) return
-    onLogin(email.trim(), password)
-  }
-
-  return (
-    <div className="login-screen">
-      <form className="login-card" onSubmit={submit}>
-        <div className="login-mark" aria-hidden>
-          <span className="avatar-mark" />
-        </div>
-        <h1>ShelfWise</h1>
-        <p className="muted">Sign in with your company account to open this store's operations.</p>
-        <p className="muted">Need access? Ask your store owner to create your work account in People &amp; access.</p>
-        <label className="login-field">
-          <span>Email</span>
-          <input
-            type="email"
-            autoComplete="username"
-            autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={busy}
-            required
-          />
-        </label>
-        <label className="login-field">
-          <span>Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={busy}
-            required
-          />
-        </label>
-        {error ? <p className="login-error">{error}</p> : null}
-        <button className="btn btn-primary" type="submit" disabled={busy || !email.trim() || !password}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 function App() {
+  const [accountLifecycleRequested, setAccountLifecycleRequested] = useState(() => (
+    /(?:^#|&)(?:activate|reset-password)=/.test(window.location.hash)
+  ))
   const [dataDomain, setDataDomain] = useState<DataDomain>('operational_twin')
   const [data, setData] = useState<GoldenScenario | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
@@ -4365,6 +4366,7 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [authRequired, setAuthRequired] = useState(false)
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
@@ -4422,7 +4424,8 @@ function App() {
     setOps(emptyOps(dataDomain))
     async function load() {
       try {
-        await ensureBrowserSession(controller.signal)
+        const sessionPayload = await ensureBrowserSession(controller.signal)
+        setPasswordChangeRequired(Boolean(sessionPayload.session?.must_change_password))
       } catch (sessionError) {
         if (controller.signal.aborted) return
         if (isUnauthorizedError(sessionError)) {
@@ -4584,14 +4587,23 @@ function App() {
     setLoginError(null)
     const controller = new AbortController()
     try {
-      await postLogin(email, password, controller.signal)
+      const sessionPayload = await postLogin(email, password, controller.signal)
       setAuthRequired(false)
+      setPasswordChangeRequired(Boolean(sessionPayload.session?.must_change_password))
       setReloadKey((key) => key + 1)
     } catch (loginErr) {
       setLoginError(loginErr instanceof Error ? loginErr.message : String(loginErr))
     } finally {
       setLoggingIn(false)
     }
+  }
+
+  const handleAuthenticated = () => {
+    setAuthRequired(false)
+    setPasswordChangeRequired(false)
+    setAccountLifecycleRequested(false)
+    setLoginError(null)
+    setReloadKey((key) => key + 1)
   }
 
   // Opening a surface (approvals) or starting a new chat must reveal the chat on mobile, where the
@@ -4849,8 +4861,17 @@ function App() {
       })
   }
 
-  if (authRequired) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} busy={loggingIn} />
+  if (authRequired || passwordChangeRequired || accountLifecycleRequested) {
+    return (
+      <WorkforceLoginScreen
+        request={fetchJson}
+        onLogin={handleLogin}
+        onAuthenticated={handleAuthenticated}
+        error={loginError}
+        busy={loggingIn}
+        forcePasswordChange={passwordChangeRequired}
+      />
+    )
   }
 
   return (

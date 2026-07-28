@@ -81,12 +81,13 @@ input {
 /* yet - see LoginScreen in App.tsx.                                       */
 /* ---------------------------------------------------------------------- */
 .login-screen {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg);
   padding: 24px;
+  overflow: auto;
 }
 
 .login-card {
@@ -99,6 +100,8 @@ input {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 32px 28px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 .login-mark {
@@ -126,7 +129,8 @@ input {
   color: var(--mute);
 }
 
-.login-field input {
+.login-field input,
+.login-field select {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-2);
@@ -135,9 +139,11 @@ input {
   font-size: 14px;
 }
 
-.login-field input:focus {
-  outline: none;
-  border-color: var(--border-strong);
+.login-field input:focus,
+.login-field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
 }
 
 .login-error {

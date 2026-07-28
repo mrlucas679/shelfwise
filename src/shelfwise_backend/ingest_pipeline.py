@@ -36,6 +36,7 @@ from .state import (
     decision_store,
     event_bus,
     event_store,
+    inventory_position_store,
     open_order_store,
     trace_registry,
 )
@@ -70,8 +71,10 @@ def record_pipeline_event(event: Event) -> dict[str, Any]:
                 "bus_message_id": None,
                 "cascade": None,
                 "twin": {"status": "not_replayed"},
+                "inventory": {"status": "not_replayed"},
             }
     open_order_store.observe_event(event)
+    inventory_projection = inventory_position_store.project_event(event.to_dict())
     twin_projection = project_twin_event(event)
 
     bus_message_id = event_bus.publish(event)
@@ -87,6 +90,7 @@ def record_pipeline_event(event: Event) -> dict[str, Any]:
         "bus_message_id": bus_message_id,
         "cascade": cascade,
         "twin": twin_projection,
+        "inventory": inventory_projection,
     }
 
 

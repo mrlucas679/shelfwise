@@ -15,6 +15,38 @@ test('chat console loads and the approval queue is reachable', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Approval queue' })).toBeVisible()
 })
 
+test('invited workers get the browser activation form from the email fragment', async ({
+  page,
+}) => {
+  await page.goto('/#activate=signed-test-token')
+
+  await expect(page.getByRole('heading', { name: 'Activate your work account' })).toBeVisible()
+  await expect(page.getByLabel('First name')).toBeVisible()
+  await expect(page.getByLabel('Surname')).toBeVisible()
+  await expect(page.getByLabel('Work position')).toBeVisible()
+  await expect(page.getByLabel('Work email')).toBeVisible()
+  await expect(page.getByLabel('New password', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Activate account' })).toBeVisible()
+})
+
+test('an unconfigured client can reach the one-time first-owner browser setup', async ({
+  page,
+}) => {
+  await page.route('**/auth/session', async (route) => {
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"detail":"Authentication is required"}' })
+  })
+  await page.route('**/auth/setup-status', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"bootstrap_required":true}' })
+  })
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Set up first company owner' }).click()
+  await expect(page.getByRole('heading', { name: 'Set up your company' })).toBeVisible()
+  await expect(page.getByLabel('Company name')).toBeVisible()
+  await expect(page.getByLabel('Platform setup key')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create company owner' })).toBeVisible()
+})
+
 test('the guided setup resumes from real server state and reaches readiness', async ({
   page,
 }) => {

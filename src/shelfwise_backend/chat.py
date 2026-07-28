@@ -149,6 +149,8 @@ def build_chat_reply(
     orchestrator_factory: Any = None,
     selected_memory_ids: tuple[str, ...] = (),
     selected_skill_ids: tuple[str, ...] = (),
+    model_role: Literal["chat", "executive"] = "chat",
+    operational_tools_enabled: bool = True,
 ) -> str:
     """Build a chat answer from current backend state."""
     answer, _meta = build_chat_reply_with_meta(
@@ -166,6 +168,8 @@ def build_chat_reply(
         orchestrator_factory=orchestrator_factory,
         selected_memory_ids=selected_memory_ids,
         selected_skill_ids=selected_skill_ids,
+        model_role=model_role,
+        operational_tools_enabled=operational_tools_enabled,
     )
     return answer
 
@@ -186,6 +190,8 @@ def build_chat_reply_with_meta(
     orchestrator_factory: Any = None,
     selected_memory_ids: tuple[str, ...] = (),
     selected_skill_ids: tuple[str, ...] = (),
+    model_role: Literal["chat", "executive"] = "chat",
+    operational_tools_enabled: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     """Answer using a real agentic tool-calling loop when a decision/memory store is
     available, falling back to a single grounded completion (or the offline reply)
@@ -202,7 +208,9 @@ def build_chat_reply_with_meta(
     inference = client or OpenAICompatibleInferenceClient()
     resolved_facts = facts or _default_facts()
     live_twin = twin is not None
-    if live_twin:
+    if not operational_tools_enabled:
+        subject, product, tool_calls = question[:80], None, []
+    elif live_twin:
         subject, product, tool_calls = question[:80], None, [{"tool": "live_twin.context"}]
     else:
         subject, product, tool_calls = _tool_context(
@@ -290,6 +298,7 @@ def build_chat_reply_with_meta(
                         audit=audit,
                         selected_memory_ids=selected_memory_ids,
                         selected_skill_ids=selected_skill_ids,
+                        model_role=model_role,
                     )
                 )
                 _assert_followup_continuity(question, state, answer, run_tool_calls)
@@ -339,7 +348,7 @@ def build_chat_reply_with_meta(
             selected_skill_ids=selected_skill_ids,
         )
         result = inference.complete(
-            agent="executive",
+            agent=model_role,
             system=fallback_system,
             user=prompt,
             max_tokens=300,
@@ -460,6 +469,7 @@ async def _run_agentic_chat(
     audit: AuditLog | None,
     selected_memory_ids: tuple[str, ...],
     selected_skill_ids: tuple[str, ...],
+    model_role: Literal["chat", "executive"],
 ) -> tuple[str, tuple[Any, ...], str, dict[str, object]]:
     """Run chat through the real platform-tool registry and return a grounded answer.
 
@@ -520,7 +530,7 @@ async def _run_agentic_chat(
         selected_skill_ids=selected_skill_ids,
     )
     run = await orchestrator.run(
-        role="chat",
+        role=model_role,
         system=system,
         user=prompt,
         final_schema=_CHAT_SCHEMA,

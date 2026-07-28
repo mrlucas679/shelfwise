@@ -409,7 +409,7 @@ def test_company_login_mints_the_trusted_owner_session(monkeypatch) -> None:
     assert ok.status_code == 200
     session = ok.json()["session"]
     assert session["role"] == "owner"
-    assert session["user_id"] == "owner@shop.test"
+    assert session["user_id"] != "owner@shop.test", "workforce identities must use opaque ids"
     assert "shelfwise_session" in ok.headers.get("set-cookie", "").lower() or ok.cookies, (
         "login must set the same session cookie the platform verifies"
     )

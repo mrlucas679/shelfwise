@@ -317,7 +317,9 @@ A few endpoints worth knowing by name (used throughout this README):
 | `GET /submission/readiness` | Track 3 gate self-check |
 | `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
 | `GET /onboarding/status` | Owner-only, server-derived progress for company, store, data source, devices, and work accounts |
-| `GET /accounts` · `POST /accounts` · `POST /accounts/{id}/role` · `POST /accounts/{id}/deactivate\|reactivate` | Owner-managed named work accounts and access lifecycle |
+| `GET /auth/setup-status` · `POST /platform/bootstrap` | One-time dedicated-client company and first-owner setup |
+| `POST /auth/activate` · `POST /auth/password-reset/request\|consume` · `POST /auth/change-password` | Signed single-use activation, recovery, forced password replacement, and session invalidation |
+| `GET /accounts` · `POST /accounts/invitations` · `GET /accounts/audit` · `POST /accounts/{id}/role` · `POST /accounts/{id}/deactivate\|reactivate` | Owner-managed named work accounts, least-privilege roles, email invitations, and identity-only audit |
 | `POST /intake/csv/preview` · `POST /intake/csv/commit` | Validated, idempotent browser-led CSV onboarding |
 | `POST /connectors/{system}/credentials/test` | Live credential and endpoint check without exposing stored secrets |
 | `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
@@ -402,7 +404,8 @@ Built now:
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
   workspaces, FEFO lot drill-down, decision log, inference routing, HITL approval, and a
   resumable first-store Setup guide backed by server-derived progress.
-- Owner-managed named work accounts with work identity, bounded roles, normal sign-in, role
+- Browser-led first-owner bootstrap and owner-managed named work accounts with work identity,
+  signed email invitations, bounded roles, normal sign-in, role
   changes, and deactivate/reactivate lifecycle.
 - 891 passing tests (21 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
