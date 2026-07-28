@@ -5,7 +5,7 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **890 passed / 21 environment-gated skips**;
+Branch: `developers` · Final local gates: **891 passed / 21 environment-gated skips**;
 Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (287 modules);
 capability manifest **231 capabilities**, contract-verified
 (`sha256:704b122af...`); Playwright golden path **8/8 passed** against isolated disposable
@@ -27,6 +27,9 @@ bundled Node runtime; see the 2026-07-28 HANDOFF entry for the exact proof bound
 - ✅ Browser regressions cover full onboarding, connector connection, and device registration.
 - ✅ Runtime endpoint precedence and strict company-profile write payload bugs found during
   real browser execution are fixed.
+- ✅ Deployment dependency drift is contract-checked: every `pyproject.toml` runtime
+  dependency must be present in `requirements.txt`, closing the clean-wheel import failure
+  that GitHub CI exposed for Cryptography.
 
 ## 2026-07-23 technical-debt and readiness campaign
 

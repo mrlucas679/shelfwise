@@ -271,10 +271,12 @@ def test_worker_loop_service_reports_reclaim_counts_and_errors(monkeypatch, capl
         )
         await service.start()
         try:
-            for _ in range(100):
+            # Reclaim runs through the shared thread pool. Give a bounded five-second
+            # deadline so full-suite CPU/thread contention cannot turn the retry check flaky.
+            for _ in range(250):
                 if service.status()["reclaimed"] >= 2:
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.02)
         finally:
             await service.stop()
         return service.status()

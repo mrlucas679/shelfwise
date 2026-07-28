@@ -364,7 +364,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         890 passing tests (21 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         891 passing tests (21 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -404,7 +404,7 @@ Built now:
   resumable first-store Setup guide backed by server-derived progress.
 - Owner-managed named work accounts with work identity, bounded roles, normal sign-in, role
   changes, and deactivate/reactivate lifecycle.
-- 890 passing tests (21 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+- 891 passing tests (21 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external

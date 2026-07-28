@@ -30,13 +30,21 @@ counts, while the dedicated delivery test continues to assert the exact 17-issue
 
 Verification on the final tree:
 
-- `890 passed, 21 skipped` — complete Python suite.
+- `891 passed, 21 skipped` — complete Python suite.
 - Ruff clean across `src`, `tests`, and `scripts`.
 - TypeScript `tsc --noEmit` and the Vite production build passed (287 modules).
 - Capability contract: 231 deterministic capabilities,
   `sha256:704b122afaf55b2157bb80a4ff2fa0c3c3f4c2965c3d0759a60392044fe7b582`.
 - Playwright golden path: 8/8 passed against disposable ShelfWise servers, including guided
   onboarding, HITL approval, grounded chat, ERP connection, and edge-device registration.
+
+The first GitHub CI run on this work then found an older packaging debt that local dependency
+state had masked: `cryptography>=42` was declared in `pyproject.toml` but absent from
+`requirements.txt`, which is what CI and the backend Dockerfile install. The distributable
+wheel therefore failed to import its encrypted-credential module in a clean environment.
+`requirements.txt` is aligned, and `test_package_contract.py` now enforces that every runtime
+project dependency remains present in the deployment requirements file. A wheel-only import
+was reproduced successfully from outside the source tree before the follow-up push.
 
 Local environment note: this machine's project `.venv` launcher currently points at a removed
 uv-managed Python installation. Verification therefore used the already-installed Hermes
