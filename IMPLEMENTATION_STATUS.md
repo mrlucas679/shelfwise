@@ -5,13 +5,17 @@
 > and is not an accidental commit target.
 
 Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **891 passed / 21 environment-gated skips**;
+Branch: `developers` · Final local gates: **892 passed / 21 environment-gated skips**;
 Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean (287 modules);
 capability manifest **231 capabilities**, contract-verified
 (`sha256:704b122af...`); Playwright golden path **8/8 passed** against isolated disposable
 ShelfWise servers. The machine's project `.venv` launcher currently targets a removed
 uv-managed interpreter, so these gates used the installed Hermes Python environment and
 bundled Node runtime; see the 2026-07-28 HANDOFF entry for the exact proof boundary.
+GitHub CI on implementation commit `2dc89b4` passed **912 tests / 1 skip** with fresh
+Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
+shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
+credentials; this remains explicitly external rather than being inferred from the green build.
 
 ## 2026-07-28 guided onboarding and account readiness
 
@@ -30,6 +34,8 @@ bundled Node runtime; see the 2026-07-28 HANDOFF entry for the exact proof bound
 - ✅ Deployment dependency drift is contract-checked: every `pyproject.toml` runtime
   dependency must be present in `requirements.txt`, closing the clean-wheel import failure
   that GitHub CI exposed for Cryptography.
+- ✅ Production migration drift is contract-checked for the durable encrypted edge-device
+  registry; fresh Postgres CI no longer depends on module-local runtime DDL.
 
 ## 2026-07-23 technical-debt and readiness campaign
 

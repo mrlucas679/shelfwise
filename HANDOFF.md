@@ -30,7 +30,7 @@ counts, while the dedicated delivery test continues to assert the exact 17-issue
 
 Verification on the final tree:
 
-- `891 passed, 21 skipped` — complete Python suite.
+- `892 passed, 21 skipped` — complete local Python suite.
 - Ruff clean across `src`, `tests`, and `scripts`.
 - TypeScript `tsc --noEmit` and the Vite production build passed (287 modules).
 - Capability contract: 231 deterministic capabilities,
@@ -45,6 +45,20 @@ wheel therefore failed to import its encrypted-credential module in a clean envi
 `requirements.txt` is aligned, and `test_package_contract.py` now enforces that every runtime
 project dependency remains present in the deployment requirements file. A wheel-only import
 was reproduced successfully from outside the source tree before the follow-up push.
+
+The next clean CI run exposed a second production-only drift: the durable edge-device registry
+had a module-local auto-schema but was absent from the central `schema.sql` used when production
+disables runtime DDL. The central migration now creates the encrypted device table, and a static
+schema contract prevents another local/production split. The same run also proved that a raw
+connector-credential assertion was querying a forced-RLS table without binding its tenant; the
+test now reads the stored ciphertext through the restricted, tenant-bound application role.
+
+GitHub Actions is green on final implementation commit `2dc89b4`: **912 passed, 1 skipped**
+against fresh Postgres and Redis; the 33/33 eval gate, wheel-only import, 8/8 browser suite,
+amd64 production image build, public-origin smoke, and three-cycle deployment shakedown all
+passed. The separate capability-contract workflow also passed. CI did not have AMD endpoint
+credentials, so live MI300X/Fireworks response proof remains an external cloud-run boundary;
+the deployed stack correctly failed closed rather than manufacturing an offline chat answer.
 
 Local environment note: this machine's project `.venv` launcher currently points at a removed
 uv-managed Python installation. Verification therefore used the already-installed Hermes

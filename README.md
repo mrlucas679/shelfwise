@@ -187,7 +187,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (755 passing, 16 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (892 local passing, 21 environment-gated skips; 912 passing and 1 skipped in fresh Postgres/Redis CI) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
