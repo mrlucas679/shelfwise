@@ -12,11 +12,12 @@ capability manifest **249 capabilities**, contract-verified
 Playwright golden path **12/12 passed** against isolated disposable
 ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
 installed frontend toolchain ran these gates directly.
-Exact-head GitHub CI is intentionally recorded after the 2026-07-29 commit is pushed. The prior
-implementation commit `e656d1d` remains green with fresh Postgres/Redis, the distributable
-wheel, the production Compose topology, and the deployment shakedown. Live AMD-model proof was
-not run because CI has no endpoint credentials; this remains explicitly external rather than
-being inferred from a green build.
+GitHub CI on implementation commit `abe6924` passed **971 tests / 1 skip** and **12/12 browser
+flows** with fresh Postgres/Redis, the distributable wheel, the production Compose topology,
+public-origin smoke, and the deployment shakedown. Push and pull-request Capability Contract
+workflows also passed for the exact SHA. Live AMD-model proof was not run because CI has no
+endpoint credentials; this remains explicitly external rather than being inferred from a green
+build.
 
 ## 2026-07-29 adaptive attribution and production-readiness pass
 

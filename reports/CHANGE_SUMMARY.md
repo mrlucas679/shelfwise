@@ -54,4 +54,6 @@ Scope: ShelfWise adaptive failure attribution and evidence-backed readiness only
 
 Ruff, capability drift, 951 Python tests, frontend typecheck/build, 12 Chromium product flows,
 dependency resolution, Node production audit, and schema/config contract tests pass locally.
-External and CI proof boundaries are listed in `PRODUCTION_READINESS_REPORT.md`.
+Implementation commit `abe6924` also passed exact-SHA GitHub CI (971 tests, 1 skip, 12 browser
+flows, fresh Postgres/Redis, wheel, Compose, production smoke, and shakedown) plus both capability
+workflows. External proof boundaries are listed in `PRODUCTION_READINESS_REPORT.md`.

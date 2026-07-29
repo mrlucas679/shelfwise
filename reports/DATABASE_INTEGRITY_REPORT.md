@@ -16,9 +16,9 @@ Canonical schema: [`src/shelfwise_storage/schema.sql`](../src/shelfwise_storage/
 | Local schema/config tests | 32 passed |
 | Environment-gated Postgres tests | 11 skipped locally because `SHELFWISE_TEST_DATABASE_URL` is not set |
 
-The full Python suite passed 951 tests with 21 total environment-gated skips. Exact-head
-Postgres/Redis/migration evidence must be produced by CI after push; no local skip is represented
-as a current database pass.
+The full local Python suite passed 951 tests with 21 total environment-gated skips. Exact
+implementation commit `abe6924` then passed GitHub CI with fresh Postgres/Redis, canonical
+migration, 971 tests, and one skip. No local skip is represented as a database pass.
 
 ## Integrity findings
 
@@ -50,5 +50,6 @@ deployments have no database behavior change.
 ## Recovery boundary
 
 Production upgrades require a backup/session capsule, migration job completion, readiness
-checks, and rollback/restore procedures in the release runbook. A real existing-database upgrade
-was not rerun locally in this resource-constrained pass; CI is the authoritative exact-head gate.
+checks, and rollback/restore procedures in the release runbook. CI verified a fresh exact-head
+database and migration; a real existing-database upgrade still requires the controlled operator
+procedure and rollback drill.

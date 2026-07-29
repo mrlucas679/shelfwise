@@ -16,12 +16,12 @@ Assessment: application code ready for controlled deployment; external acceptanc
 | Human control | High-risk decisions and all replay/write-back actions remain approval-gated |
 | Recovery/operations | Release, rollback, retention, health-monitor, startup, and safe session-capsule paths exist and are tested |
 | Observability | Existing events, journals, model runs, evidence, decisions, traces, and optional adaptive attribution remain correlated |
+| Exact-head hosted gate | Commit `abe6924`: 971 tests, 1 skip, 12 browser flows, Postgres/Redis, wheel, Compose, production smoke, and shakedown passed |
 
 ## Deployment acceptance still required
 
 | Boundary | Why it is not a code-completion claim | Required evidence |
 |---|---|---|
-| Exact-head GitHub Actions | Current local changes must be pushed before CI can test their commit | Green CI and capability workflows for the pushed SHA |
 | Live AMD/Fireworks inference | No current public endpoint credential is available | Direct `/v1/chat/completions` output plus live-required ShelfWise receipt |
 | W7900D/MI300X training and serving | Accelerator access is external | Preflight, training/evaluation, adapter compatibility, and generated serving receipts |
 | Existing production database upgrade | Local Postgres URL was not supplied | Backup, migration job, readiness check, rollback/restore drill |
@@ -40,6 +40,7 @@ considered only after measured restart/volume need.
 ## Release decision
 
 The repository has no known unmitigated critical correctness, tenant-isolation, secret-handling,
-or data-integrity defect from this pass. It is suitable for a controlled deployment after the
-exact-head CI gate. It is not yet honest to call the product fully production-accepted until the
-live inference, database-upgrade, retailer, legal, rollback, and capacity evidence above exists.
+or data-integrity defect from this pass. The exact implementation commit passed its hosted CI and
+is suitable for a controlled deployment. It is not yet honest to call the product fully
+production-accepted until the live inference, existing-database upgrade, retailer, legal,
+rollback, and capacity evidence above exists.

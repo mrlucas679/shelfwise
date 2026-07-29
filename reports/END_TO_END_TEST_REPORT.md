@@ -46,13 +46,27 @@ All 12 passed. Windows emitted `ConnectionResetError [WinError 10054]` messages 
 terminated its disposable Uvicorn server after the successful run. There was no failed browser
 assertion or running application outage.
 
+## Exact-head GitHub evidence
+
+Implementation commit `abe6924` passed all four workflows triggered for its SHA:
+
+- [Push CI](https://github.com/mrlucas679/shelfwise/actions/runs/30484271638):
+  971 tests passed, 1 skipped, 12 browser flows passed; fresh Postgres and Redis, wheel import,
+  frontend build, Compose validation, production topology, public-origin smoke, deployment
+  shakedown, and fail-closed Track 3 gate passed.
+- [Pull-request CI](https://github.com/mrlucas679/shelfwise/actions/runs/30484275094): passed.
+- [Push Capability Contract](https://github.com/mrlucas679/shelfwise/actions/runs/30484272250):
+  passed.
+- [Pull-request Capability Contract](https://github.com/mrlucas679/shelfwise/actions/runs/30484275116):
+  passed.
+
 ## Coverage boundaries
 
 - The 21 full-suite skips are environment-gated; 11 are explicitly Postgres integration checks
   without `SHELFWISE_TEST_DATABASE_URL`.
 - Local Docker inspection timed out on the resource-constrained workstation, so no fresh local
   image build is claimed.
-- GitHub Actions is the clean Postgres/Redis/wheel/Compose/deployment authority after push.
+- GitHub Actions supplied the clean Postgres/Redis/wheel/Compose/deployment evidence above.
 - Direct MI300X/Fireworks generation, hardware training, retailer connector acceptance, and
   production rollback drills require external systems or credentials and are not represented
   as local passes.

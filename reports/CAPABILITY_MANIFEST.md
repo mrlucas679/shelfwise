@@ -47,6 +47,10 @@ The manifest is the record-level inventory; `FEATURE_COMPLETION_MATRIX.md` is th
 reader-oriented roll-up. The repository does not infer live provider or accelerator proof from
 source code, mocks, configuration, or local deterministic tests.
 
+Exact-SHA push and pull-request Capability Contract workflows passed for implementation commit
+`abe6924`: [push run 30484272250](https://github.com/mrlucas679/shelfwise/actions/runs/30484272250)
+and [pull-request run 30484275116](https://github.com/mrlucas679/shelfwise/actions/runs/30484275116).
+
 ## External-proof records
 
 | Capability | Status | Boundary |

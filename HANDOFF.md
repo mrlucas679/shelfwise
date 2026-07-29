@@ -22,8 +22,11 @@ Final local evidence from the completed source state:
 - Ruff, the 249-record capability contract, frontend typecheck, and production build passed.
 - All 12 isolated Chromium product flows passed on ports 5187/8017.
 - Dependency resolution and the Node production advisory scan are clean.
-- Postgres-dependent integrity checks remain CI-owned; live provider/hardware/retailer proof
-  remains external and must not be inferred from local deterministic tests.
+- Exact implementation commit `abe6924` passed GitHub CI with 971 tests, 1 skip, 12 browser
+  flows, fresh Postgres/Redis, wheel import, Compose validation, production-topology smoke, and
+  deployment shakedown. Both push and pull-request capability-contract checks passed.
+- Live provider/hardware/retailer proof remains external and must not be inferred from local or
+  hosted deterministic tests.
 
 The detailed evidence set is under `reports/`, and
 `docs/ADAPTIVE_FAILURE_ATTRIBUTION.md` is the operator/developer guide.

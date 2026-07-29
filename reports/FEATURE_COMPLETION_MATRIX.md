@@ -30,7 +30,7 @@ created by this local repository.
 | Cold-chain resilience | structured edge observation → signature/replay checks → diagnosis → event/twin/cascade | Opaque device identity, encrypted secret, no raw media | edge signature, batch recovery, diagnosis, browser registration tests | Complete |
 | Retention/recovery | scheduled retention/session capsule → bounded member checks → scoped prune/restore | Simulation history pruned; archive links/special members rejected | retention and safe-extraction tests | Complete |
 | One-command shop startup | setup script → preserved/generated secrets → Compose → health wait → first-login output | Refuses unsafe regeneration and reports Docker/health failures | startup/provisioning/config tests | Complete in code; local Docker run not repeated in this pass |
-| Production topology | migration → Postgres/Redis/backend/frontend/Nginx → shakedown | RLS stores, Redis worker, secure cookie/origin checks | CI Compose, migration, Postgres/Redis, deployment shakedown | Complete in code; exact-head CI rerun after push |
+| Production topology | migration → Postgres/Redis/backend/frontend/Nginx → shakedown | RLS stores, Redis worker, secure cookie/origin checks | Exact-SHA CI Compose, migration, Postgres/Redis, public smoke, deployment shakedown | Complete and CI-verified |
 | Training pipeline | config/preflight/dataset/collator/train/eval/serving checks | Simulation/training domain guard; immutable revisions | deterministic config/data tests | External hardware proof |
 | Live MI300X/Fireworks inference | validated provider config → `/v1/chat/completions` → exact model receipt | No offline fallback in live-required profiles | fail-closed local tests | External endpoint proof |
 
