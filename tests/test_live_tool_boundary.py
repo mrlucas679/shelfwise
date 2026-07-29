@@ -7,12 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from shelfwise_backend.app import _project_twin_event
 from shelfwise_backend.tools.mcp_surface import (
     AuditLog,
     build_live_twin_tools,
     build_platform_tools,
 )
+from shelfwise_backend.twin_projection import project_twin_event
 from shelfwise_contracts import Event, EventSource, EventType
 from shelfwise_runtime.provenance import DataDomain, DataDomainBoundaryError
 from shelfwise_twin import InMemoryTwinStore, StateLane, TwinObservation, TwinService
@@ -48,7 +48,7 @@ def test_simulation_event_is_skipped_by_twin_projection() -> None:
         payload={"store_id": "store_1", "synthetic": True, "asset_id": "fridge_1"},
     )
 
-    result = _project_twin_event(event)
+    result = project_twin_event(event)
 
     assert result["status"] == "skipped_non_operational"
     assert result["data_domain"] == "world_simulation"

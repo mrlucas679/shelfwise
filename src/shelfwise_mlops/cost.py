@@ -84,6 +84,12 @@ def decision_economics(
     return {
         "cost": cost.to_dict(),
         "recovered": recovered.to_dict(),
-        "recovered_per_cost": str(ratio.quantize(Decimal("0.1"))) if ratio else None,
+        # `Decimal("0")` is falsy in Python, so `if ratio` silently reported "None"
+        # (undefined) for a genuinely computed ratio of exactly zero - conflating "this
+        # decision cost real tokens and recovered nothing" (a meaningful 0.0, worth
+        # flagging on the economics dashboard) with "cost was zero, division undefined"
+        # (the only case `ratio` is actually None). Same class of bug as the R0.00
+        # "recovered" regressions already fixed elsewhere in this codebase.
+        "recovered_per_cost": str(ratio.quantize(Decimal("0.1"))) if ratio is not None else None,
         "total_tokens": total_tokens,
     }

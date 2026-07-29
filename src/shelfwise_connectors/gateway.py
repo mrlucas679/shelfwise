@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 from dataclasses import dataclass
 
 MAX_INTAKE_BYTES = 5 * 1024 * 1024
@@ -101,12 +103,25 @@ def quarantine_webhook_body(
 
 
 def neutralise_formula_text(text: str) -> str:
-    """Demote spreadsheet formulas to plain text in comma-separated intake rows."""
+    """Demote spreadsheet formulas to plain text in comma-separated intake rows.
 
-    return "\n".join(
-        ",".join(neutralise_formula(cell) for cell in line.split(","))
-        for line in text.splitlines()
-    ) + ("\n" if text.endswith("\n") else "")
+    Parses with the real `csv` module rather than a raw `line.split(",")` - a naive split
+    corrupts any quoted field containing a comma (e.g. `"Smith, John"` becomes two cells)
+    before the actual CSV parser downstream ever sees it. `csv.reader`/`csv.writer` with the
+    default dialect understands quoting and produces byte-identical output to the old
+    behavior for the common case (no quoted commas), so this only changes output for the
+    payloads the old code silently mangled.
+    """
+
+    rows = list(csv.reader(io.StringIO(text)))
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    for row in rows:
+        writer.writerow([neutralise_formula(cell) for cell in row])
+    neutralised = buffer.getvalue()
+    if not text.endswith("\n") and neutralised.endswith("\n"):
+        neutralised = neutralised[:-1]
+    return neutralised
 
 
 def neutralise_formula(value: str) -> str:

@@ -3,8 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
 
-const FRONTEND_PORT = 5173
-const BACKEND_PORT = 8000
+const FRONTEND_PORT = Number(process.env.PLAYWRIGHT_FRONTEND_PORT || 5173)
+const BACKEND_PORT = Number(process.env.PLAYWRIGHT_BACKEND_PORT || 8000)
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '..')
@@ -24,6 +24,19 @@ function resolvePythonExecutable(): string {
 }
 
 const pythonExecutable = resolvePythonExecutable()
+const nodeExecutable = process.env.PLAYWRIGHT_NODE || process.execPath
+
+function resolveViteExecutable(): string {
+  const override = process.env.PLAYWRIGHT_VITE
+  if (override) return override
+  const executable = path.join(here, 'node_modules', 'vite', 'bin', 'vite.js')
+  if (!existsSync(executable)) {
+    throw new Error('Vite is not installed. Install frontend dependencies before Playwright.')
+  }
+  return executable
+}
+
+const viteExecutable = resolveViteExecutable()
 
 export default defineConfig({
   testDir: './e2e',
@@ -50,15 +63,28 @@ export default defineConfig({
       env: {
         SHELFWISE_STORE_BACKEND: 'memory',
         SHELFWISE_TENANT_ID: 'sa_retail_demo',
+        SHELFWISE_CORS_ORIGINS: `http://127.0.0.1:${FRONTEND_PORT}`,
+        // Required to store/read connector credentials (shelfwise_connectors.credentials
+        // fails closed with no default) - the E2E connector-credentials test exercises
+        // that real write path, so this must be set for it to run at all, matching what a
+        // real deployment's own SHELFWISE_CREDENTIAL_ENCRYPTION_KEY would provide.
+        SHELFWISE_CREDENTIAL_ENCRYPTION_KEY: 'e2e-test-only-key-not-for-production',
+        // Exercise the optional trace extension in browser CI while production/local
+        // defaults remain disabled unless an operator explicitly enables it.
+        SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED: 'true',
+        SHELFWISE_ATTRIBUTION_MIN_SUCCESSES: '2',
       },
       timeout: 60_000,
     },
     {
-      // vite.config.ts proxies API paths to VITE_DEV_API (defaults to localhost:8000,
-      // matching BACKEND_PORT above) so no explicit env override is needed here.
-      command: 'npm run dev -- --host 127.0.0.1 --port ' + FRONTEND_PORT,
+      // The explicit browser API base keeps isolated non-default test ports honest.
+      command:
+        `"${nodeExecutable}" "${viteExecutable}" --host 127.0.0.1 --port ` + FRONTEND_PORT,
       url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: !process.env.CI,
+      env: {
+        VITE_API_BASE: `http://127.0.0.1:${BACKEND_PORT}`,
+      },
       timeout: 60_000,
     },
   ],

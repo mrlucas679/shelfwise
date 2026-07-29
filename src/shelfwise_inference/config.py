@@ -127,7 +127,19 @@ def _host_label(base_url: str) -> str:
     if not base_url:
         return ""
     parsed = urlparse(base_url)
-    return parsed.netloc or parsed.path
+    host = parsed.hostname
+    if host is None:
+        return parsed.path
+    # `netloc` includes URL userinfo (`user:password@host`), so it is not safe for
+    # the public readiness/config response even though the field is named host-only.
+    try:
+        port = parsed.port
+    except ValueError:
+        # Leave malformed configuration to the client validation path, but never echo
+        # a credential-bearing netloc while reporting it.
+        port = None
+    rendered_host = f"[{host}]" if ":" in host else host
+    return f"{rendered_host}:{port}" if port is not None else rendered_host
 
 
 MAX_OPERATIONAL_TIMEOUT_S = 900

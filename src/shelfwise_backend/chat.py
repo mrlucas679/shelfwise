@@ -18,10 +18,12 @@ from shelfwise_inference.orchestration import (
 from shelfwise_inference.tool_calling import (
     ToolCallingError,
     assert_conclusion_grounded_in_tool_results,
+    platform_tool_to_openai_schema,
 )
 from shelfwise_twin import TwinService
 
 from .context_assembler import assemble_context
+from .context_budget import build_context_receipt
 from .product_catalog import get_delivery_exception, search_product_catalog
 from .security.gateway import DATA_RULE, fence_context, spotlight
 from .tools.mcp_surface import AuditLog, build_live_twin_tools, build_platform_tools
@@ -145,6 +147,10 @@ def build_chat_reply(
     twin: TwinService | None = None,
     audit: AuditLog | None = None,
     orchestrator_factory: Any = None,
+    selected_memory_ids: tuple[str, ...] = (),
+    selected_skill_ids: tuple[str, ...] = (),
+    model_role: Literal["chat", "executive"] = "chat",
+    operational_tools_enabled: bool = True,
 ) -> str:
     """Build a chat answer from current backend state."""
     answer, _meta = build_chat_reply_with_meta(
@@ -160,6 +166,10 @@ def build_chat_reply(
         twin=twin,
         audit=audit,
         orchestrator_factory=orchestrator_factory,
+        selected_memory_ids=selected_memory_ids,
+        selected_skill_ids=selected_skill_ids,
+        model_role=model_role,
+        operational_tools_enabled=operational_tools_enabled,
     )
     return answer
 
@@ -178,6 +188,10 @@ def build_chat_reply_with_meta(
     twin: TwinService | None = None,
     audit: AuditLog | None = None,
     orchestrator_factory: Any = None,
+    selected_memory_ids: tuple[str, ...] = (),
+    selected_skill_ids: tuple[str, ...] = (),
+    model_role: Literal["chat", "executive"] = "chat",
+    operational_tools_enabled: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     """Answer using a real agentic tool-calling loop when a decision/memory store is
     available, falling back to a single grounded completion (or the offline reply)
@@ -194,7 +208,9 @@ def build_chat_reply_with_meta(
     inference = client or OpenAICompatibleInferenceClient()
     resolved_facts = facts or _default_facts()
     live_twin = twin is not None
-    if live_twin:
+    if not operational_tools_enabled:
+        subject, product, tool_calls = question[:80], None, []
+    elif live_twin:
         subject, product, tool_calls = question[:80], None, [{"tool": "live_twin.context"}]
     else:
         subject, product, tool_calls = _tool_context(
@@ -223,6 +239,22 @@ def build_chat_reply_with_meta(
         max_chars=_CHAT_CONTEXT_MAX_CHARS,
     )
     state = assembled.payload
+    prompt = (
+        f"{DATA_RULE}\n\n"
+        f"<state_json>"
+        f"{json.dumps(fence_context(state), sort_keys=True, default=str)}"
+        f"</state_json>\n"
+        f"<user_question>{spotlight(question, max_len=2_000)}</user_question>"
+    )
+    # Offline replies do not reach an inference provider, but retaining an honest receipt
+    # keeps the conversation metadata shape stable and makes a later live retry auditable.
+    meta["context_receipt"] = _build_prompt_context_receipt(
+        system=_CHAT_SYSTEM_PROMPT,
+        prompt=prompt,
+        tools=(),
+        selected_memory_ids=selected_memory_ids,
+        selected_skill_ids=selected_skill_ids,
+    )
     if not inference.config.api_key_present:
         if live_required:
             raise InferenceError("live chat requires configured inference credentials")
@@ -243,19 +275,12 @@ def build_chat_reply_with_meta(
             ),
             meta,
         )
-    prompt = (
-        f"{DATA_RULE}\n\n"
-        f"<state_json>"
-        f"{json.dumps(fence_context(state), sort_keys=True, default=str)}"
-        f"</state_json>\n"
-        f"<user_question>{spotlight(question, max_len=2_000)}</user_question>"
-    )
     if decisions is not None and memory is not None:
         last_error: AgentOrchestrationError | ToolCallingError | None = None
         for attempt in range(2):
             try:
                 attempt_prompt = _continuity_retry_prompt(prompt, question, state, attempt)
-                answer, run_tool_calls, model_used = asyncio.run(
+                answer, run_tool_calls, model_used, context_receipt = asyncio.run(
                     _run_agentic_chat(
                         question=question,
                         continuity_ids=_continuity_ids(question, state),
@@ -271,12 +296,16 @@ def build_chat_reply_with_meta(
                         orchestrator_factory=orchestrator_factory,
                         twin=twin,
                         audit=audit,
+                        selected_memory_ids=selected_memory_ids,
+                        selected_skill_ids=selected_skill_ids,
+                        model_role=model_role,
                     )
                 )
                 _assert_followup_continuity(question, state, answer, run_tool_calls)
                 meta["answer_source"] = "model"
                 meta["tools_used"] = [call.name for call in run_tool_calls]
                 meta["tool_calls"] = [call.to_dict() for call in run_tool_calls]
+                meta["context_receipt"] = context_receipt
                 if model_used:
                     meta["model"] = model_used
                 return answer, meta
@@ -299,20 +328,28 @@ def build_chat_reply_with_meta(
                 meta,
             )
     try:
+        fallback_system = (
+            "You are ShelfWise Executive chat. Be concise and evidence-grounded. "
+            "Never describe the shape of tool_results/state_json to the user (no "
+            '"the tool result is `null`", no field names, no backticks around raw '
+            "values) - speak in plain retail-operations language, the way a store "
+            "manager would talk to a colleague. If the question's subject has no "
+            "catalogue match or no dedicated data (tool_results.catalog_search is "
+            "null and store_intelligence/decisions do not cover it), say plainly "
+            "that you don't have data on that specific subject, then pivot to what "
+            "you do know from decisions/store_intelligence/learning in state_json - "
+            "never leave the user with only a description of an empty result."
+        )
+        meta["context_receipt"] = _build_prompt_context_receipt(
+            system=fallback_system,
+            prompt=prompt,
+            tools=(),
+            selected_memory_ids=selected_memory_ids,
+            selected_skill_ids=selected_skill_ids,
+        )
         result = inference.complete(
-            agent="executive",
-            system=(
-                "You are ShelfWise Executive chat. Be concise and evidence-grounded. "
-                "Never describe the shape of tool_results/state_json to the user (no "
-                '"the tool result is `null`", no field names, no backticks around raw '
-                "values) - speak in plain retail-operations language, the way a store "
-                "manager would talk to a colleague. If the question's subject has no "
-                "catalogue match or no dedicated data (tool_results.catalog_search is "
-                "null and store_intelligence/decisions do not cover it), say plainly "
-                "that you don't have data on that specific subject, then pivot to what "
-                "you do know from decisions/store_intelligence/learning in state_json - "
-                "never leave the user with only a description of an empty result."
-            ),
+            agent=model_role,
+            system=fallback_system,
             user=prompt,
             max_tokens=300,
             tenant_id=tenant_id,
@@ -430,7 +467,10 @@ async def _run_agentic_chat(
     orchestrator_factory: Any,
     twin: TwinService | None,
     audit: AuditLog | None,
-) -> tuple[str, tuple[Any, ...], str]:
+    selected_memory_ids: tuple[str, ...],
+    selected_skill_ids: tuple[str, ...],
+    model_role: Literal["chat", "executive"],
+) -> tuple[str, tuple[Any, ...], str, dict[str, object]]:
     """Run chat through the real platform-tool registry and return a grounded answer.
 
     Also returns the model that actually answered the question - role="chat" resolves
@@ -466,25 +506,32 @@ async def _run_agentic_chat(
         if orchestrator_factory is not None
         else _default_chat_orchestrator(tools=tools, inference=inference)
     )
+    system = (
+        _CHAT_SYSTEM_PROMPT
+        if twin is None
+        else _CHAT_SYSTEM_PROMPT.replace(
+            "get_stock (on-hand/on-order for a SKU), get_demand_forecast, get_expiry_risk, "
+            "get_reorder_policy and get_supplier_ranking (procurement/ordering), "
+            "get_stock_sourcing_options (ranks real branches/DC/suppliers for a shortage), "
+            "get_cold_chain_status (refrigeration risk), check_price_integrity (till price vs "
+            "catalogue), simulate_markdown (what-if discount math), list_open_decisions and "
+            "explain_decision (approvals/HITL), and get_thresholds (learned policy memory).",
+            "get_live_twin_state, get_live_stock, and get_live_cold_chain_status for reported "
+            "operational observations, plus live_list_open_decisions, live_explain_decision, "
+            "and live_get_thresholds. Never use generated-world or what-if data to answer a "
+            "live-store question; if a reported property is missing, say that it is unavailable.",
+        )
+    )
+    context_receipt = _build_prompt_context_receipt(
+        system=system,
+        prompt=prompt,
+        tools=tools,
+        selected_memory_ids=selected_memory_ids,
+        selected_skill_ids=selected_skill_ids,
+    )
     run = await orchestrator.run(
-        role="chat",
-        system=(
-            _CHAT_SYSTEM_PROMPT
-            if twin is None
-            else _CHAT_SYSTEM_PROMPT.replace(
-                "get_stock (on-hand/on-order for a SKU), get_demand_forecast, get_expiry_risk, "
-                "get_reorder_policy and get_supplier_ranking (procurement/ordering), "
-                "get_stock_sourcing_options (ranks real branches/DC/suppliers for a shortage), "
-                "get_cold_chain_status (refrigeration risk), check_price_integrity (till price vs "
-                "catalogue), simulate_markdown (what-if discount math), list_open_decisions and "
-                "explain_decision (approvals/HITL), and get_thresholds (learned policy memory).",
-                "get_live_twin_state, get_live_stock, and get_live_cold_chain_status for reported "
-                "operational observations, plus live_list_open_decisions, live_explain_decision, "
-                "and live_get_thresholds. Never use generated-world or what-if data to answer a "
-                "live-store "
-                "question; if a reported property is missing, say that it is unavailable.",
-            )
-        ),
+        role=model_role,
+        system=system,
         user=prompt,
         final_schema=_CHAT_SCHEMA,
         final_schema_name="chat_answer",
@@ -499,6 +546,7 @@ async def _run_agentic_chat(
         # vLLM/Gemma supports generic required tool choice reliably; forcing one named
         # function can make it exhaust the output budget without emitting a valid call.
         require_tool_call_first=True,
+        max_context_tokens=8_192,
     )
     answer = ensure_english_response(str(run.answer["answer"]))
     hostile_control_text = _contains_hostile_control_text(question)
@@ -512,7 +560,31 @@ async def _run_agentic_chat(
     if not answer:
         raise AgentOrchestrationError("agentic chat produced an empty answer")
     model_used = run.model_calls[-1].model if run.model_calls else ""
-    return answer[:3_000], run.tool_calls, model_used
+    return answer[:3_000], run.tool_calls, model_used, context_receipt
+
+
+def _build_prompt_context_receipt(
+    *,
+    system: str,
+    prompt: str,
+    tools: list[Any] | tuple[Any, ...],
+    selected_memory_ids: tuple[str, ...],
+    selected_skill_ids: tuple[str, ...],
+) -> dict[str, object]:
+    """Account for every static payload that reaches an inference request before I/O."""
+    tool_schemas = [platform_tool_to_openai_schema(tool) for tool in tools]
+    receipt = build_context_receipt(
+        sections={
+            "system": system,
+            "user_prompt": prompt,
+            "tool_schemas": json.dumps(tool_schemas, sort_keys=True),
+            "final_answer_schema": json.dumps(_CHAT_SCHEMA, sort_keys=True),
+        },
+        selected_memory_ids=selected_memory_ids,
+        selected_skill_ids=selected_skill_ids,
+        selected_tools=tuple(tool.name for tool in tools),
+    )
+    return receipt.to_dict()
 
 
 def _assert_chat_grounded(answer: str, tool_calls: tuple[Any, ...]) -> None:
@@ -715,5 +787,3 @@ def _offline_reply(
             f"decision(s). {summary}{grounding}"
         )
     return f"Current ShelfWise state: {summary}{grounding}"
-
-

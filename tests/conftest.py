@@ -9,10 +9,13 @@ from shelfwise_edge import edge_device_registry
 os.environ["SHELFWISE_TENANT_ID"] = "sa_retail_demo"
 
 from shelfwise_backend.app import (
+    account_store,
     candidate_store,
     chat_store,
     cold_chain_feed,
+    connector_credential_store,
     decision_store,
+    evaluation_registry,
     event_bus,
     event_store,
     inbound_record_store,
@@ -32,7 +35,7 @@ from shelfwise_backend.app import (
     write_limiter,
     writeback_sink,
 )
-from shelfwise_backend.state import scenario_engine
+from shelfwise_backend.state import policy_confirmation_store, scenario_engine
 
 
 @pytest.fixture(autouse=True)
@@ -54,16 +57,21 @@ def _reset_demo_stores() -> None:
     journal.clear()
     trace_registry.clear()
     twin_service.store.clear()
+    twin_service.onboarding_manifests.clear()
     scenario_engine.clear()
     edge_device_registry.clear()
     tool_audit.clear()
     model_run_registry.clear()
+    evaluation_registry.clear()
     prompt_registry.clear()
     tenant_fact_store.clear()
     tenant_profile_store.clear()
+    account_store.clear()
+    policy_confirmation_store.clear()
     writeback_sink.clear()
     worldgen_run_store.clear()
     cold_chain_feed.clear()
+    connector_credential_store.clear()
     chat_store.clear()
     candidate_store.clear()
     open_order_store.clear()

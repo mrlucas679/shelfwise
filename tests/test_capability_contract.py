@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -64,6 +65,52 @@ def test_committed_capability_snapshot_matches_deterministic_discovery() -> None
 
     assert discovered == manifest
     assert_contract(manifest, policy, ROOT, discovered=discovered, today=CHECK_DATE)
+
+
+def test_every_routes_module_contributes_its_routes_to_discovery() -> None:
+    """A new `routes_*.py` extracted from `app.py` must never silently vanish from the
+    capability manifest while still working at runtime.
+
+    `_discover_openapi_routes` used to name each split-out router file individually
+    (`routes_twin.py`, ...) - extracting `routes_catalog.py` the same way `routes_twin.py`
+    was extracted revealed the trap: the routes worked over HTTP, tests passed, but all
+    seven vanished from the manifest because nobody remembered to add the new filename to
+    that hardcoded list. Discovery now globs `routes_*.py`; this proves every such file
+    that actually declares an `APIRouter` route decorator has at least one of its routes
+    represented as a discovered `openapi_route:*` capability, so a future `routes_foo.py`
+    can't repeat the same silent gap.
+    """
+    _manifest, policy, profiles = _documents()
+    discovered = discover_manifest(ROOT, policy, profiles)
+    discovered_route_ids = {
+        capability.id
+        for capability in discovered.capabilities
+        if capability.id.startswith("openapi_route:")
+    }
+
+    backend_dir = ROOT / "src" / "shelfwise_backend"
+    for routes_file in sorted(backend_dir.glob("routes_*.py")):
+        text = routes_file.read_text(encoding="utf-8")
+        if "@router." not in text:
+            continue
+        matching = {
+            capability_id
+            for capability_id in discovered_route_ids
+            if any(
+                capability_id == f"openapi_route:{method.lower()}:{path}"
+                for method in ("get", "post", "put", "delete", "patch")
+                for path in _route_paths(text)
+            )
+        }
+        assert matching, (
+            f"{routes_file.name} declares @router routes but none appear in the "
+            "discovered manifest - it is missing from _discover_openapi_routes' scan"
+        )
+
+
+def _route_paths(text: str) -> list[str]:
+    """Extract every literal path string passed to a `@router.<method>(...)` decorator."""
+    return re.findall(r'@router\.\w+\(\s*["\']([^"\']+)["\']', text)
 
 
 def test_manifest_schema_and_json_documents_are_normalized() -> None:

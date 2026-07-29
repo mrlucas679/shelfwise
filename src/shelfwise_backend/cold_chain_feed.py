@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -13,6 +14,7 @@ from shelfwise_resilience.feed import run_cold_chain_feed
 
 Publish = Callable[[str, dict[str, Any]], Awaitable[None]]
 FeedRunner = Callable[..., Awaitable[None]]
+_LOG = logging.getLogger("shelfwise.cold_chain_feed")
 
 
 class ColdChainFeedService:
@@ -93,8 +95,11 @@ class ColdChainFeedService:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            self._last_error = str(exc)[:200]
+        except Exception:
+            # The feed status is public; retain diagnostics in server logs, not in
+            # an API response that may expose upstream endpoint or sensor details.
+            self._last_error = "feed_failed"
+            _LOG.exception("cold-chain feed stopped unexpectedly")
 
 
 def _enabled() -> bool:

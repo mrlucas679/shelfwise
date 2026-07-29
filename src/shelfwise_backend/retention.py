@@ -12,6 +12,7 @@ with the process, so the service reports not-applicable there instead of pretend
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from shelfwise_storage import connect
 
 _MIN_RETENTION_DAYS = 7.0
 _SIMULATION_DOMAIN = "world_simulation"
+_LOG = logging.getLogger("shelfwise.retention")
 
 
 def retention_enabled() -> bool:
@@ -149,7 +151,8 @@ class RetentionService:
                 await asyncio.sleep(self._poll_s)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception:
                 self._last_status = "crashed"
-                self._last_error = str(exc)[:200]
+                self._last_error = "retention_failed"
+                _LOG.exception("simulation retention service crashed")
                 await asyncio.sleep(self._poll_s)

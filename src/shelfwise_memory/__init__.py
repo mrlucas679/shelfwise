@@ -95,7 +95,7 @@ class InMemoryLearningStore:
             if existing is not None:
                 return existing.to_dict()
 
-            metric, _subject = _routed_metric(decision)
+            metric, _subject = routed_metric(decision)
             event = _build_learning_event(
                 decision,
                 previous_threshold=self._thresholds.get((tenant_id, data_domain, metric)),
@@ -199,7 +199,7 @@ class PostgresLearningStore:
             if existing is not None:
                 return deepcopy(existing["payload"])
 
-            metric, _subject = _routed_metric(decision)
+            metric, _subject = routed_metric(decision)
             threshold_row = conn.execute(
                 """
                 select threshold_units
@@ -426,12 +426,17 @@ def _data_domain(decision: dict[str, Any]) -> str:
     return domain
 
 
-def _routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
+def routed_metric(decision: dict[str, Any]) -> tuple[str, str]:
     """Choose the learning metric for a decision by what was actually decided.
 
     Forcing every action through the markdown sell-through metric produced provably
     dead learning: facilities decisions landed on SKU "unknown" and every threshold
     stayed zero. Each action type measures the quantity it actually moves.
+
+    Public (not `_`-prefixed): this is the one authoritative definition of a decision's
+    metric key, shared by the write path here and by cascade builders that cite a prior
+    threshold as evidence (`cascade.py`'s `_learned_threshold_evidence`) - both sides
+    must agree on the same key or a cascade's citation would silently look up nothing.
     """
     action = decision.get("action") or {}
     params = action.get("params") or {}
@@ -541,7 +546,7 @@ def _build_learning_event(
     *,
     previous_threshold: int | None,
 ) -> LearningEvent:
-    metric, subject = _routed_metric(decision)
+    metric, subject = routed_metric(decision)
     action_type = str((decision.get("action") or {}).get("type") or "")
     if action_type == "review_price_exception":
         return _exposure_event(
@@ -642,7 +647,7 @@ def _markdown_learning_event(
         default=0,
     )
     actual_recovered_cents = expected_recovered_cents + uplift_units * margin_cents
-    metric, _subject = _routed_metric(decision)
+    metric, _subject = routed_metric(decision)
     base_threshold = predicted_units if previous_threshold is None else previous_threshold
     updated_threshold = max(base_threshold, actual_units)
     outcome = {
@@ -708,4 +713,5 @@ __all__ = [
     "LearningStore",
     "PostgresLearningStore",
     "create_learning_store",
+    "routed_metric",
 ]

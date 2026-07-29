@@ -32,6 +32,7 @@ from shelfwise_decision_science import (
     simulate_markdown,
 )
 from shelfwise_inference import load_inference_config
+from shelfwise_memory import routed_metric
 
 from .product_policies import resolve_product_policy
 from .tenant import default_tenant_context
@@ -90,6 +91,62 @@ def _monitor_action(sku: str) -> RecommendedAction:
     return RecommendedAction("monitor", {"sku": sku}, RiskTier.LOW)
 
 
+def _learning_data_domain(event: Event | None) -> str:
+    """Match `shelfwise_memory`'s own default exactly, or a lookup would hit the wrong key.
+
+    The learning store falls back to "world_simulation" for any decision missing a
+    data_domain (manual demo runs never go through `cascade_dispatcher`, which is the
+    only place that stamps one); this mirrors that default rather than inventing a
+    second one that could silently drift from it.
+    """
+    return event.data_domain.value if event is not None else "world_simulation"
+
+
+def _learned_threshold_evidence(
+    *,
+    learning: Any | None,
+    action: RecommendedAction,
+    tenant_id: str,
+    data_domain: str,
+) -> EvidenceObject | None:
+    """Surface this decision's own learned high-water mark as evidence, never as a gate.
+
+    `learning_store.thresholds()` tracks the largest measured value ever proven for this
+    exact SKU/metric (`shelfwise_memory.routed_metric`) - a monotonic high-water mark
+    recorded for the `/mlops` economics dashboard's "visible learning moment," not a
+    live control parameter. Gating a critic on "biggest profit this SKU ever proved"
+    would reject perfectly good smaller markdowns whenever one past decision happened
+    to be unusually large - the wrong shape for a pass/fail bar. It is exactly the
+    right shape for evidence: closing the loop by giving the human reviewer the
+    system's own memory ("this SKU has recovered up to R X before") without touching
+    critic_passed, decision status, or the routed action at all. Returns None (adds
+    nothing) when no prior threshold exists yet, so a SKU's first-ever decision is
+    unaffected - this is purely additive, never required.
+    """
+    if learning is None:
+        return None
+    metric, subject = routed_metric({"action": action.to_dict()})
+    previous = learning.thresholds(tenant_id=tenant_id, data_domain=data_domain).get(metric)
+    if not previous:
+        return None
+    return EvidenceObject(
+        agent=AgentName.OPPORTUNITY,
+        conclusion=(
+            f"{subject} has previously proven {previous} measured minor units for this "
+            "metric - historical context for the reviewer, not a pass/fail bar."
+        ),
+        supporting_data=[
+            _supporting_fact(
+                "previous_high_water_mark_minor_units", previous, "learning_memory", metric
+            )
+        ],
+        confidence=Decimal("0.70"),
+        recommended_action=action,
+        sources=(SourceRef.tool("get_thresholds"),),
+        requires_human_review=False,
+    )
+
+
 def _facts_source_dataset(facts: object) -> str:
     """Name the measured source without assuming every provider is the demo world."""
     return str(getattr(facts, "source_dataset", "generated_world"))
@@ -109,8 +166,53 @@ def _event_source_dataset(event: Event, simulation_source: str) -> str:
     )
 
 
+def _enforce_critic_verdict(
+    *,
+    critic_passed: bool,
+    executive_action: RecommendedAction,
+    safe_action: RecommendedAction,
+) -> tuple[RecommendedAction, bool]:
+    """Make the critic's verdict binding on the executive's routing, not advisory.
+
+    This is the single authoritative home of the Critic->Executive contract for both
+    cascade layers. In the agentic layer the critic's verdict reaches the executive
+    only as prose inside a prompt, and prose is not enforcement: a hallucinating
+    executive can answer with the escalating action even though the critic failed the
+    work. In the deterministic layer the same contract holds by construction only if
+    every builder routes evidence, decision action, and decision status through this
+    one gate instead of re-deriving `x if critic_passed else y` per call site - the
+    golden builder shipped the escalating action on a failed verdict for exactly that
+    reason. A failed critic verdict always routes the safe action, and choosing the
+    safe action is always allowed regardless of the critic (an executive may be more
+    conservative than the critic, never less).
+
+    Returns (final_action, override_applied) so callers can put the override on the
+    decision record for auditability instead of hiding the disagreement.
+    """
+    if critic_passed or executive_action.type == safe_action.type:
+        return executive_action, False
+    return safe_action, True
+
+
+def _critic_gate_receipt(
+    *,
+    critic_passed: bool,
+    executive_action_type: str,
+    override_applied: bool,
+) -> dict[str, Any]:
+    """One auditable record of what each agent said and what the gate did about it."""
+    return {
+        "critic_passed": critic_passed,
+        "executive_action_type": executive_action_type,
+        "override_applied": override_applied,
+    }
+
+
 def run_golden_cascade(
-    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+    event: Event | None = None,
+    *,
+    facts: WorldFactsProvider | None = None,
+    learning: Any | None = None,
 ) -> dict[str, Any]:
     """Run the golden expiry-markdown scenario against the generated world.
 
@@ -315,16 +417,30 @@ def run_golden_cascade(
             requires_human_review=True,
         )
     )
+    history_evidence = _learned_threshold_evidence(
+        learning=learning,
+        action=markdown,
+        tenant_id=_event_tenant_id(event),
+        data_domain=_learning_data_domain(event),
+    )
+    if history_evidence is not None:
+        evidence.append(history_evidence)
 
     critic_passed = simulation.incremental_profit.cents > 0 and all(
         item.sources for item in evidence
     )
-    critic_action = markdown if critic_passed else monitor
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=markdown,
+        safe_action=monitor,
+    )
     evidence.append(
         EvidenceObject(
             agent=AgentName.CRITIC,
             conclusion=(
                 "Recommendation passes: it is sourced, math-backed, and requires HITL approval."
+                if critic_passed
+                else "Markdown does not recover measured value; monitor instead of discounting."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -335,9 +451,9 @@ def run_golden_cascade(
                 )
             ],
             confidence=Decimal("0.88"),
-            recommended_action=critic_action,
+            recommended_action=routed_action,
             sources=(SourceRef.tool("critic_gate"),),
-            requires_human_review=True,
+            requires_human_review=critic_passed,
         )
     )
     evidence.append(
@@ -345,6 +461,8 @@ def run_golden_cascade(
             agent=AgentName.EXECUTIVE,
             conclusion=(
                 f"Approve a 20% markdown for SKU {sku} now, then review outcome after 24 hours."
+                if critic_passed
+                else f"Hold the markdown for SKU {sku}; monitor until value at risk is measured."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -355,24 +473,33 @@ def run_golden_cascade(
                 )
             ],
             confidence=Decimal("0.86"),
-            recommended_action=markdown,
-            sources=(SourceRef.tool("executive_policy"),),
-            requires_human_review=True,
+            recommended_action=routed_action,
+            sources=(SourceRef.tool("executive_policy"), SourceRef.tool("critic_gate")),
+            requires_human_review=critic_passed,
         )
     )
 
     decision = Decision(
         id=_decision_id(event),
-        status=DecisionStatus.PENDING,
-        action=markdown,
+        status=DecisionStatus.PENDING if critic_passed else DecisionStatus.REJECTED,
+        action=routed_action,
         caused_by=(_cause_id(event, correlation_id),),
-        summary=f"Pending manager approval: 20% markdown for {product} at {scenario.location}.",
+        summary=(
+            f"Pending manager approval: 20% markdown for {product} at {scenario.location}."
+            if critic_passed
+            else f"Critic rejected the markdown for {product}; monitoring {scenario.location}."
+        ),
     )
     decision_payload = decision.to_dict()
     decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _GOLDEN_SCENARIO_ID
     decision_payload["role"] = "store_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=markdown.type,
+        override_applied=gate_override,
+    )
     decision_payload["expected_outcome"] = {
         "predicted_sell_through_units": _whole_units(simulation.markdown_units_sold),
         "predicted_waste_units": _whole_units(simulation.markdown_waste_units),
@@ -398,7 +525,10 @@ def run_golden_cascade(
 
 
 def run_procurement_cascade(
-    event: Event | None = None, *, facts: WorldFactsProvider | None = None
+    event: Event | None = None,
+    *,
+    facts: WorldFactsProvider | None = None,
+    learning: Any | None = None,
 ) -> dict[str, Any]:
     """Run the procurement role path: reorder policy plus measured supplier choice."""
 
@@ -561,8 +691,21 @@ def run_procurement_cascade(
             requires_human_review=True,
         )
     )
+    history_evidence = _learned_threshold_evidence(
+        learning=learning,
+        action=reorder,
+        tenant_id=_event_tenant_id(event),
+        data_domain=_learning_data_domain(event),
+    )
+    if history_evidence is not None:
+        evidence.append(history_evidence)
 
     critic_passed = policy.should_reorder and ranking.coverage >= Decimal("0.60")
+    routed_action, gate_override = _enforce_critic_verdict(
+        critic_passed=critic_passed,
+        executive_action=reorder,
+        safe_action=monitor,
+    )
     evidence.append(
         EvidenceObject(
             agent=AgentName.CRITIC,
@@ -579,7 +722,7 @@ def run_procurement_cascade(
                 )
             ],
             confidence=Decimal("0.89"),
-            recommended_action=reorder if critic_passed else monitor,
+            recommended_action=routed_action,
             sources=(SourceRef.tool("critic_gate"),),
             requires_human_review=critic_passed,
         )
@@ -590,6 +733,9 @@ def run_procurement_cascade(
             conclusion=(
                 f"Route a replenishment request for SKU {sku} to procurement, "
                 "with manager approval before any write-back."
+                if critic_passed
+                else f"Hold the reorder for SKU {sku}; supplier coverage or reorder policy "
+                "did not clear the critic's bar."
             ),
             supporting_data=[
                 _supporting_fact(
@@ -600,7 +746,7 @@ def run_procurement_cascade(
                 )
             ],
             confidence=Decimal("0.85"),
-            recommended_action=reorder if critic_passed else monitor,
+            recommended_action=routed_action,
             sources=(SourceRef.tool("executive_policy"), SourceRef.tool("critic_gate")),
             requires_human_review=critic_passed,
         )
@@ -609,15 +755,25 @@ def run_procurement_cascade(
     decision = Decision(
         id=_decision_id(event),
         status=DecisionStatus.PENDING if critic_passed else DecisionStatus.REJECTED,
-        action=reorder if critic_passed else monitor,
+        action=routed_action,
         caused_by=(_cause_id(event, correlation_id),),
-        summary=f"Pending procurement approval: reorder {product} from {top_supplier.supplier_id}.",
+        summary=(
+            f"Pending procurement approval: reorder {product} from {top_supplier.supplier_id}."
+            if critic_passed
+            else f"Critic rejected the reorder for {product}; "
+            f"monitoring {top_supplier.supplier_id}."
+        ),
     )
     decision_payload = decision.to_dict()
     decision_payload["tenant_id"] = _event_tenant_id(event)
     decision_payload["scenario_id"] = _PROCUREMENT_SCENARIO_ID
     decision_payload["role"] = "procurement_manager"
     decision_payload["critic_verdict"] = "approved" if critic_passed else "rejected"
+    decision_payload["critic_gate"] = _critic_gate_receipt(
+        critic_passed=critic_passed,
+        executive_action_type=reorder.type,
+        override_applied=gate_override,
+    )
     decision_payload["expected_outcome"] = {
         "suggested_order_units": str(policy.suggested_order_units),
         "stockout_risk": str(policy.stockout_risk),

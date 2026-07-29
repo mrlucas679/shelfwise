@@ -1,8 +1,23 @@
-from .canonical import InventoryState, ProductMaster, SalesLine, SourceSystem, StockState
+from .canonical import (
+    ExpiryEntry,
+    InventoryState,
+    ProductMaster,
+    SalesLine,
+    SourceSystem,
+    StockState,
+)
 from .catalog import (
     ConnectorCapability,
     connector_status_for_policy,
     list_connector_capabilities,
+)
+from .connector_test import (
+    CREDENTIAL_FIELDS,
+    TESTABLE_SYSTEMS,
+    ConnectionTestResult,
+    ConnectorTestNotSupported,
+    build_test_connector,
+    test_connection,
 )
 from .connectors import (
     CursorStore,
@@ -34,6 +49,23 @@ from .connectors.systems import (
     map_syspro_inventory,
     map_yoco_checkout,
 )
+from .credentials import (
+    ConnectorCredentialError,
+    CredentialEncryptionError,
+    InMemoryConnectorCredentialStore,
+    PostgresConnectorCredentialStore,
+    create_connector_credential_store,
+    decrypt_credential_fields,
+    encrypt_credential_fields,
+    resolve_connector_credentials,
+)
+from .csv_intake import (
+    CSV_INTAKE_KINDS,
+    CsvIntakeError,
+    CsvPreview,
+    build_records,
+    preview_csv,
+)
 from .gateway import (
     MAX_WEBHOOK_BYTES,
     QuarantineVerdict,
@@ -50,26 +82,52 @@ from .inbound_store import (
 )
 from .normalize import inventory_to_event, record_to_event
 from .provenance import InboundRecord, ValidationResult, raw_payload_hash
-from .validation import validate_inventory, validate_product, validate_sales
+from .validation import validate_expiry, validate_inventory, validate_product, validate_sales
+from .webhook_endpoints import (
+    WEBHOOK_SYSTEMS,
+    InMemoryWebhookEndpointRegistry,
+    PostgresWebhookEndpointRegistry,
+    WebhookEndpoint,
+    WebhookEndpointError,
+    WebhookSystemNotSupported,
+    create_webhook_endpoint_registry,
+    new_endpoint_credentials,
+    resolve_webhook_system,
+)
 from .writeback import PostgresTaskWriteBackSink, TaskWriteBackSink, create_writeback_sink
 
 __all__ = [
+    "CREDENTIAL_FIELDS",
+    "CSV_INTAKE_KINDS",
     "MAX_WEBHOOK_BYTES",
+    "TESTABLE_SYSTEMS",
+    "WEBHOOK_SYSTEMS",
+    "ConnectionTestResult",
     "ConnectorCapability",
+    "ConnectorCredentialError",
+    "ConnectorTestNotSupported",
+    "CredentialEncryptionError",
+    "CsvIntakeError",
+    "CsvPreview",
     "CursorStore",
     "DynamicsBusinessCentralInventoryConnector",
+    "ExpiryEntry",
     "IdentityMap",
+    "InMemoryConnectorCredentialStore",
     "InMemoryCursorStore",
     "InMemoryInboundRecordStore",
     "InMemoryWebhookDedupStore",
+    "InMemoryWebhookEndpointRegistry",
     "InboundRecord",
     "InventoryState",
     "LightspeedSaleWebhookReceiver",
     "OdooProductConnector",
     "PollingConnector",
+    "PostgresConnectorCredentialStore",
     "PostgresCursorStore",
     "PostgresInboundRecordStore",
     "PostgresTaskWriteBackSink",
+    "PostgresWebhookEndpointRegistry",
     "ProductMaster",
     "QuarantineVerdict",
     "SalesLine",
@@ -82,12 +140,21 @@ __all__ = [
     "SysproInventoryConnector",
     "TaskWriteBackSink",
     "ValidationResult",
+    "WebhookEndpoint",
+    "WebhookEndpointError",
     "WebhookReceiver",
+    "WebhookSystemNotSupported",
     "YocoCheckoutWebhookReceiver",
+    "build_records",
+    "build_test_connector",
     "connector_status_for_policy",
+    "create_connector_credential_store",
     "create_cursor_store",
     "create_inbound_record_store",
+    "create_webhook_endpoint_registry",
     "create_writeback_sink",
+    "decrypt_credential_fields",
+    "encrypt_credential_fields",
     "inventory_to_event",
     "list_connector_capabilities",
     "map_dynamics_inventory",
@@ -101,11 +168,17 @@ __all__ = [
     "map_yoco_checkout",
     "neutralise_formula",
     "neutralise_formula_text",
+    "new_endpoint_credentials",
     "parse_gs1",
+    "preview_csv",
     "quarantine_intake",
     "quarantine_webhook_body",
     "raw_payload_hash",
     "record_to_event",
+    "resolve_connector_credentials",
+    "resolve_webhook_system",
+    "test_connection",
+    "validate_expiry",
     "validate_inventory",
     "validate_product",
     "validate_sales",

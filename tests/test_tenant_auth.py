@@ -27,9 +27,11 @@ def _token(role: str, *, tenant_id: str = "sa_retail_demo", secret: str = "secre
     )
 
 
-def _scan_event(tenant_id: str = "sa_retail_demo") -> dict[str, object]:
+def _scan_event(
+    tenant_id: str = "sa_retail_demo", *, event_id: str | None = None
+) -> dict[str, object]:
     return {
-        "id": f"evt_auth_{tenant_id}",
+        "id": event_id or f"evt_auth_{tenant_id}",
         "type": "scan",
         "ts": "2026-07-06T10:14:00Z",
         "actor": "store_12",
@@ -101,6 +103,47 @@ def test_jwt_auth_mode_guards_ingest_tenant_and_approval_roles(
     assert blocked_approval.status_code == 403
     assert allowed_approval.status_code == 200
     assert allowed_approval.json()["decision"]["status"] == "approved"
+
+
+def test_approve_and_reject_record_the_real_authenticated_reviewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `review.reviewer` audit-trail field must be the actual authenticated user, not
+    a hardcoded placeholder - a decision approved by "alice" and one approved by "bob"
+    must not both silently claim the same reviewer identity."""
+    client = TestClient(app)
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "secret")
+
+    def _reviewer_token(user_id: str) -> dict[str, str]:
+        token = encode_hs256_token(
+            {
+                "tenant_id": "sa_retail_demo",
+                "user_id": user_id,
+                "role": "manager",
+                "exp": int(time.time()) + 3600,
+            },
+            secret="secret",
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    alice = _reviewer_token("alice")
+    bob = _reviewer_token("bob")
+
+    approved = client.post(
+        "/ingest", json=_scan_event(event_id="evt_auth_reviewer_alice"), headers=alice
+    )
+    approve_id = approved.json()["cascade"]["decision"]["id"]
+    approve_response = client.post(f"/decisions/{approve_id}/approve", headers=alice)
+
+    rejected = client.post(
+        "/ingest", json=_scan_event(event_id="evt_auth_reviewer_bob"), headers=bob
+    )
+    reject_id = rejected.json()["cascade"]["decision"]["id"]
+    reject_response = client.post(f"/decisions/{reject_id}/reject", headers=bob)
+
+    assert approve_response.json()["decision"]["review"]["reviewer"] == "alice"
+    assert reject_response.json()["decision"]["review"]["reviewer"] == "bob"
 
 
 def test_jwt_auth_mode_blocks_cross_tenant_decision_read_approve_and_reject(
@@ -366,7 +409,7 @@ def test_company_login_mints_the_trusted_owner_session(monkeypatch) -> None:
     assert ok.status_code == 200
     session = ok.json()["session"]
     assert session["role"] == "owner"
-    assert session["user_id"] == "owner@shop.test"
+    assert session["user_id"] != "owner@shop.test", "workforce identities must use opaque ids"
     assert "shelfwise_session" in ok.headers.get("set-cookie", "").lower() or ok.cookies, (
         "login must set the same session cookie the platform verifies"
     )

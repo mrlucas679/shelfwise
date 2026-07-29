@@ -4,12 +4,133 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-21 (supersedes the 2026-07-14 continuation log; that history lives in git)
-Branch: `developers` · Gates at time of writing: **761 passed / 16 env-gated skips** locally;
-**776 passed / 1 skipped** in current GitHub Actions CI against real Postgres + Redis
-([run 29789599559](https://github.com/mrlucas679/shelfwise/actions/runs/29789599559)); ruff
-clean; frontend `tsc --noEmit` clean; capability manifest **214 capabilities**,
-contract-verified.
+Date: 2026-07-29 (supersedes the 2026-07-28 update below; older entries are kept as history)
+Branch: `developers` · Final local gates: **951 passed / 21 environment-gated skips**;
+Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean;
+capability manifest **249 capabilities**, contract-verified
+(`sha256:5e0a4aa76d4f89e93365463cb52231e76daeef0e3830d8a0d5918b33e152a048`);
+Playwright golden path **12/12 passed** against isolated disposable
+ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
+installed frontend toolchain ran these gates directly.
+GitHub CI on implementation commit `abe6924` passed **971 tests / 1 skip** and **12/12 browser
+flows** with fresh Postgres/Redis, the distributable wheel, the production Compose topology,
+public-origin smoke, and the deployment shakedown. Push and pull-request Capability Contract
+workflows also passed for the exact SHA. Live AMD-model proof was not run because CI has no
+endpoint credentials; this remains explicitly external rather than being inferred from a green
+build.
+
+## 2026-07-29 adaptive attribution and production-readiness pass
+
+- ✅ ShelfWise now derives bounded, privacy-preserving step representations from its existing
+  TraceSpan, ModelCall, ToolExecution, EvidenceObject, and Decision receipts. It learns only
+  from structurally verified successes and reports warming, normal, suspicious, or failed
+  state through the existing trace API and Operations interface.
+- ✅ The capability is disabled by default. With the flag off, the prior trace response shape
+  and failed-model behavior are unchanged. It adds no event bus, trajectory store, database
+  migration, automatic replay, automatic training, or operational write.
+- ✅ References are isolated by tenant, data domain, and trajectory family. Failed model and
+  post-model schema/tool/grounding paths produce safe correlated traces without raw errors,
+  prompts, tool payloads, response text, secrets, or personal data.
+- ✅ Operational-twin traces can never become training candidates. Simulation candidates remain
+  review-only and replay always requires human approval.
+- ✅ Repository-wide completion, dead-code, technical-debt, hardcoding, dependency, database,
+  end-to-end, and production-readiness artifacts are under `reports/`. External live inference,
+  accelerator training, retailer pilot, and legal acceptance remain explicitly outside local
+  proof.
+
+## 2026-07-28 one-command startup and self-serve connection completeness
+
+- ✅ `scripts/start_shelfwise.py` provisions a shop, starts the Compose stack, waits for a
+  real health signal, and prints the console URL and first-login credentials in one command.
+  Re-running never regenerates existing secrets, which would otherwise make stored connector
+  credentials undecryptable and lock the owner out. A real run proved the .env-preservation
+  guard and the Docker-failure path; the successful-start path remains unproven because this
+  machine's disk is full and its Docker engine is unresponsive. See HANDOFF.md.
+
+- ✅ All nine supported source systems are now owner-connectable from the product with no
+  developer step. Poll-based ERPs use stored credentials with a live connection test;
+  Shopify, Square, Lightspeed, and Yoco use per-tenant signed webhook endpoints provisioned
+  in the console, removing the operator-held shared ingest key from the connection path.
+- ✅ Webhook endpoint secrets are encrypted at rest, returned exactly once, revocable, and
+  tenant-isolated; delivery attribution comes from the endpoint identity, never the payload.
+
+## 2026-07-28 product operations closure (plans 013-016)
+
+- ✅ Guided onboarding now requires an explicit confirmation of the current product-policy
+  templates per category; a superseded template version stops satisfying readiness instead of
+  silently reusing an old acknowledgement.
+- ✅ Decision queues are personalized by the verified workforce role through one server-owned
+  assignment matrix; the complete tenant ledger remains available and audit visibility is intact.
+- ✅ Monthly value reporting separates verified recovered amounts from estimated exposure.
+  Only recorded actual amounts count as verified; modeled outcomes are never summed into them.
+- ✅ Portable operations controls without a paid dependency: a stdlib health monitor with
+  bounded incident receipts, plus release/rollback and POPIA operator documentation.
+
+## 2026-07-28 guided onboarding and account readiness
+
+- ✅ Resumable **Setup guide** for company, store, data source, optional devices, optional
+  people, and final readiness review.
+- ✅ Owner-only `GET /onboarding/status` derives progress from authoritative tenant-scoped
+  stores; no client-provided completion state.
+- ✅ Guided CSV preview/commit and encrypted ERP credential flows are available directly in
+  onboarding; committed data or a configured connector satisfies the required data-source gate.
+- ✅ Named work accounts include first name, surname, work position, email, password, and
+  bounded operational role. A one-time platform key bootstraps the first opaque-ID owner;
+  owners invite staff by email, change roles, deactivate/reactivate, resend invitations, and
+  initiate recovery. Staff activate and choose their own password in the browser.
+- ✅ Signed invitation/reset tokens are expiring and single-use, only digests are stored,
+  account audit events contain identity IDs rather than PII, and role/password/activity changes
+  atomically advance the account session version so earlier workforce JWTs stop working.
+- ✅ Configured legacy-owner credentials migrate idempotently into the durable account store;
+  steady-state fallback is disabled unless emergency recovery is explicitly enabled.
+- ✅ Browser regressions cover full onboarding, connector connection, and device registration.
+- ✅ Runtime endpoint precedence and strict company-profile write payload bugs found during
+  real browser execution are fixed.
+- ✅ Deployment dependency drift is contract-checked: every `pyproject.toml` runtime
+  dependency must be present in `requirements.txt`, closing the clean-wheel import failure
+  that GitHub CI exposed for Cryptography.
+- ✅ Production migration drift is contract-checked for the durable encrypted edge-device
+  registry; fresh Postgres CI no longer depends on module-local runtime DDL.
+
+## 2026-07-23 technical-debt and readiness campaign
+
+A day-long, book-grounded technical-debt and correctness campaign (see `HANDOFF.md` for the
+full, dated record of every individual fix) closed real bugs across nine domains:
+decision-science math, multi-tenant isolation/auth, agentic guardrails, inventory/procurement,
+connectors, MLOps governance, the digital twin, chat streaming, and dependency/environment
+integrity. Highlights, not exhaustive (see HANDOFF.md for the complete list with file:line
+references and regression tests for each):
+
+- **MLOps skill promotion now genuinely gates on a recorded evaluation result** (a real
+  `EvaluationRecord` registry), not a client-supplied, unverified `measured_pass_rate` float -
+  this was the single highest-severity finding of the whole campaign, since it meant any
+  approver-role caller could previously promote any draft skill by asserting a perfect score
+  with zero evaluation ever run.
+- **Multi-tenant encrypted connector credentials** - a real subsystem (Fernet encryption,
+  RLS-scoped Postgres storage, owner-only CRUD API) closing the "single-tenant only" gap the
+  2026-07-14 connector-poll work had explicitly scoped out.
+- **Twin scenario (what-if) predictions no longer contaminate operational reads** - running a
+  scenario used to silently leak `PREDICTED`-lane values into `get_store()`/`fidelity()`'s
+  reported "real" state.
+- **Executive-conclusion grounding** across all 6 agentic cascades, correctly conditional so
+  the existing adversarial critic-override tests still hold.
+- **`/chat/stream` genuinely delivers incremental content** now, with the safety tradeoffs of
+  true live-token capture explained and deliberately avoided rather than built unsafely.
+- Three real, narrowly-scoped bugs fixed and regression-tested: a training eval gate using
+  naive substring matching, a tenant-blind write-rate limiter (real cross-tenant DoS vector),
+  and a CSV formula-neutralization routine that corrupted quoted fields containing commas.
+- **This session's own dependency-drift bug** (see above) - `cryptography`/`psycopg-pool`
+  present in `pyproject.toml` but never installed into the actual deployment `.venv`, caught
+  only because this pass insisted on booting the real server rather than trusting test output
+  alone.
+
+The two application gaps previously called open are now reconciled. The receiving ledger no
+longer claims to create, approve, or transmit purchase orders. Normalized operational
+`STOCK_UPDATE` and POS `SALE` events now update the tenant inventory-position ledger through an
+idempotent projection receipt: replay cannot double-decrement, overselling cannot make stock
+negative, missing baselines and unsupported fractional units remain visible failure receipts,
+and simulation events cannot enter the operational ledger. Live connector acceptance still
+requires a real retailer sandbox and credentials; that external proof is not inferred locally.
 
 **Every feature enabled by the supported application deployment profiles is implemented and
 covered by the applicable local or CI gate.** The six capability records marked `partial` are
@@ -78,6 +199,11 @@ not an oversight).
 - ✅ **Deterministic tier routing** (`conversation_routing.py`): routine/strong route computed
   from pre-inference facts, saved as an auditable `conversation-route-v1` receipt on every
   answer's metadata.
+- ✅ **Bounded adaptive evidence planning** (`retrieval_planning.py`): intent/risk signals select
+  live facts, decisions, learning, traces, conversation memory, and promoted skills before state
+  is read. The `retrieval-plan-v1` receipt records counts, omissions, freshness, conflicts,
+  inadequacy, and a hard maximum of one follow-up. Conflicting/inadequate evidence selects the
+  strong tier; account/help questions do not load operational state.
 - ✅ **Token-accounted context receipts** (`context_budget.py`): per-section token accounting
   validated against the 8,192-token allocation BEFORE network I/O; receipt on every answer.
 - ✅ Grounded agentic chat: real read-only platform tools, conclusions must cite tool numbers,
@@ -231,8 +357,11 @@ not an oversight).
 - ✅ Company-account login (landed 2026-07-17): `POST /auth/login` verifies the configured
   owner account with stdlib scrypt (honest 503 unconfigured, uniform 401 on failure with no
   field oracle, constant-shape comparison) and mints the exact owner-role JWT session cookie
-  the platform already verifies everywhere. Per-person staff accounts remain the multi-user
-  phase of the owner roadmap.
+  the platform already verifies everywhere.
+- ✅ Per-person work accounts: first-owner setup, owner-issued invitations, activation, normal
+  login, forced temporary-password replacement, forgot/reset, role changes, session-aware
+  deactivation/reactivation, identity-only audit, and tenant-scoped storage. Personalized
+  per-role queue routing remains a product refinement, not an account-creation gap.
 
 ## 10. Simulation, evaluation, and observability — ✅
 

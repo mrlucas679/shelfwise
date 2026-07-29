@@ -25,6 +25,24 @@ class ColdChainProfile:
     safe_max_c: float
     unsafe_above_c: float
 
+    def __post_init__(self) -> None:
+        """Enforce the class invariant `_status`/`predict_time_to_unsafe` both assume.
+
+        `_status` (feed.py) checks `unsafe_above_c` before `safe_max_c`, so an inverted
+        profile wouldn't misclassify "unsafe" - but `predict_time_to_unsafe`'s
+        `minutes_to_unsafe = (unsafe_above_c - current_temp) / slope` has no such ordering
+        defense: with `unsafe_above_c` below `safe_max_c`, a still-"safe" reading already
+        past the (lower) unsafe threshold produces a negative-then-clamped-to-zero
+        "minutes to unsafe," reporting an asset as already unsafe by prediction while
+        `_status` still reports it "safe" by direct reading - a self-contradictory alert.
+        """
+        if not self.safe_max_c < self.unsafe_above_c:
+            raise ValueError(
+                f"{self.name!r} cold-chain profile is invalid: safe_max_c "
+                f"({self.safe_max_c}) must be strictly below unsafe_above_c "
+                f"({self.unsafe_above_c})"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class Prediction:

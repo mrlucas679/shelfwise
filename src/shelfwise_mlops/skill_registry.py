@@ -160,6 +160,22 @@ class InMemorySkillRegistry:
                     return updated
             return None
 
+    def transition_status(
+        self, skill_id: str, *, expected_status: str, status: str, tenant_id: str | None = None
+    ) -> SkillManifest | None:
+        """Atomically transition a manifest only from its observed lifecycle state."""
+        with self._lock:
+            for owner in (tenant_id or _GLOBAL_TENANT, _GLOBAL_TENANT):
+                key = (owner, skill_id)
+                manifest = self._manifests.get(key)
+                if manifest is not None:
+                    if manifest.status != expected_status:
+                        return None
+                    updated = replace(manifest, status=status)
+                    self._manifests[key] = updated
+                    return updated
+            return None
+
     def clear(self) -> None:
         with self._lock:
             self._manifests.clear()
@@ -252,6 +268,28 @@ class PostgresSkillRegistry:
             conn.commit()
         return updated
 
+    def transition_status(
+        self, skill_id: str, *, expected_status: str, status: str, tenant_id: str | None = None
+    ) -> SkillManifest | None:
+        """Compare-and-set lifecycle state so stale promotion cannot revive retirement."""
+        current = self.get(skill_id, tenant_id=tenant_id)
+        if current is None:
+            return None
+        owner = current.tenant_id or _GLOBAL_TENANT
+        updated = replace(current, status=status)
+        with connect(self._database_url, tenant_id=owner) as conn:
+            row = conn.execute(
+                """
+                update shelfwise_skill_manifests
+                set status = %s, manifest = %s
+                where tenant_id = %s and skill_id = %s and status = %s
+                returning manifest
+                """,
+                (status, jsonb(updated.to_dict()), owner, skill_id, expected_status),
+            ).fetchone()
+            conn.commit()
+        return _manifest_from_dict(row["manifest"]) if row else None
+
     def clear(self) -> None:
         with connect(self._database_url, tenant_id=_GLOBAL_TENANT) as conn:
             conn.execute(
@@ -322,21 +360,41 @@ def promote(
     registry: Any,
     skill_id: str,
     *,
-    measured_pass_rate: float,
+    evaluation_registry: Any,
+    evaluation_id: str,
     tenant_id: str | None = None,
 ) -> SkillManifest:
-    """Flip draft -> promoted only when the skill clears its own evaluation bar."""
+    """Flip draft -> promoted only from a recorded, referenced passing evaluation."""
     manifest = registry.get(skill_id, tenant_id=tenant_id)
     if manifest is None:
         raise ValueError(f"unknown skill: {skill_id}")
     if manifest.status == "retired":
         raise ValueError("a retired skill cannot be promoted; re-register a new version")
-    if measured_pass_rate < manifest.minimum_pass_rate:
+    if evaluation_id not in manifest.evaluation_ids:
+        raise ValueError("evaluation is not referenced by this skill")
+    if tenant_id is None:
+        raise ValueError("tenant_id is required to promote a skill")
+    evaluation = evaluation_registry.get(evaluation_id, tenant_id=tenant_id)
+    if evaluation is None:
+        raise ValueError("recorded evaluation was not found for this tenant")
+    if not evaluation.gate_passed:
+        raise ValueError("recorded evaluation did not pass its gate")
+    if evaluation.pass_rate < manifest.minimum_pass_rate:
         raise ValueError(
-            f"measured pass rate {measured_pass_rate} is below the skill's required "
+            f"recorded pass rate {evaluation.pass_rate} is below the skill's required "
             f"{manifest.minimum_pass_rate}"
         )
-    return registry.set_status(skill_id, "promoted", tenant_id=tenant_id)
+    if manifest.status == "promoted":
+        return manifest
+    promoted = registry.transition_status(
+        skill_id,
+        expected_status="draft",
+        status="promoted",
+        tenant_id=tenant_id,
+    )
+    if promoted is None:
+        raise ValueError("skill lifecycle changed during promotion; retry with fresh evidence")
+    return promoted
 
 
 def retire(registry: Any, skill_id: str, *, tenant_id: str | None = None) -> SkillManifest:
@@ -444,7 +502,7 @@ def default_skill_manifests() -> tuple[SkillManifest, ...]:
         manifest(
             "delivery_status_lookup",
             "Delivery status lookup",
-            "Report open purchase orders and inbound delivery coverage for one SKU.",
+            "Report observed inbound shipment status and delivery coverage for one SKU.",
             "procurement",
             ("delivery", "shipment", "inbound", "arriving", "on order"),
             ("get_delivery_status",),

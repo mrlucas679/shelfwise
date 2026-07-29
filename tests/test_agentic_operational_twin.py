@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import shelfwise_backend.app as app_module
+import shelfwise_backend.routes_scenarios as scenarios_module
 from shelfwise_backend.app import app
 from shelfwise_backend.tenant import default_tenant_context
 from shelfwise_catalog import Product, ProductIdentifier, ProductVariant
@@ -137,7 +138,7 @@ def test_golden_agentic_route_resolves_operational_twin_facts(
             "data_domain": event.data_domain.value,
         }
 
-    monkeypatch.setattr(app_module, "run_golden_cascade_via_agents", spy)
+    monkeypatch.setattr(scenarios_module, "run_golden_cascade_via_agents", spy)
 
     client = TestClient(app)
     response = client.post(

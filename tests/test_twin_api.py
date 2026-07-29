@@ -4,6 +4,43 @@ from fastapi.testclient import TestClient
 
 import shelfwise_backend.app as app_module
 from shelfwise_backend.app import app
+from shelfwise_backend.routes_twin import _parse_events
+from shelfwise_backend.tenant import encode_hs256_token
+
+
+def test_twin_bootstrap_logs_a_malformed_historical_event_without_its_payload(caplog) -> None:
+    rows = [
+        {
+            "id": "evt_valid_001",
+            "type": "stock_update",
+            "ts": "2026-07-13T08:00:00Z",
+            "actor": "store_1",
+            "payload": {"store_id": "store_1", "sku": "SKU-1", "on_hand": 2},
+        },
+        {"id": "evt_bad_001", "payload": {"private_note": "do-not-log-this"}},
+    ]
+
+    events = _parse_events(rows)
+
+    assert [event.id for event in events] == ["evt_valid_001"]
+    assert "evt_bad_001" in caplog.text
+    assert "do-not-log-this" not in caplog.text
+
+
+def test_owner_can_onboard_a_store_without_entering_a_tenant_id(monkeypatch) -> None:
+    monkeypatch.setenv("SHELFWISE_AUTH_MODE", "jwt")
+    monkeypatch.setenv("TENANT_AUTH_SECRET", "test-secret")
+    token = encode_hs256_token(
+        {"tenant_id": "sa_retail_demo", "user_id": "owner_1", "role": "owner"},
+        secret="test-secret",
+    )
+    response = TestClient(app).post(
+        "/twin/onboarding/self-service",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"store_id": "owner_setup_store", "display_name": "Owner Setup Store"},
+    )
+    assert response.status_code == 200
+    assert response.json()["manifest"]["store_id"] == "owner_setup_store"
 
 
 def test_canonical_event_updates_exact_store_twin_without_replacing_cascade() -> None:

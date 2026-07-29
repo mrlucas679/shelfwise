@@ -23,6 +23,12 @@ until plans 001-003 are complete. Execute in order and update status after each 
 | 009 | Enforce roles for state-changing scenario routes | P1 | S | - | DONE |
 | 010 | Secure and rate-limit multimodal processing routes | P1 | M | - | DONE |
 | 011 | Make concurrent learning-threshold updates monotonic | P1 | M | - | DONE |
+| 012 | Productize client onboarding and workforce accounts | P1 | L | - | DONE |
+| 013 | Make category policy confirmation part of guided onboarding | P1 | M | 012 | DONE |
+| 014 | Personalize decision queues by workforce role | P1 | S | 012 | DONE |
+| 015 | Report monthly value recovered from verified outcome receipts | P1 | M | 014 | DONE |
+| 016 | Close product operations controls without paid dependencies | P1 | M | 013-015 | DONE |
+| 017 | Integrate adaptive failure attribution | P1 | M | 006 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 
@@ -101,3 +107,8 @@ README/HANDOFF/runbook drift, recent churn, and final run artifacts.
 
 Not exhaustively audited: every decision-science formula, all 3,429 lines of frontend behavior,
 notebook cell outputs, third-party Python advisories, and every Postgres query plan.
+# Productization direction (next)
+
+| Plan | Status | Priority | Depends on | Summary |
+|---|---|---:|---|---|
+| [012](012-productize-client-onboarding-and-workforce-accounts.md) | DONE | P1 | none | Browser-led client onboarding, workforce accounts, and bounded adaptive evidence planning. |

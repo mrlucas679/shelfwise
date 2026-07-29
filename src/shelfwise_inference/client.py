@@ -16,6 +16,24 @@ RunRecorder = Callable[[dict[str, Any]], None]
 _MAX_RECORDED_CHARS = 4_000
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Turn provider redirects into errors so credentials never change origin."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def _open_inference_request(
+    request: urllib.request.Request,
+    timeout: float | None = None,
+) -> Any:
+    """Open a live inference request without following HTTP redirects."""
+    return _NO_REDIRECT_OPENER.open(request, timeout=timeout)
+
+
 def _is_transient_provider_error(exc: urllib.error.URLError | InferenceError) -> bool:
     """Retry transport failures and explicitly transient HTTP responses once."""
     if isinstance(exc, InferenceError):
@@ -225,9 +243,7 @@ class OpenAICompatibleInferenceClient:
                 if remaining_timeout <= 0:
                     raise InferenceError("Inference provider request timed out")
                 try:
-                    with urllib.request.urlopen(
-                        request, timeout=remaining_timeout
-                    ) as response:
+                    with _open_inference_request(request, timeout=remaining_timeout) as response:
                         raw = json.loads(response.read().decode("utf-8"))
                     message, finish_reason = _extract_message(
                         raw, allow_tool_calls=bool(tools)
@@ -546,7 +562,7 @@ def stream_chat_deltas(
     )
     assembled: list[str] = []
     try:
-        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+        with _open_inference_request(request, timeout=effective_timeout) as response:
             for data in iter_sse_data_lines(response):
                 try:
                     chunk = json.loads(data)

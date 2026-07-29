@@ -9,7 +9,7 @@ from shelfwise_resilience.feed import ColdChainFeed
 from shelfwise_resilience.ingest import MONNIT_MAP, normalize
 from shelfwise_resilience.simulate import SIM_START, FridgeSpec, PowerScenario, simulate_site
 from shelfwise_resilience.telemetry import GeneratorState, PowerState, SignalKind, Transport
-from shelfwise_resilience.thermal import PROFILES, predict_time_to_unsafe
+from shelfwise_resilience.thermal import PROFILES, ColdChainProfile, predict_time_to_unsafe
 from shelfwise_resilience.valuation import spoilage_probability, stock_at_risk
 
 CHILLED = PROFILES["chilled"]
@@ -74,6 +74,18 @@ def test_predictor_forecasts_unsafe_before_it_happens():
     assert predict_time_to_unsafe(_readings_from_minute(OK, minute=10)[:6], profile=CHILLED) is None
 
 
+def test_cold_chain_profile_rejects_an_inverted_safety_threshold():
+    """`safe_max_c` must be strictly below `unsafe_above_c` - an inverted profile lets a
+    reading `_status` still classifies "safe" produce a self-contradictory prediction
+    (`minutes_to_unsafe` already at/past zero) from `predict_time_to_unsafe`."""
+    import pytest
+
+    with pytest.raises(ValueError, match="safe_max_c"):
+        ColdChainProfile(name="broken", safe_max_c=10.0, unsafe_above_c=5.0)
+    with pytest.raises(ValueError, match="safe_max_c"):
+        ColdChainProfile(name="degenerate", safe_max_c=5.0, unsafe_above_c=5.0)
+
+
 def test_diagnosis_truth_table():
     assert (
         diagnose(Snapshot(PowerState.OUTAGE, GeneratorState.FAILED, 0.26, 0.0)).diagnosis
@@ -103,6 +115,30 @@ def test_diagnosis_truth_table():
         diagnose(Snapshot(PowerState.MAINS, GeneratorState.OFF, 0.0, 180.0)).diagnosis
         is Diagnosis.NORMAL
     )
+    assert (
+        diagnose(Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.0, 180.0)).diagnosis
+        is Diagnosis.ON_GENERATOR
+    )
+
+
+def test_an_active_warming_trend_is_never_masked_by_a_low_fuel_notice():
+    """A live thermal risk to stock must surface even when the generator is also
+    reporting low fuel - the fuel notice is informational for later, warming is a
+    risk right now. Reproduced live before the fix: this exact snapshot returned
+    "on_generator / low fuel" with zero mention of the active warming trend, and
+    GeneratorState.LOW_FUEL had no test coverage at all before this pair of tests.
+    """
+    warming_and_low_fuel = diagnose(
+        Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.3, 180.0)
+    )
+    assert warming_and_low_fuel.diagnosis is Diagnosis.WARMING
+    assert "rising" in warming_and_low_fuel.headline.lower()
+
+    stable_and_low_fuel = diagnose(
+        Snapshot(PowerState.OUTAGE, GeneratorState.LOW_FUEL, 0.0, 180.0)
+    )
+    assert stable_and_low_fuel.diagnosis is Diagnosis.ON_GENERATOR
+    assert "fuel" in stable_and_low_fuel.headline.lower()
 
 
 def test_stock_at_risk_is_money_and_bounded():

@@ -5,7 +5,11 @@ from dataclasses import replace
 
 import pytest
 
-from shelfwise_inference.client import InferenceError, OpenAICompatibleInferenceClient
+from shelfwise_inference.client import (
+    InferenceError,
+    OpenAICompatibleInferenceClient,
+    _NoRedirectHandler,
+)
 from shelfwise_inference.config import InferenceConfig, ProviderKind
 
 
@@ -36,6 +40,22 @@ class _FakeHttpResponse:
         return None
 
 
+def test_live_inference_transport_refuses_http_redirects() -> None:
+    handler = _NoRedirectHandler()
+
+    assert (
+        handler.redirect_request(
+            request=None,
+            fp=None,
+            code=302,
+            msg="Found",
+            headers=None,
+            newurl="https://other.example/v1/chat/completions",
+        )
+        is None
+    )
+
+
 def test_missing_api_key_raises_and_records_error_run() -> None:
     recorded: list[dict] = []
     client = OpenAICompatibleInferenceClient(
@@ -52,7 +72,7 @@ def test_network_failure_raises_inference_error_and_records_it(monkeypatch) -> N
     def fake_urlopen(request, timeout=30):
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("shelfwise_inference.client._open_inference_request", fake_urlopen)
     recorded: list[dict] = []
     client = OpenAICompatibleInferenceClient(_config(), recorder=recorded.append)
 
@@ -74,7 +94,7 @@ def test_transient_network_failure_retries_once_within_timeout(monkeypatch) -> N
             raise urllib.error.URLError("connection reset")
         return _FakeHttpResponse(body)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("shelfwise_inference.client._open_inference_request", fake_urlopen)
     client = OpenAICompatibleInferenceClient(_config())
 
     result = client.chat_completions(
@@ -90,7 +110,7 @@ def test_transient_network_failure_retries_once_within_timeout(monkeypatch) -> N
 def test_non_json_200_body_raises_inference_error_and_records_it(monkeypatch) -> None:
     """A malformed success response must not escape as a raw, unrecorded ValueError."""
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(b"not json"),
     )
     recorded: list[dict] = []
@@ -106,7 +126,7 @@ def test_missing_choices_in_a_valid_200_body_raises_and_records_it(monkeypatch) 
     """A well-formed-but-wrong-shape response is a provider failure too, and must be recorded
     the same way as a network failure - not silently unrecorded."""
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(b'{"unexpected": "shape"}'),
     )
     recorded: list[dict] = []
@@ -121,7 +141,7 @@ def test_missing_choices_in_a_valid_200_body_raises_and_records_it(monkeypatch) 
 def test_http_200_provider_error_sentinel_is_rejected_and_recorded(monkeypatch) -> None:
     body = b'{"choices": [{"message": {"content": "Internal Server Error"}}]}'
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(body),
     )
     recorded: list[dict] = []
@@ -139,7 +159,7 @@ def test_http_200_provider_error_sentinel_retries_once(monkeypatch) -> None:
     ok_body = b'{"choices": [{"message": {"content": "ready"}}]}'
     bodies = iter((error_body, ok_body))
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(next(bodies)),
     )
 
@@ -156,7 +176,7 @@ def test_happy_path_returns_content_and_records_ok_run(monkeypatch) -> None:
         b'"usage": {"prompt_tokens": 5, "completion_tokens": 2}}'
     )
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(body),
     )
     recorded: list[dict] = []
@@ -173,7 +193,7 @@ def test_happy_path_returns_content_and_records_ok_run(monkeypatch) -> None:
 def test_explicit_provider_is_preserved_for_a_different_tier_endpoint(monkeypatch) -> None:
     body = b'{"choices": [{"message": {"content": "ready"}}]}'
     monkeypatch.setattr(
-        "urllib.request.urlopen",
+        "shelfwise_inference.client._open_inference_request",
         lambda request, timeout=30: _FakeHttpResponse(body),
     )
     config = replace(

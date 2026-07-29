@@ -176,11 +176,11 @@ def test_recall_demo_returns_a_truthful_still_processing_signal_not_a_fake_500(
     instead of the old blanket "did not produce a decision" 500 that implied a hard failure
     for what was actually just a slow but successful submission.
     """
-    from shelfwise_backend import app as app_module
+    from shelfwise_backend import routes_scenarios as scenarios_module
 
     monkeypatch.setenv("WORKER_ENABLED", "true")
     monkeypatch.setenv("SHELFWISE_SCENARIO_DRILL_WAIT_SECONDS", "0.3")
-    monkeypatch.setattr(app_module, "_DEMO_DRILL_POLL_S", 0.05)
+    monkeypatch.setattr(scenarios_module, "_DEMO_DRILL_POLL_S", 0.05)
     client = TestClient(app)
 
     response = client.post("/scenarios/recall")

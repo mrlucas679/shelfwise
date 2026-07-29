@@ -56,6 +56,14 @@ def test_chat_completions_url_preserves_query_string_with_v1_suffix() -> None:
     )
 
 
+def test_public_inference_config_never_exposes_url_userinfo() -> None:
+    public = _config("https://operator:password@inference.example:8443/v1").to_public_dict()
+
+    assert public["base_url_host"] == "inference.example:8443"
+    assert "operator" not in str(public)
+    assert "password" not in str(public)
+
+
 def test_provider_detection_requires_an_explicit_amd_declaration(monkeypatch) -> None:
     monkeypatch.setenv("LLM_BASE_URL", "https://api.fireworks.ai/inference/v1")
     monkeypatch.setenv("LLM_API_KEY", "fw-key")

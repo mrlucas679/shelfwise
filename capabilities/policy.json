@@ -81,6 +81,16 @@
       "status": "partial",
       "verification_nodeids": []
     },
+    "workflow:adaptive_failure_attribution": {
+      "note": "Disabled-by-default structured one-class monitoring over existing ShelfWise trace receipts.",
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_adaptive_attribution.py::test_disabled_flag_preserves_original_trace_contract",
+        "tests/test_adaptive_attribution.py::test_failed_model_run_becomes_safe_attributed_trace_when_enabled",
+        "tests/test_adaptive_attribution.py::test_post_model_orchestration_failure_is_captured_without_raw_exception",
+        "tests/test_adaptive_attribution.py::test_verified_successes_calibrate_and_locate_a_deviation"
+      ]
+    },
     "workflow:cold_chain": {
       "note": null,
       "status": null,

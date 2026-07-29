@@ -92,19 +92,24 @@ def diagnose(snapshot: Snapshot) -> DiagnosisResult:
             "Cooling is on but the unit is not holding temperature.",
             "Inspect the unit, load, and door state.",
         )
+    if rising:
+        # Checked before the low-fuel branch below: an active warming trend is a live
+        # thermal risk to stock right now, while a fuel-level notice is informational
+        # for later. Ordering low-fuel first silently dropped the warming signal
+        # whenever both were true simultaneously (found: zero test coverage existed
+        # for this combination, or for GeneratorState.LOW_FUEL at all).
+        return DiagnosisResult(
+            Diagnosis.WARMING,
+            Severity.WARNING,
+            "Temperature rising.",
+            "Investigate the cause.",
+        )
     if generator is GeneratorState.LOW_FUEL:
         return DiagnosisResult(
             Diagnosis.ON_GENERATOR,
             Severity.WARNING,
             "On generator with low fuel.",
             "Refuel generator before runtime expires.",
-        )
-    if rising:
-        return DiagnosisResult(
-            Diagnosis.WARMING,
-            Severity.WARNING,
-            "Temperature rising.",
-            "Investigate the cause.",
         )
     if power is PowerState.OUTAGE and generator is GeneratorState.RUNNING:
         return DiagnosisResult(

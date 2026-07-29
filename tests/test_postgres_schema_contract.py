@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import pytest
 
@@ -16,17 +17,23 @@ from shelfwise_backend.event_store import PostgresEventStore
 from shelfwise_backend.open_orders import PostgresOpenOrderStore
 from shelfwise_backend.worker.journal import PostgresJournal
 from shelfwise_catalog.store import PostgresProductCatalogStore
-from shelfwise_connectors import PostgresCursorStore, SourceSystem
+from shelfwise_connectors import (
+    PostgresConnectorCredentialStore,
+    PostgresCursorStore,
+    SourceSystem,
+)
 from shelfwise_connectors.inbound_store import PostgresInboundRecordStore
 from shelfwise_connectors.writeback import PostgresTaskWriteBackSink
+from shelfwise_edge import EdgeDevice, PostgresEdgeDeviceRegistry
 from shelfwise_inventory.store import PostgresInventoryPositionStore
 from shelfwise_memory import PostgresLearningStore
 from shelfwise_mlops import (
+    PostgresEvaluationRegistry,
     PostgresModelRunRegistry,
     PostgresPromptRegistry,
     PostgresTenantFactStore,
 )
-from shelfwise_storage import bind_tenant_context, reset_tenant_context
+from shelfwise_storage import bind_tenant_context, connect, reset_tenant_context
 from shelfwise_storage.tenant_profiles import PostgresTenantProfileStore
 from shelfwise_twin import (
     PostgresCalibrationRegistry,
@@ -66,6 +73,10 @@ def test_central_schema_supports_every_postgres_store(
             )
             is None
         )
+        assert PostgresConnectorCredentialStore(_DATABASE_URL).get(
+            tenant_id=_TENANT_ID, system=SourceSystem.SAP
+        ) is None
+        assert PostgresEdgeDeviceRegistry(_DATABASE_URL).get_active("schema-check-device") is None
         assert PostgresChatConversationStore(_DATABASE_URL).list(
             tenant_id=_TENANT_ID,
             user_id="schema-user",
@@ -108,6 +119,9 @@ def test_central_schema_supports_every_postgres_store(
             tenant_id=_TENANT_ID,
             data_domain="world_simulation",
         ) == []
+        assert PostgresEvaluationRegistry(_DATABASE_URL).get(
+            "schema-evaluation", tenant_id=_TENANT_ID
+        ) is None
         assert PostgresPromptRegistry(_DATABASE_URL).list(tenant_id=_TENANT_ID) == []
         assert PostgresTenantFactStore(_DATABASE_URL).list(
             tenant_id=_TENANT_ID,
@@ -248,6 +262,39 @@ def test_postgres_chat_lock_preserves_concurrent_messages_and_user_scope(
     ) is None
 
 
+def test_candidate_history_sequence_is_atomic_for_concurrent_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lifecycle burst must append every transition instead of racing on MAX(sequence)."""
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = "postgres_candidate_history_concurrency"
+    candidate_key = f"cand_{uuid4().hex}"
+    store = PostgresCandidateHistoryStore(_DATABASE_URL)
+
+    def record(index: int) -> int:
+        entry = store.record(
+            {
+                "tenant_id": tenant_id,
+                "data_domain": "operational_twin",
+                "candidate_key": candidate_key,
+                "status": f"transition_{index}",
+                "score": float(index),
+                "urgency": 1.0,
+                "exposure_units": 1,
+                "decision_id": None,
+            },
+            reason="concurrent_transition",
+        )
+        return entry.sequence
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sequences = list(pool.map(record, range(8)))
+
+    assert sorted(sequences) == list(range(1, 9))
+    entries = store.list(tenant_id, candidate_key)
+    assert sorted(entry.sequence for entry in entries) == list(range(1, 9))
+
+
 def test_concurrent_double_approve_learning_never_500s_and_records_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -292,6 +339,90 @@ def test_concurrent_double_approve_learning_never_500s_and_records_once(
     finally:
         reset_tenant_context(token)
     assert len([e for e in events if e["decision_id"] == decision["id"]]) == 1
+
+
+def test_concurrent_rerun_upsert_cannot_win_a_race_against_a_human_reject(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Race a cascade rerun's upsert() against a human's reject() on the same decision id
+    under real Postgres row-level locking, not just the sequential in-memory proof.
+
+    `upsert()` (`ON CONFLICT ... WHERE status NOT IN ('approved','rejected')`) and
+    `_transition()` (`UPDATE ... WHERE status = 'pending'`) are two independent
+    statements guarded by the same status discriminator, each evaluated against the
+    row's latest committed value at lock-acquisition time. Whichever ordering the
+    scheduler picks, the human's terminal decision must be the one left standing - a
+    self-heal replay or a retried worker delivery racing the same decision id must
+    never be able to reopen it to "pending" with a fresh action payload.
+    """
+    from uuid import uuid4
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"postgres_reject_race_{uuid4().hex[:10]}"
+    decision_id = f"dec_reject_race_{uuid4().hex[:10]}"
+    store = PostgresDecisionStore(_DATABASE_URL)
+
+    def seed() -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.upsert(
+                {
+                    "id": decision_id,
+                    "tenant_id": tenant_id,
+                    "data_domain": "world_simulation",
+                    "status": "pending",
+                    "action": {"type": "apply_markdown", "params": {"sku": "SKU-RACE"}},
+                }
+            )
+        finally:
+            reset_tenant_context(token)
+
+    seed()
+
+    def rerun_upsert() -> dict[str, object]:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.upsert(
+                {
+                    "id": decision_id,
+                    "tenant_id": tenant_id,
+                    "data_domain": "world_simulation",
+                    "status": "pending",
+                    "action": {
+                        "type": "apply_markdown",
+                        "params": {"sku": "SKU-RACE", "rerun": True},
+                    },
+                }
+            )
+        finally:
+            reset_tenant_context(token)
+
+    def human_reject() -> dict[str, object] | None:
+        token = bind_tenant_context(tenant_id)
+        try:
+            return store.reject(decision_id)
+        finally:
+            reset_tenant_context(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        upsert_future = pool.submit(rerun_upsert)
+        reject_future = pool.submit(human_reject)
+        upsert_future.result()
+        reject_future.result()
+
+    token = bind_tenant_context(tenant_id)
+    try:
+        final = store.get(decision_id)
+    finally:
+        reset_tenant_context(token)
+
+    assert final is not None
+    assert final["status"] == "rejected", (
+        "a concurrent cascade rerun must never leave a human-rejected decision pending"
+    )
+    assert final["action"]["params"].get("rerun") is not True, (
+        "the rerun's action payload must not overwrite the rejected decision's recorded action"
+    )
 
 
 def test_learning_threshold_never_regresses_for_distinct_concurrent_decisions(
@@ -454,3 +585,155 @@ def test_postgres_catalog_rejects_conflicting_identifier_remap(
         )
     finally:
         reset_tenant_context(token)
+
+
+def test_concurrent_conflicting_identifier_upserts_cannot_both_win(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two variants racing to claim the same real-world identifier (e.g. a supplier feed
+    and a POS scan both mapping the same GTIN to different SKUs at once) must not both
+    succeed under real Postgres concurrency.
+
+    A prior version checked for a conflict with a `select` and only then ran
+    `insert ... on conflict do update` - a classic check-then-act race where a concurrent
+    writer's insert could land between the select and the insert, and the unconditional
+    `do update` would silently overwrite it. The fix makes the `do update` itself
+    conditional (`where variant_id = excluded.variant_id`) so only one of two racing,
+    differently-targeted upserts can ever win - the other must observe the loser's row and
+    raise `ConflictingIdentifierError`, never silently overwrite it.
+    """
+    from uuid import uuid4
+
+    from shelfwise_catalog import (
+        ConflictingIdentifierError,
+        Product,
+        ProductIdentifier,
+        ProductVariant,
+    )
+
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    tenant_id = f"pg_catalog_identifier_race_{uuid4().hex[:10]}"
+    gtin = "6009999999999"
+    store = PostgresProductCatalogStore(_DATABASE_URL)
+
+    def seed() -> None:
+        token = bind_tenant_context(tenant_id)
+        try:
+            store.upsert_product(
+                Product(tenant_id=tenant_id, product_id="prod_race", name="Race Product")
+            )
+            store.upsert_variant(
+                ProductVariant(tenant_id=tenant_id, variant_id="var_a", product_id="prod_race")
+            )
+            store.upsert_variant(
+                ProductVariant(tenant_id=tenant_id, variant_id="var_b", product_id="prod_race")
+            )
+        finally:
+            reset_tenant_context(token)
+
+    seed()
+
+    def claim(variant_id: str) -> str:
+        token = bind_tenant_context(tenant_id)
+        try:
+            store.upsert_identifier(
+                ProductIdentifier(
+                    tenant_id=tenant_id, variant_id=variant_id, kind="gtin", value=gtin
+                )
+            )
+            return "won"
+        except ConflictingIdentifierError:
+            return "rejected"
+        finally:
+            reset_tenant_context(token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_a = pool.submit(claim, "var_a")
+        future_b = pool.submit(claim, "var_b")
+        outcomes = {future_a.result(), future_b.result()}
+
+    assert outcomes == {"won", "rejected"}, (
+        "exactly one racing upsert must win and the other must be rejected - both "
+        "winning would mean the identifier silently ended up mapped to whichever request "
+        "committed last"
+    )
+    token = bind_tenant_context(tenant_id)
+    try:
+        resolved = store.resolve_identifier(tenant_id=tenant_id, kind="gtin", value=gtin)
+    finally:
+        reset_tenant_context(token)
+    assert resolved is not None and resolved["variant_id"] in {"var_a", "var_b"}
+
+
+def test_postgres_connector_credentials_are_encrypted_at_rest_and_tenant_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The database column must never contain plaintext, and one tenant's stored ERP
+    credentials must never be returned when a different tenant's id is used to read - real
+    encryption, and isolation enforced by the same RLS every other tenant-scoped table in
+    this codebase relies on (see the exhaustive RLS-coverage audit in HANDOFF.md), not just
+    an incidental `where tenant_id = %s` that happened to be correct."""
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    monkeypatch.setenv("SHELFWISE_CREDENTIAL_ENCRYPTION_KEY", "pg-contract-test-key")
+    tenant_a = f"pg_cred_a_{uuid4().hex[:10]}"
+    tenant_b = f"pg_cred_b_{uuid4().hex[:10]}"
+    store = PostgresConnectorCredentialStore(_DATABASE_URL)
+    secret = f"sk_live_{uuid4().hex}"
+
+    store.upsert(tenant_id=tenant_a, system=SourceSystem.ODOO, fields={"api_key": secret})
+
+    # Read the raw column through the same tenant-bound, least-privilege app role. An
+    # unscoped read must return no rows because FORCE RLS is working, so it cannot prove
+    # ciphertext storage. The tenant-bound read exposes the stored value, not a decrypted
+    # application object, while preserving the production security boundary.
+    with connect(_DATABASE_URL, tenant_id=tenant_a) as conn:
+        row = conn.execute(
+            "select encrypted_payload from shelfwise_connector_credentials "
+            "where tenant_id = %s and system = %s",
+            (tenant_a, SourceSystem.ODOO.value),
+        ).fetchone()
+    assert row is not None
+    assert secret not in row["encrypted_payload"]
+
+    assert store.get(tenant_id=tenant_b, system=SourceSystem.ODOO) is None, (
+        "tenant_b must never read tenant_a's stored credentials"
+    )
+    assert store.get(tenant_id=tenant_a, system=SourceSystem.ODOO) == {"api_key": secret}
+
+
+def test_postgres_edge_device_secrets_are_encrypted_at_rest_and_survive_a_fresh_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A camera/sensor device credential must be encrypted at rest (same posture as
+    connector credentials) and must survive a process restart - constructing a *second*,
+    independent registry instance against the same database and reading the device back
+    is the real proof a redeploy would not silently break an already-connected camera."""
+    monkeypatch.setenv("SHELFWISE_AUTO_SCHEMA", "false")
+    monkeypatch.setenv("SHELFWISE_CREDENTIAL_ENCRYPTION_KEY", "pg-contract-test-key")
+    tenant_id = f"pg_edge_{uuid4().hex[:10]}"
+    device_id = f"edge_{uuid4().hex[:10]}"
+    secret = uuid4().bytes + uuid4().bytes
+
+    registry = PostgresEdgeDeviceRegistry(_DATABASE_URL)
+    registry.register(
+        EdgeDevice(device_id=device_id, tenant_id=tenant_id, store_id="store_1", hmac_secret=secret)
+    )
+
+    with connect(_DATABASE_URL, tenant_id=tenant_id) as conn:
+        row = conn.execute(
+            "select encrypted_secret from shelfwise_edge_devices where device_id = %s",
+            (device_id,),
+        ).fetchone()
+    assert row is not None
+    assert secret.hex() not in row["encrypted_secret"]
+    assert secret not in row["encrypted_secret"].encode("ascii", errors="ignore")
+
+    # A fresh instance (simulating a restart) must still resolve the same device by id.
+    restarted_registry = PostgresEdgeDeviceRegistry(_DATABASE_URL)
+    resolved = restarted_registry.get_active(device_id)
+    assert resolved is not None
+    assert resolved.tenant_id == tenant_id
+    assert resolved.hmac_secret == secret
+
+    assert restarted_registry.revoke(device_id, tenant_id=tenant_id, store_id="store_1") is True
+    assert restarted_registry.get_active(device_id) is None

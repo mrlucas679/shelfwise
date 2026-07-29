@@ -1,6 +1,7 @@
 import {
   Component,
   type CSSProperties,
+  type FormEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -10,6 +11,7 @@ import {
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { LoginScreen as WorkforceLoginScreen } from './LoginScreen'
 import { applyTheme, currentTheme, type Theme } from './theme'
 
 // ---------------------------------------------------------------------------
@@ -217,6 +219,8 @@ type ConnectorSystemRow = {
   write_back_mode?: string
   enabled_for_tenant?: boolean
   status?: string
+  credential_fields?: { key: string; label: string; secret?: boolean }[]
+  connection_test_supported?: boolean
 }
 type InboundRecordRow = {
   id?: string
@@ -252,6 +256,16 @@ type WritebackTaskRow = {
   action?: RecommendedAction
   created_at?: string
   data_domain?: DataDomain
+  completion_receipt?: JsonObject
+}
+type ValueStatement = {
+  month?: string
+  currency?: string
+  verified_recovered_minor_units?: number
+  verified_receipt_count?: number
+  estimated_opportunity_minor_units?: number
+  unverified_decision_count?: number
+  verified_receipts?: JsonObject[]
 }
 type OperationalSnapshot = {
   dataDomain: DataDomain
@@ -270,6 +284,7 @@ type OperationalSnapshot = {
   platformTools: JsonObject[]
   platformToolAudit: JsonObject[]
   writebackTasks: WritebackTaskRow[]
+  valueStatement: ValueStatement
   learningThresholds: JsonObject
   learningEvents: JsonObject[]
   productAttention: ProductAttentionPayload
@@ -284,7 +299,39 @@ type OperationalSnapshot = {
   observability: JsonObject
   worker: JsonObject
 }
-type DecisionLogResponse = { decisions?: Decision[] }
+type OnboardingStoreSummary = {
+  store_id: string
+  display_name: string
+  timezone: string
+  entity_count: number
+}
+type OnboardingStatus = {
+  tenant_id: string
+  ready_for_operations: boolean
+  required_steps: {
+    completed: number
+    total: number
+    next: 'company' | 'store' | 'data' | 'policies' | 'review'
+  }
+  company: { configured: boolean; name: string }
+  stores: OnboardingStoreSummary[]
+  data: {
+    configured: boolean
+    connector_systems: string[]
+    has_imported_records: boolean
+  }
+  policies: {
+    configured: boolean
+    confirmed_categories: string[]
+  }
+  devices: { active: number; total: number }
+  accounts: { active: number; total: number }
+}
+type DecisionLogResponse = {
+  decisions?: Decision[]
+  queue_view?: 'all' | 'assigned'
+  assignment?: { account_role?: string; decision_roles?: string[] }
+}
 type TransitionResult = { decision: Decision; learning_event?: LearningEvent | null }
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type Tone = 'ok' | 'warn' | 'risk' | 'info' | 'mute' | 'accent'
@@ -310,6 +357,15 @@ type StoredChatMessage = {
 type ChatConversation = ConversationSummary & { messages?: StoredChatMessage[] }
 type AgenticRunStatus = { state: 'running' | 'ok' | 'error'; detail: string }
 type UiIconName = 'attach' | 'close' | 'menu' | 'mic' | 'moon' | 'send' | 'stop' | 'sun'
+type AuthSessionPayload = {
+  session?: {
+    tenant_id?: string
+    user_id?: string
+    role?: string
+    must_change_password?: boolean
+  }
+  mode?: string
+}
 
 declare global {
   interface Window {
@@ -333,7 +389,8 @@ function runtimeConfig(): Window['SHELFWISE_CONFIG'] {
 }
 function configuredBase(): string {
   const env = import.meta.env as Record<string, string | undefined>
-  return (runtimeConfig()?.apiBase ?? env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
+  const runtimeBase = runtimeConfig()?.apiBase?.trim()
+  return runtimeBase || (env.VITE_API_BASE ?? env.VITE_API_BASE_URL ?? '').trim()
 }
 function apiKey(): string {
   // Deliberately runtime-config only (public/shelfwise-config.js, a deployment-owned
@@ -383,8 +440,22 @@ async function fetchFromUrls<T>(urls: string[], path: string, init: RequestInit,
   }
   throw new Error(`Could not reach ${path}. ${lastError}`)
 }
-async function ensureBrowserSession(signal: AbortSignal): Promise<void> {
-  await fetchJson<JsonObject>('/auth/session', { method: 'POST' }, signal)
+async function ensureBrowserSession(signal: AbortSignal): Promise<AuthSessionPayload> {
+  return fetchJson<AuthSessionPayload>('/auth/session', { method: 'POST' }, signal)
+}
+// Real client deployments run SHELFWISE_AUTH_MODE=jwt with public demo sessions correctly
+// disabled - /auth/session then answers 401 for a browser with no session cookie yet, and
+// there is no other identity to fall back to. Distinguishing this from a generic load
+// failure is what lets the app show a real login form instead of a dead error screen.
+function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof Error && /\b401\b/.test(error.message)
+}
+async function postLogin(email: string, password: string, signal: AbortSignal): Promise<AuthSessionPayload> {
+  return fetchJson<AuthSessionPayload>(
+    '/auth/login',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) },
+    signal,
+  )
 }
 const fetchScenario = (path: string, signal: AbortSignal) => fetchJson<GoldenScenario>(path, { method: 'POST' }, signal)
 async function fetchOptional<T>(path: string, signal: AbortSignal): Promise<T | null> {
@@ -536,6 +607,14 @@ function moneyMinorUnits(value: unknown): number | null {
   }
   return null
 }
+function formatZarMinor(value: unknown): string {
+  const minorUnits = Number(value ?? 0)
+  if (!Number.isFinite(minorUnits) || minorUnits <= 0) return 'R0'
+  return `R${(minorUnits / 100).toLocaleString('en-ZA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '-'
   const money = formatMoneyish(value)
@@ -568,6 +647,7 @@ function emptyOps(dataDomain: DataDomain = 'operational_twin'): OperationalSnaps
     platformTools: [],
     platformToolAudit: [],
     writebackTasks: [],
+    valueStatement: {},
     learningThresholds: {},
     learningEvents: [],
     productAttention: {},
@@ -589,6 +669,12 @@ function asObject(value: unknown): JsonObject {
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
+function deliveryIssueCount(deliveries: DeliveryException[], fallbackMissingUnits: unknown): number {
+  if (deliveries.length) {
+    return deliveries.filter((delivery) => Number(delivery.missing_units ?? 0) > 0).length
+  }
+  return Number(fallbackMissingUnits ?? 0) > 0 ? 1 : 0
+}
 function fieldText(row: JsonObject | undefined, key: string, fallback = '-'): string {
   const value = row?.[key]
   if (value === null || value === undefined || value === '') return fallback
@@ -597,6 +683,19 @@ function fieldText(row: JsonObject | undefined, key: string, fallback = '-'): st
 function fieldNumber(row: JsonObject | undefined, key: string): number {
   const n = Number(row?.[key])
   return Number.isFinite(n) ? n : 0
+}
+function traceAttributionDetail(trace: JsonObject): string {
+  const attribution = asObject(trace.adaptive_attribution)
+  const state = fieldText(attribution, 'state', '')
+  if (!state) return formatValue(trace.evidence_agents ?? [])
+  const references = fieldNumber(attribution, 'reference_successes')
+  const suspected = asObject(attribution.suspected_step)
+  const suspectedName = fieldText(suspected, 'name', '')
+  return [
+    `Attribution ${state}`,
+    `${references} verified reference${references === 1 ? '' : 's'}`,
+    suspectedName ? `suspected step: ${suspectedName}` : '',
+  ].filter(Boolean).join(' · ')
 }
 function optionalStatusTone(value: unknown): Tone | undefined {
   const status = String(value ?? '').toLowerCase()
@@ -1151,6 +1250,7 @@ function UserBubble({ text }: { text: string }) {
 // ---------------------------------------------------------------------------
 type SidebarPage = 'settings'
 type WorkspaceSurface =
+  | 'onboarding'
   | 'products'
   | 'twin'
   | 'to-order'
@@ -1158,6 +1258,7 @@ type WorkspaceSurface =
   | 'deliveries'
   | 'cold-chain'
   | 'connections'
+  | 'people'
   | 'operations'
   | 'results'
 type Recent = { id: string; title: string; active?: boolean }
@@ -1187,6 +1288,8 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Product search', method: 'GET', path: '/products/search', detail: 'Bounded search-first catalogue lookup.' },
   { label: 'Decisions', method: 'GET', path: '/decisions', detail: 'Decision ledger for approvals, history, and outcomes.' },
   { label: 'Decision detail', method: 'GET', path: '/decisions/{decision_id}', detail: 'Parameterized decision record behind approval rows.' },
+  { label: 'Verified value report', method: 'GET', path: '/reports/value-recovered', detail: 'Monthly receipt-backed recovered value separated from estimates.' },
+  { label: 'Onboarding policy templates', method: 'GET', path: '/onboarding/policies', detail: 'Current versioned product policies and tenant confirmations.' },
   { label: 'Learning', method: 'GET', path: '/learning', detail: 'Outcome learning thresholds and learning events.' },
   { label: 'Write-back tasks', method: 'GET', path: '/writeback/tasks', detail: 'Task-only write-back queue.' },
   { label: 'Events', method: 'GET', path: '/events', detail: 'Persisted canonical event log.' },
@@ -1203,6 +1306,7 @@ const OPERATION_READ_ENDPOINTS = [
   { label: 'Tenant profile', method: 'GET', path: '/tenants/me', detail: 'Current tenant/store profile and connector policy.' },
   { label: 'Inventory positions', method: 'GET', path: '/inventory/positions', detail: 'Tenant shelf, backroom, bin, quarantine, and returns ledger.' },
   { label: 'Connector catalogue', method: 'GET', path: '/connectors/systems', detail: 'Supported source-system connector capabilities.' },
+  { label: 'Tenant webhook endpoints', method: 'GET', path: '/connectors/webhook-endpoints', detail: 'This tenant\'s provisioned retailer webhook endpoints; signing secrets are never returned.' },
   { label: 'Tenant connectors', method: 'GET', path: '/connectors/me', detail: 'Connector status for the current tenant.' },
   { label: 'Inbound records', method: 'GET', path: '/connectors/inbound-records', detail: 'Connector intake and validation records.' },
   { label: 'Model runs', method: 'GET', path: '/mlops/model-runs', detail: 'Inference run ledger.' },
@@ -1228,17 +1332,45 @@ const OPERATION_READ_ENDPOINTS = [
 ]
 
 const GATED_ENDPOINTS = [
+  { label: 'Confirm onboarding policies', method: 'POST', path: '/onboarding/policies/confirm', group: 'operations', detail: 'Owner confirmation of the exact policy templates used by decisions.' },
   { label: 'Browser session', method: 'POST', path: '/auth/session', group: 'operations', detail: 'Issues or resumes the signed same-origin browser identity.' },
-  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/answer/done; deltas only from a live provider).' },
+  { label: 'Account setup status', method: 'GET', path: '/auth/setup-status', group: 'operations', detail: 'Reports whether this dedicated client workspace still needs its first owner.' },
+  { label: 'First company owner', method: 'POST', path: '/platform/bootstrap', group: 'operations', detail: 'One-time platform-authorized company and owner bootstrap.' },
+  { label: 'Chat stream', method: 'POST', path: '/chat/stream', group: 'operations', detail: 'SSE chat with a truthful lifecycle envelope (accepted/delta*/answer/done); the validated answer is delivered incrementally, not as live provider tokens.' },
   { label: 'Company login', method: 'POST', path: '/auth/login', group: 'operations', detail: 'Owner-account login (scrypt-verified) minting the trusted JWT session cookie.' },
+  { label: 'Activate invitation', method: 'POST', path: '/auth/activate', group: 'operations', detail: 'Consumes one signed, expiring workforce invitation and starts a session.' },
+  { label: 'Request password reset', method: 'POST', path: '/auth/password-reset/request', group: 'operations', detail: 'Sends a generic password-recovery response without disclosing account existence.' },
+  { label: 'Complete password reset', method: 'POST', path: '/auth/password-reset/consume', group: 'operations', detail: 'Consumes a single-use reset and invalidates earlier account sessions.' },
+  { label: 'Change own password', method: 'POST', path: '/auth/change-password', group: 'operations', detail: 'Replaces a temporary or current password and invalidates earlier sessions.' },
+  { label: 'List work accounts', method: 'GET', path: '/accounts', group: 'operations', detail: 'Owner-only: list store work accounts without password data.' },
+  { label: 'Create work account', method: 'POST', path: '/accounts', group: 'operations', detail: 'Owner-only: create a named staff account with a work role and position.' },
+  { label: 'Invite work account', method: 'POST', path: '/accounts/invitations', group: 'operations', detail: 'Owner-only: email a single-use activation link without choosing the worker’s password.' },
+  { label: 'Account audit', method: 'GET', path: '/accounts/audit', group: 'operations', detail: 'Owner-only: identity-only account lifecycle audit records.' },
+  { label: 'Resend work-account invitation', method: 'POST', path: '/accounts/{account_id}/invitation', group: 'operations', detail: 'Owner-only: replace and resend a pending invitation token.' },
+  { label: 'Send work-account recovery', method: 'POST', path: '/accounts/{account_id}/password-reset', group: 'operations', detail: 'Owner-only: send recovery without learning or setting the worker’s password.' },
+  { label: 'Change work-account role', method: 'POST', path: '/accounts/{account_id}/role', group: 'operations', detail: 'Owner-only: change a staff member’s operational role without duplicating their account.' },
+  { label: 'Deactivate work account', method: 'POST', path: '/accounts/{account_id}/deactivate', group: 'operations', detail: 'Owner-only: remove a staff account’s ability to sign in while retaining its audit identity.' },
+  { label: 'Reactivate work account', method: 'POST', path: '/accounts/{account_id}/reactivate', group: 'operations', detail: 'Owner-only: restore a previously deactivated staff account.' },
   { label: 'Chat', method: 'POST', path: '/chat', group: 'operations', detail: 'Composer-backed ShelfWise chat; API-key gated when configured.' },
   { label: 'Connector intake', method: 'POST', path: '/connectors/{system}/intake', group: 'connections', detail: 'Webhook/poll payload intake; API-key and role gated.' },
+  { label: 'Connector credential status', method: 'GET', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Whether this tenant has stored credentials for a system - never returns the values.' },
+  { label: 'Connector credential store', method: 'POST', path: '/connectors/{system}/credentials', group: 'connections', detail: 'Owner-only: store this tenant\'s own encrypted ERP credentials, used in place of the shared env-var default.' },
+  { label: 'Connector credential delete', method: 'POST', path: '/connectors/{system}/credentials/delete', group: 'connections', detail: 'Owner-only: remove this tenant\'s stored credentials, reverting that system to the shared env-var default.' },
+  { label: 'Connector credential test', method: 'POST', path: '/connectors/{system}/credentials/test', group: 'connections', detail: 'Owner-only: live-probe a poll-based system with posted or stored credentials before relying on them.' },
+  { label: 'Provision webhook endpoint', method: 'POST', path: '/connectors/{system}/webhook-endpoint', group: 'connections', detail: 'Owner-only: mint this tenant\'s own signing secret for a retailer webhook; returned exactly once.' },
+  { label: 'Revoke webhook endpoint', method: 'POST', path: '/connectors/webhook-endpoints/{endpoint_id}/revoke', group: 'connections', detail: 'Owner-only: disable one of this tenant\'s provisioned retailer webhook endpoints.' },
+  { label: 'Tenant webhook delivery', method: 'POST', path: '/connectors/webhook/{endpoint_id}', group: 'connections', detail: 'Retailer delivery authenticated by this tenant\'s signature alone - no operator API key.' },
+  { label: 'CSV import preview', method: 'POST', path: '/intake/csv/preview', group: 'connections', detail: 'Dry-run a client CSV: inferred column mapping and per-row validation, no writes.' },
+  { label: 'CSV import commit', method: 'POST', path: '/intake/csv/commit', group: 'connections', detail: 'Idempotent CSV import through the connector pipeline; invalid rows quarantine with provenance.' },
   { label: 'Event ingest', method: 'POST', path: '/ingest', group: 'operations', detail: 'Canonical event ingest; validates tenant and source payloads.' },
   { label: 'Twin observation ingest', method: 'POST', path: '/twin/observations', group: 'connections', detail: 'Tenant-bound derived observation intake; raw media is rejected.' },
   { label: 'Twin onboarding', method: 'POST', path: '/twin/onboarding', group: 'connections', detail: 'Binds one named shop and seeds its tenant-scoped topology.' },
+  { label: 'Self-service store setup', method: 'POST', path: '/twin/onboarding/self-service', group: 'connections', detail: 'Owner-only: create a store without exposing an internal tenant identifier.' },
   { label: 'Twin event bootstrap', method: 'POST', path: '/twin/stores/{store_id}/bootstrap', group: 'operations', detail: 'Replays existing canonical events into the twin without rerunning cascades.' },
   { label: 'Signed edge observations', method: 'POST', path: '/twin/edge/observations', group: 'connections', detail: 'HMAC-authenticated derived edge facts; raw frames never enter the twin.' },
   { label: 'Twin calibration', method: 'POST', path: '/twin/stores/{store_id}/calibration', group: 'connections', detail: 'Records a bounded sensor/reference calibration result.' },
+  { label: 'Camera/sensor device register', method: 'POST', path: '/twin/stores/{store_id}/devices', group: 'connections', detail: 'Owner-only: provision an HMAC credential for a camera/sensor system to push structured events - never raw video.' },
+  { label: 'Camera/sensor device revoke', method: 'POST', path: '/twin/stores/{store_id}/devices/{device_id}/revoke', group: 'connections', detail: 'Owner-only: disable a previously issued camera/sensor device credential.' },
   { label: 'Twin scenario', method: 'POST', path: '/twin/stores/{store_id}/scenarios', group: 'intelligence', detail: 'Runs an isolated what-if branch without changing reported state.' },
   { label: 'Barcode scan', method: 'POST', path: '/scan/barcode', group: 'connections', detail: 'Multimodal SKU lookup from barcode input.' },
   { label: 'Confirm reviewed scan', method: 'POST', path: '/scan/candidates/confirm', group: 'connections', detail: 'Promotes one manager-reviewed scanner candidate into canonical ingest.' },
@@ -1412,7 +1544,7 @@ function Sidebar({
   data,
   seed,
   ops,
-  recoveredToday,
+  verifiedThisMonth,
 }: {
   open: boolean
   onClose: () => void
@@ -1426,7 +1558,7 @@ function Sidebar({
   data: GoldenScenario | null
   seed: SeedSummary | null
   ops: OperationalSnapshot
-  recoveredToday: string | null
+  verifiedThisMonth: string | null
 }) {
   const intel = data?.store_intelligence
   const cover = intel?.supplier_cover
@@ -1485,8 +1617,10 @@ function Sidebar({
   const orderCount = apiToOrderCount || (cover?.transfer_units_recommended ? 1 : 0)
   const sellFirstUnits = Number(intel?.batch_split?.priority_sell_units ?? 0)
   const sellFirstProducts = apiSellFirstCount || (intel?.batch_split && sellFirstUnits > 0 ? 1 : 0)
-  const deliveryShortUnits = Number(intel?.delivery_reconciliation?.missing_units ?? 0)
-  const deliveryIssues = deliveryShortUnits > 0 ? 1 : 0
+  const deliveryIssues = deliveryIssueCount(
+    asArray<DeliveryException>(ops.productAttention.deliveries),
+    intel?.delivery_reconciliation?.missing_units,
+  )
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true
   const coldChainValue = data?.scenario === 'cold_chain' || ops.coldChainEvents.length ? 'review' : coldRunning ? 'live' : coldEnabled ? 'armed' : 'clear'
@@ -1685,9 +1819,9 @@ function Sidebar({
                     onOpen={() => openWorkspace('products')}
                   />
                   <NavRow
-                    label="Today's results"
-                    value={recoveredToday ?? 'R0'}
-                    tone={recoveredToday ? 'ok' : undefined}
+                    label="Verified value"
+                    value={verifiedThisMonth ?? 'R0'}
+                    tone={verifiedThisMonth ? 'ok' : undefined}
                     active={activeWorkspace === 'results'}
                     onOpen={() => openWorkspace('results')}
                   />
@@ -1702,10 +1836,22 @@ function Sidebar({
                 <div className="sidebar-section">
                   <div className="sidebar-kicker">System</div>
                   <NavRow
+                    label="Setup guide"
+                    value="guided"
+                    active={activeWorkspace === 'onboarding'}
+                    onOpen={() => openWorkspace('onboarding')}
+                  />
+                  <NavRow
                     label="Connections"
                     value={`${connectorCount} systems`}
                     active={activeWorkspace === 'connections'}
                     onOpen={() => openWorkspace('connections')}
+                  />
+                  <NavRow
+                    label="People & access"
+                    value="work accounts"
+                    active={activeWorkspace === 'people'}
+                    onOpen={() => openWorkspace('people')}
                   />
                   <NavRow
                     label="Operations"
@@ -1942,6 +2088,373 @@ function WorkspaceEmpty({ children }: { children: ReactNode }) {
   return <p className="workspace-empty">{children}</p>
 }
 
+type ConnectorCredentialField = { key: string; label: string; secret?: boolean }
+type ConnectorCredentialSystem = {
+  system: string
+  label: string
+  fields: ConnectorCredentialField[]
+  connectionTestSupported: boolean
+}
+type ConnectionTestOutcome = { status: string; ok: boolean; detail: string }
+
+/** Self-serve "connect your ERP/POS" panel: the actual UI a store owner uses to store
+ * their own encrypted connector credentials (POST /connectors/{system}/credentials, owner
+ * role only - see routes_connector_credentials.py) instead of an operator hand-editing
+ * env vars. Values are never re-displayed once saved - only whether a system is
+ * configured (GET .../credentials returns configured: bool, never the stored fields).
+ *
+ * The field list itself is fetched from GET /connectors/systems (credential_fields,
+ * catalog.py) instead of being duplicated here, so adding a new poll-based system is a
+ * backend catalog entry, not a frontend code change - see connector_test.CREDENTIAL_FIELDS
+ * for the single source of truth. */
+function ConnectorCredentialsPanel({ onChanged }: { onChanged?: () => void } = {}) {
+  const [systems, setSystems] = useState<ConnectorCredentialSystem[]>([])
+  const [status, setStatus] = useState<Record<string, boolean>>({})
+  const [openSystem, setOpenSystem] = useState<string | null>(null)
+  const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [busySystem, setBusySystem] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<Record<string, string>>({})
+  const [testResult, setTestResult] = useState<Record<string, ConnectionTestOutcome>>({})
+  const [testingSystem, setTestingSystem] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchJson<{ systems?: ConnectorSystemRow[] }>('/connectors/systems', {}, controller.signal)
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        const credentialSystems = (payload.systems ?? [])
+          .filter((row) => (row.credential_fields?.length ?? 0) > 0 && row.system && row.label)
+          .map((row) => ({
+            system: row.system as string,
+            label: row.label as string,
+            fields: row.credential_fields ?? [],
+            connectionTestSupported: Boolean(row.connection_test_supported),
+          }))
+        setSystems(credentialSystems)
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
+  const refreshStatus = useCallback(() => {
+    if (!systems.length) return () => undefined
+    const controller = new AbortController()
+    Promise.all(
+      systems.map((entry) =>
+        fetchJson<{ configured?: boolean }>(`/connectors/${entry.system}/credentials`, {}, controller.signal)
+          .then((payload) => [entry.system, Boolean(payload.configured)] as const)
+          .catch(() => [entry.system, undefined] as const),
+      ),
+    ).then((pairs) => {
+      if (controller.signal.aborted) return
+      setStatus((prev) => {
+        const next = { ...prev }
+        for (const [system, configured] of pairs) {
+          if (configured !== undefined) next[system] = configured
+        }
+        return next
+      })
+    })
+    return () => controller.abort()
+  }, [systems])
+
+  useEffect(() => refreshStatus(), [refreshStatus])
+
+  const openForm = (entry: ConnectorCredentialSystem) => {
+    setOpenSystem(entry.system)
+    setFormValues(Object.fromEntries(entry.fields.map((field) => [field.key, ''])))
+    setRowError((prev) => ({ ...prev, [entry.system]: '' }))
+    setTestResult((prev) => ({ ...prev, [entry.system]: undefined as unknown as ConnectionTestOutcome }))
+  }
+
+  const missingFields = (entry: ConnectorCredentialSystem) =>
+    entry.fields.filter((field) => !formValues[field.key]?.trim())
+
+  const testConnection = async (entry: ConnectorCredentialSystem, useSavedCredentials: boolean) => {
+    if (!useSavedCredentials) {
+      const missing = missingFields(entry)
+      if (missing.length) {
+        setRowError((prev) => ({ ...prev, [entry.system]: `${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required before testing.` }))
+        return
+      }
+    }
+    setTestingSystem(entry.system)
+    setRowError((prev) => ({ ...prev, [entry.system]: '' }))
+    const controller = new AbortController()
+    try {
+      const outcome = await fetchJson<ConnectionTestOutcome>(
+        `/connectors/${entry.system}/credentials/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(useSavedCredentials ? {} : { fields: formValues }),
+        },
+        controller.signal,
+      )
+      setTestResult((prev) => ({ ...prev, [entry.system]: outcome }))
+    } catch (testError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: testError instanceof Error ? testError.message : String(testError) }))
+    } finally {
+      setTestingSystem(null)
+    }
+  }
+
+  const submitForm = async (entry: ConnectorCredentialSystem) => {
+    const missing = missingFields(entry)
+    if (missing.length) {
+      setRowError((prev) => ({ ...prev, [entry.system]: `${missing.map((f) => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required.` }))
+      return
+    }
+    setBusySystem(entry.system)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/connectors/${entry.system}/credentials`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: formValues }),
+        },
+        controller.signal,
+      )
+      setOpenSystem(null)
+      setFormValues({})
+      setStatus((prev) => ({ ...prev, [entry.system]: true }))
+      onChanged?.()
+    } catch (submitError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: submitError instanceof Error ? submitError.message : String(submitError) }))
+    } finally {
+      setBusySystem(null)
+    }
+  }
+
+  const disconnect = async (entry: ConnectorCredentialSystem) => {
+    setBusySystem(entry.system)
+    const controller = new AbortController()
+    try {
+      await fetchJson(`/connectors/${entry.system}/credentials/delete`, { method: 'POST' }, controller.signal)
+      setStatus((prev) => ({ ...prev, [entry.system]: false }))
+      setTestResult((prev) => ({ ...prev, [entry.system]: undefined as unknown as ConnectionTestOutcome }))
+      onChanged?.()
+    } catch (deleteError) {
+      setRowError((prev) => ({ ...prev, [entry.system]: deleteError instanceof Error ? deleteError.message : String(deleteError) }))
+    } finally {
+      setBusySystem(null)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect your systems" count={pluralLabel(systems.length, 'system')}>
+      <p className="workspace-empty">
+        Store your own ERP/POS credentials here - encrypted at rest, never shown again once saved.
+        Owner login required. Test the connection before saving to confirm the values actually work.
+        Webhook-based systems (Shopify, Square, Lightspeed, Yoco) connect via a shared webhook secret
+        instead and are configured with us directly, not here.
+      </p>
+      <div className="workspace-list connector-credentials">
+        {systems.map((entry) => {
+          const configured = status[entry.system]
+          const isOpen = openSystem === entry.system
+          const busy = busySystem === entry.system
+          const testing = testingSystem === entry.system
+          const result = testResult[entry.system]
+          return (
+            <div className="connector-credential-row" key={entry.system}>
+              <WorkspaceRow
+                label={entry.label}
+                meta={configured === undefined ? 'checking status…' : configured ? 'Connected' : 'Not connected'}
+                detail={rowError[entry.system] || undefined}
+                value={configured ? 'connected' : 'not connected'}
+                tone={configured ? 'ok' : undefined}
+                onSelect={() => (isOpen ? setOpenSystem(null) : openForm(entry))}
+              />
+              {isOpen ? (
+                <div className="connector-credential-form">
+                  {entry.fields.map((field) => (
+                    <label className="login-field" key={field.key}>
+                      <span>{field.label}</span>
+                      <input
+                        type={field.secret ? 'password' : 'text'}
+                        value={formValues[field.key] ?? ''}
+                        onChange={(e) => setFormValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                        disabled={busy || testing}
+                      />
+                    </label>
+                  ))}
+                  {result ? (
+                    <p className={result.ok ? 'workspace-empty' : 'login-error'}>
+                      {result.ok ? 'Connection test passed: ' : 'Connection test failed: '}
+                      {result.detail}
+                    </p>
+                  ) : null}
+                  <div className="connector-credential-actions">
+                    {entry.connectionTestSupported ? (
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        disabled={busy || testing}
+                        onClick={() => testConnection(entry, false)}
+                      >
+                        {testing ? 'Testing…' : 'Test connection'}
+                      </button>
+                    ) : null}
+                    <button className="btn btn-primary" type="button" disabled={busy || testing} onClick={() => submitForm(entry)}>
+                      {busy ? 'Saving…' : configured ? 'Update' : 'Connect'}
+                    </button>
+                    {configured ? (
+                      <button className="btn btn-secondary" type="button" disabled={busy || testing} onClick={() => disconnect(entry)}>
+                        Disconnect
+                      </button>
+                    ) : null}
+                    <button className="btn btn-ghost" type="button" disabled={busy || testing} onClick={() => setOpenSystem(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </WorkspaceSection>
+  )
+}
+
+type EdgeDeviceRow = { device_id: string; store_id: string; active: boolean }
+
+/** Self-serve "connect a camera or sensor" panel. This is the real answer to "can a shop
+ * just connect their existing camera system": most commercial retail camera/people-counting
+ * systems push structured events via their own webhook or REST API rather than streaming
+ * raw video to a third party - this panel provisions the HMAC credential a shop points that
+ * existing integration at (POST /twin/stores/{store_id}/devices, owner role only). Raw video
+ * ingestion/processing is a separate, much larger computer-vision project and is not what
+ * this panel does - the help text says so plainly rather than implying otherwise. */
+function EdgeDeviceRegistrationPanel({
+  storeId,
+  onChanged,
+}: {
+  storeId: string
+  onChanged?: () => void
+}) {
+  const [devices, setDevices] = useState<EdgeDeviceRow[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [justRegistered, setJustRegistered] = useState<{ deviceId: string; secret: string } | null>(null)
+
+  const refresh = useCallback(() => {
+    const controller = new AbortController()
+    fetchJson<{ devices?: EdgeDeviceRow[] }>(
+      `/twin/stores/${encodeURIComponent(storeId)}/devices`,
+      {},
+      controller.signal,
+    )
+      .then((payload) => {
+        if (!controller.signal.aborted) setDevices(Array.isArray(payload.devices) ? payload.devices : [])
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [storeId])
+
+  useEffect(() => refresh(), [refresh])
+
+  const register = async () => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      const payload = await fetchJson<{ device_id: string; hmac_secret: string }>(
+        `/twin/stores/${encodeURIComponent(storeId)}/devices`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+        controller.signal,
+      )
+      setJustRegistered({ deviceId: payload.device_id, secret: payload.hmac_secret })
+      refresh()
+      onChanged?.()
+    } catch (registerError) {
+      setError(registerError instanceof Error ? registerError.message : String(registerError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async (deviceId: string) => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/twin/stores/${encodeURIComponent(storeId)}/devices/${encodeURIComponent(deviceId)}/revoke`,
+        { method: 'POST' },
+        controller.signal,
+      )
+      if (justRegistered?.deviceId === deviceId) setJustRegistered(null)
+      refresh()
+      onChanged?.()
+    } catch (revokeError) {
+      setError(revokeError instanceof Error ? revokeError.message : String(revokeError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect a camera or sensor" count={pluralLabel(devices.length, 'device')}>
+      <p className="workspace-empty">
+        If your camera or people-counting system can push structured events to a webhook or
+        REST API (most commercial retail systems can), register a device credential here and
+        point that integration at it. This is not raw video streaming or storage - ShelfWise
+        never receives or stores camera frames, only the derived facts your system already
+        computes (occupancy, temperature, door-open events, and similar).
+      </p>
+      {error ? <p className="login-error">{error}</p> : null}
+      {justRegistered ? (
+        <div className="connector-credential-form">
+          <p className="workspace-empty">
+            <strong>Save this now - it will not be shown again.</strong>
+          </p>
+          <label className="login-field">
+            <span>Device ID</span>
+            <input type="text" readOnly value={justRegistered.deviceId} />
+          </label>
+          <label className="login-field">
+            <span>HMAC secret</span>
+            <input type="text" readOnly value={justRegistered.secret} />
+          </label>
+          <div className="connector-credential-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => setJustRegistered(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="workspace-list connector-credentials">
+        {devices.map((device) => (
+          <div className="connector-credential-row" key={device.device_id}>
+            <WorkspaceRow
+              label={device.device_id}
+              meta={device.active ? 'Active' : 'Revoked'}
+              value={device.active ? 'active' : 'revoked'}
+              tone={device.active ? 'ok' : undefined}
+            />
+            {device.active ? (
+              <div className="connector-credential-actions" style={{ padding: '0 2px 12px' }}>
+                <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => revoke(device.device_id)}>
+                  Revoke
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div className="connector-credential-actions" style={{ padding: '4px 2px' }}>
+        <button className="btn btn-primary" type="button" disabled={busy} onClick={register}>
+          {busy ? 'Registering…' : 'Register a new device'}
+        </button>
+      </div>
+    </WorkspaceSection>
+  )
+}
+
 function batchExpiryText(batch: FefoBatch): string {
   const d = batch.days_to_expiry
   if (d == null) return 'No expiry date'
@@ -2000,6 +2513,13 @@ function productRows(items: ProductCatalogItem[]): WorkspaceRowProps[] {
 
 function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: string; status: string; subtitle: string } {
   switch (surface) {
+    case 'onboarding':
+      return {
+        title: 'Set up ShelfWise',
+        kicker: 'First-store guide',
+        status: 'resumable',
+        subtitle: 'Create the company and store, connect one real data source, then add devices and work accounts when needed.',
+      }
     case 'twin':
       return {
         title: 'Store twin',
@@ -2049,6 +2569,13 @@ function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: stri
         status: 'read first',
         subtitle: 'Systems feeding stock, POS, delivery, and catalogue facts into ShelfWise.',
       }
+    case 'people':
+      return {
+        title: 'People & access',
+        kicker: 'Workforce accounts',
+        status: 'owner managed',
+        subtitle: 'Create and manage store work accounts and responsibilities.',
+      }
     case 'operations':
       return {
         title: 'Operations',
@@ -2058,12 +2585,123 @@ function workspaceCopy(surface: WorkspaceSurface): { title: string; kicker: stri
       }
     case 'results':
       return {
-        title: "Today's results",
+        title: 'Verified value',
         kicker: 'Outcome ledger',
-        status: 'today',
-        subtitle: 'Resolved actions and value recovered from decisions closed today.',
+        status: 'this month',
+        subtitle: 'Receipt-backed value kept separate from model estimates.',
       }
   }
+}
+
+function TaskCompletionPanel({
+  task,
+  onCancel,
+  onCompleted,
+}: {
+  task: WritebackTaskRow | undefined
+  onCancel: () => void
+  onCompleted: () => void
+}) {
+  const approvedUnits = Number(task?.action?.params?.units ?? 0)
+  const [sourceReference, setSourceReference] = useState('')
+  const [completedUnits, setCompletedUnits] = useState(
+    Number.isFinite(approvedUnits) ? approvedUnits : 0,
+  )
+  const [actualValueRand, setActualValueRand] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  if (!task?.id) return null
+  const taskId = task.id
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setMessage(null)
+    const actualValue = actualValueRand.trim()
+      ? Math.round(Number(actualValueRand) * 100)
+      : null
+    if (actualValue !== null && (!Number.isFinite(actualValue) || actualValue < 0)) {
+      setMessage('Actual value must be a non-negative rand amount.')
+      setBusy(false)
+      return
+    }
+    try {
+      await fetchJson(
+        `/writeback/tasks/${encodeURIComponent(taskId)}/complete?data_domain=${task.data_domain ?? 'operational_twin'}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_reference: sourceReference,
+            completed_units: completedUnits,
+            ...(actualValue === null
+              ? {}
+              : {
+                  actual_value_recovered_minor_units: actualValue,
+                  currency: 'ZAR',
+                }),
+          }),
+        },
+        new AbortController().signal,
+      )
+      onCompleted()
+    } catch {
+      setMessage('The completion receipt could not be recorded. Check the approved units and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Record completion evidence" count="manager review">
+      <form className="login-card" onSubmit={(event) => void submit(event)}>
+        <p className="muted">
+          Completing this task records evidence only. It does not write directly to the source
+          system. Actual recovered value is counted only when you enter it here.
+        </p>
+        <label className="login-field">
+          <span>Source reference</span>
+          <input
+            value={sourceReference}
+            onChange={(event) => setSourceReference(event.target.value)}
+            placeholder="POS receipt, stock count, or invoice reference"
+            maxLength={200}
+            required
+          />
+        </label>
+        <label className="login-field">
+          <span>Completed units</span>
+          <input
+            type="number"
+            min={0}
+            max={1_000_000}
+            value={completedUnits}
+            onChange={(event) => setCompletedUnits(Number(event.target.value))}
+            required
+          />
+        </label>
+        <label className="login-field">
+          <span>Actual value recovered (ZAR, optional)</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={actualValueRand}
+            onChange={(event) => setActualValueRand(event.target.value)}
+            placeholder="0.00"
+          />
+        </label>
+        {message ? <p className="login-error" role="status">{message}</p> : null}
+        <div className="onboarding-step-actions">
+          <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? 'Recording…' : 'Complete task'}
+          </button>
+        </div>
+      </form>
+    </WorkspaceSection>
+  )
 }
 
 function WorkspaceScreen({
@@ -2075,7 +2713,8 @@ function WorkspaceScreen({
   seed,
   queue,
   ops,
-  recoveredToday,
+  verifiedThisMonth,
+  onRefresh,
   agenticRuns,
   onRunAgentic,
 }: {
@@ -2087,7 +2726,8 @@ function WorkspaceScreen({
   seed: SeedSummary | null
   queue: Decision[]
   ops: OperationalSnapshot
-  recoveredToday: string | null
+  verifiedThisMonth: string | null
+  onRefresh: () => void
   agenticRuns: Record<string, AgenticRunStatus>
   onRunAgentic: (path: string) => void
 }) {
@@ -2097,6 +2737,7 @@ function WorkspaceScreen({
   const [catalogSearchState, setCatalogSearchState] = useState<LoadState>('idle')
   const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null)
   const [selectedDeliverySku, setSelectedDeliverySku] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const intel = data?.store_intelligence
   const cover = intel?.supplier_cover
   const coverDays = daysNumber(cover?.days_of_supply)
@@ -2118,11 +2759,7 @@ function WorkspaceScreen({
   // Every individual delivery exception (matches the real per-tenant receiving records), not
   // just the one hero-SKU reconciliation - falls back to that single line only when empty.
   const apiDeliveries = asArray<DeliveryException>(ops.productAttention.deliveries)
-  const deliveryIssues = apiDeliveries.length
-    ? apiDeliveries.filter((item) => Number(item.missing_units ?? 0) > 0).length
-    : Number(delivery?.missing_units ?? 0) > 0
-      ? 1
-      : 0
+  const deliveryIssues = deliveryIssueCount(apiDeliveries, delivery?.missing_units)
   const selectedDelivery = apiDeliveries.find((item) => item.sku === selectedDeliverySku) ?? null
   const coldRunning = ops.coldChainStatus.running === true
   const coldEnabled = ops.coldChainStatus.enabled === true
@@ -2651,6 +3288,10 @@ function WorkspaceScreen({
         <WorkspaceMetric label="Inbound records" value={String(ops.inboundRecords.length || fieldNumber(obsConnectors, 'inbound_records'))} />
         <WorkspaceMetric label="Invalid records" value={String(fieldNumber(obsConnectors, 'invalid_records'))} tone={fieldNumber(obsConnectors, 'invalid_records') ? 'risk' : undefined} />
       </div>
+      <CompanyProfilePanel />
+      <ConnectorCredentialsPanel />
+      <WebhookEndpointsPanel />
+      <CsvImportPanel />
       <WorkspaceSection title="Connector catalogue" count={pluralLabel(connectorRows.length, 'system')}>
         <div className="workspace-list">
           {connectorRows.map((system) => {
@@ -2718,7 +3359,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {GATED_ENDPOINTS.filter((item) => item.group === 'connections' || item.group === 'intelligence').map((item) => (
             <WorkspaceRow
-              key={item.path}
+              key={`${item.method}:${item.path}`}
               label={item.label}
               meta={`${item.method} ${item.path}`}
               detail={item.detail}
@@ -2777,7 +3418,7 @@ function WorkspaceScreen({
         <div className="workspace-list">
           {OPERATION_READ_ENDPOINTS.map((item) => (
             <WorkspaceRow
-              key={item.path}
+              key={`${item.method}:${item.path}`}
               label={item.label}
               meta={`${item.method} ${item.path}`}
               detail={item.detail}
@@ -2795,9 +3436,11 @@ function WorkspaceScreen({
                 key={String(trace.correlation_id ?? index)}
                 label={fieldText(trace, 'scenario', 'Cascade trace')}
                 meta={fieldText(trace, 'correlation_id', 'Correlation')}
-                detail={formatValue(trace.evidence_agents ?? [])}
+                detail={traceAttributionDetail(trace)}
                 value={fieldText(trace, 'status', 'ok')}
-                tone={optionalStatusTone(trace.status ?? 'ok')}
+                tone={fieldText(asObject(trace.adaptive_attribution), 'state', '') === 'suspicious'
+                  ? 'risk'
+                  : optionalStatusTone(trace.status ?? 'ok')}
               />
             ))}
           </div>
@@ -2863,7 +3506,7 @@ function WorkspaceScreen({
           />
         </div>
       </WorkspaceSection>
-      <WorkspaceSection title="Worker and worldgen">
+      <WorkspaceSection title="Worker and validation history">
         <div className="workspace-list">
           <WorkspaceRow
             label="Worker service"
@@ -2890,7 +3533,7 @@ function WorkspaceScreen({
             ops.worldgenRuns.slice(0, 4).map((run, index) => (
               <WorkspaceRow
                 key={String(run.run_id ?? index)}
-                label={fieldText(run, 'scenario_id', 'Worldgen run')}
+                label={fieldText(run, 'scenario_id', 'Validation run')}
                 meta={fieldText(run, 'run_id', 'Run')}
                 detail={[`events ${formatValue(run.events_total)}`, `decisions ${formatValue(run.decisions_total)}`].join(' · ')}
                 value={fieldText(run, 'status', 'completed')}
@@ -2898,7 +3541,7 @@ function WorkspaceScreen({
               />
             ))
           ) : (
-            <WorkspaceRow label="Worldgen runs" meta="No synthetic drill run recorded yet." value="clear" />
+            <WorkspaceRow label="Validation runs" meta="No internal validation run recorded yet." value="clear" />
           )}
         </div>
       </WorkspaceSection>
@@ -2968,7 +3611,7 @@ function WorkspaceScreen({
             const runTone: Tone = run?.state === 'error' ? 'warn' : run?.state === 'ok' ? 'ok' : 'info'
             return (
               <WorkspaceRow
-                key={item.path}
+                key={`${item.method}:${item.path}`}
                 label={isRunnable ? `${item.label} - click to run` : item.label}
                 meta={`${item.method} ${item.path}`}
                 detail={isRunnable ? (run?.detail ?? item.detail) : item.detail}
@@ -2993,17 +3636,28 @@ function WorkspaceScreen({
   const renderResults = () => (
     <>
       <div className="workspace-metrics">
-        <WorkspaceMetric label="Recovered today" value={recoveredToday ?? 'R0'} tone={recoveredToday ? 'ok' : undefined} />
+        <WorkspaceMetric label="Verified this month" value={verifiedThisMonth ?? 'R0'} tone={verifiedThisMonth ? 'ok' : undefined} />
         <WorkspaceMetric label="Approvals waiting" value={String(queue.length)} tone={queue.length ? 'warn' : 'ok'} />
         <WorkspaceMetric label="Write-back tasks" value={String(ops.writebackTasks.length || fieldNumber(obsWriteback, 'tasks'))} />
         <WorkspaceMetric label="Learning events" value={String(ops.learningEvents.length || fieldNumber(obsLearning, 'learning_events'))} />
       </div>
       <WorkspaceSection title="Today">
-        {recoveredToday ? (
-          <WorkspaceRow label="Resolved value" meta="Approved actions closed today" value={recoveredToday} tone="ok" />
+        {verifiedThisMonth ? (
+          <WorkspaceRow
+            label="Receipt-backed recovered value"
+            meta={`${Number(ops.valueStatement.verified_receipt_count ?? 0)} completion receipts`}
+            value={verifiedThisMonth}
+            tone="ok"
+          />
         ) : (
-          <WorkspaceEmpty>No recovered value has been recorded today.</WorkspaceEmpty>
+          <WorkspaceEmpty>No receipt-backed recovered value has been recorded this month.</WorkspaceEmpty>
         )}
+        <WorkspaceRow
+          label="Estimated opportunity"
+          meta="Not counted as recovered until completion evidence is recorded"
+          value={formatZarMinor(ops.valueStatement.estimated_opportunity_minor_units)}
+          tone="info"
+        />
       </WorkspaceSection>
       <WorkspaceSection title="Write-back ledger" count={ops.writebackTasks.length ? pluralLabel(ops.writebackTasks.length, 'task') : undefined}>
         {ops.writebackTasks.length ? (
@@ -3014,7 +3668,8 @@ function WorkspaceScreen({
                 label={task.title ?? describeAction(task.action)}
                 meta={task.assignee_role}
                 value={formatLabel(task.status ?? 'pending')}
-            tone={optionalStatusTone(task.status ?? 'pending')}
+                tone={optionalStatusTone(task.status ?? 'pending')}
+                onSelect={task.id && task.status !== 'completed' ? () => setSelectedTaskId(task.id ?? null) : undefined}
               />
             ))}
           </div>
@@ -3022,6 +3677,16 @@ function WorkspaceScreen({
           <WorkspaceEmpty>No task-only write-back records yet.</WorkspaceEmpty>
         )}
       </WorkspaceSection>
+      {selectedTaskId ? (
+        <TaskCompletionPanel
+          task={ops.writebackTasks.find((task) => task.id === selectedTaskId)}
+          onCancel={() => setSelectedTaskId(null)}
+          onCompleted={() => {
+            setSelectedTaskId(null)
+            onRefresh()
+          }}
+        />
+      ) : null}
       <WorkspaceSection title="Learning outcomes" count={ops.learningEvents.length ? pluralLabel(ops.learningEvents.length, 'event') : undefined}>
         {ops.learningEvents.length ? (
           <div className="workspace-list">
@@ -3052,6 +3717,8 @@ function WorkspaceScreen({
           <WorkspaceMetric label="Raw media" value="never stored" tone="ok" />
         </div>
       </WorkspaceSection>
+      <StoreSetupPanel />
+      <EdgeDeviceRegistrationPanel storeId={seed?.location ?? 'store_12'} />
       <WorkspaceSection title="Operator actions">
         <div className="workspace-list">
           <WorkspaceRow label="Snapshot" meta="GET /twin/stores/{store_id}/snapshot" detail="Projection hash anchors assistant and scenario context." value="available" tone="ok" />
@@ -3064,6 +3731,8 @@ function WorkspaceScreen({
 
   const renderContent = () => {
     switch (surface) {
+      case 'onboarding':
+        return <OnboardingWizard />
       case 'twin':
         return renderTwin()
       case 'products':
@@ -3078,6 +3747,8 @@ function WorkspaceScreen({
         return renderColdChain()
       case 'connections':
         return renderConnections()
+      case 'people':
+        return <PeopleAccessPanel />
       case 'operations':
         return renderOperations()
       case 'results':
@@ -3217,9 +3888,960 @@ function isOverlayViewport(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+function PeopleAccessPanel({ onChanged }: { onChanged?: () => void } = {}) {
+  type WorkAccount = {
+    id: string
+    email: string
+    given_name: string
+    surname: string
+    position: string
+    role: string
+    active: boolean
+    status?: string
+  }
+  const emptyForm = { email: '', given_name: '', surname: '', position: '', role: 'manager' }
+  const [form, setForm] = useState(emptyForm)
+  const [accounts, setAccounts] = useState<WorkAccount[]>([])
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchBackendJson<{ accounts?: typeof accounts }>('/accounts', { method: 'GET' }, controller.signal)
+      .then((payload) => setAccounts(payload.accounts ?? []))
+      .catch(() => setNotice('People & access is available to store owners only.'))
+    return () => controller.abort()
+  }, [])
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setNotice(null)
+    try {
+      const payload = await fetchJson<{ account: WorkAccount }>(
+        '/accounts/invitations',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) },
+        new AbortController().signal,
+      )
+      setAccounts((current) => [...current, payload.account].sort((a, b) => a.surname.localeCompare(b.surname)))
+      setNotice(`Invitation sent to ${form.given_name} ${form.surname}.`)
+      setForm(emptyForm)
+      onChanged?.()
+    } catch { setNotice('The invitation could not be delivered. Check the email setup and try again.') }
+    finally { setBusy(false) }
+  }
+  const deactivate = async (accountId: string) => {
+    if (!window.confirm('Deactivate this work account? They will no longer be able to sign in.')) return
+    try {
+      await fetchJson(`/accounts/${encodeURIComponent(accountId)}/deactivate`, { method: 'POST' }, new AbortController().signal)
+      setAccounts((current) => current.map((account) => account.id === accountId ? { ...account, active: false } : account))
+      onChanged?.()
+    } catch { setNotice('The account could not be deactivated. Try again.') }
+  }
+  const reactivate = async (accountId: string) => {
+    try {
+      await fetchJson(
+        `/accounts/${encodeURIComponent(accountId)}/reactivate`,
+        { method: 'POST' },
+        new AbortController().signal,
+      )
+      setAccounts((current) => current.map((account) => (
+        account.id === accountId ? { ...account, active: true } : account
+      )))
+      onChanged?.()
+    } catch { setNotice('The account could not be reactivated. Try again.') }
+  }
+  const changeRole = async (accountId: string, role: string) => {
+    try {
+      const payload = await fetchJson<{ account: WorkAccount }>(
+        `/accounts/${encodeURIComponent(accountId)}/role`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) },
+        new AbortController().signal,
+      )
+      setAccounts((current) => current.map((account) => account.id === accountId ? payload.account : account))
+      onChanged?.()
+    } catch { setNotice('The work role could not be changed. Try again.') }
+  }
+  const sendRecovery = async (accountId: string, invitation = false) => {
+    try {
+      await fetchJson(
+        `/accounts/${encodeURIComponent(accountId)}/${invitation ? 'invitation' : 'password-reset'}`,
+        { method: 'POST' },
+        new AbortController().signal,
+      )
+      setNotice(invitation ? 'A new invitation was sent.' : 'A password-reset link was sent.')
+    } catch {
+      setNotice('The email could not be delivered. Check the email service and try again.')
+    }
+  }
+  return <>
+    <WorkspaceSection title="Store work accounts" count={accounts.length ? pluralLabel(accounts.length, 'account') : undefined}>
+      <p className="muted">Executives review outcomes; managers run store work; inventory staff manage stock; analysts inspect evidence; auditors have oversight access.</p>
+      {accounts.length ? <div className="workspace-list">{accounts.map((account) => {
+        const invited = account.status === 'invited'
+        return <div key={account.id}>
+          <WorkspaceRow
+            label={`${account.given_name} ${account.surname}`}
+            meta={`${account.position} · ${account.email}`}
+            value={`${account.role} · ${account.status ?? (account.active ? 'active' : 'inactive')}`}
+            tone={account.active ? 'ok' : 'warn'}
+          />
+          {account.role !== 'owner' && !invited ? <label className="login-field">
+            <span>Work role</span>
+            <select value={account.role} onChange={(e) => void changeRole(account.id, e.target.value)}>
+              {['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}
+            </select>
+          </label> : null}
+          {invited ? <button className="btn btn-secondary" type="button" onClick={() => void sendRecovery(account.id, true)}>Resend invitation</button> : null}
+          {account.active && account.role !== 'owner' ? <>
+            <button className="btn btn-secondary" type="button" onClick={() => void sendRecovery(account.id)}>Send password reset</button>
+            <button className="btn" type="button" onClick={() => void deactivate(account.id)}>Deactivate access</button>
+          </> : null}
+          {!account.active && !invited ? <button className="btn btn-primary" type="button" onClick={() => void reactivate(account.id)}>Reactivate access</button> : null}
+        </div>
+      })}</div> : <WorkspaceEmpty>No staff accounts have been invited yet.</WorkspaceEmpty>}
+    </WorkspaceSection>
+    <WorkspaceSection title="Invite a colleague">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">They will receive a single-use link and choose their own password. Invitation secrets are never shown here.</p>
+      {(['given_name', 'surname', 'position', 'email'] as const).map((field) => <label className="login-field" key={field}><span>{field === 'given_name' ? 'First name' : field === 'surname' ? 'Surname' : field === 'position' ? 'Work position' : 'Work email'}</span><input type={field === 'email' ? 'email' : 'text'} value={form[field]} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required /></label>)}
+      <label className="login-field"><span>Store role</span><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{['executive', 'manager', 'inventory', 'analyst', 'auditor'].map((role) => <option key={role}>{role}</option>)}</select></label>
+      {notice ? <p className="login-error">{notice}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Sending…' : 'Send invitation'}</button>
+    </form>
+    </WorkspaceSection>
+  </>
+}
+
+type WebhookEndpointRow = { endpoint_id: string; system: string; active: boolean }
+type ProvisionedWebhookEndpoint = {
+  endpoint_id: string
+  system: string
+  signing_secret: string
+  delivery_url: string
+  signature_header: string
+}
+
+/** Self-serve "connect a till or online store" panel for the signature-authenticated
+ * systems (Shopify, Square, Lightspeed, Yoco). These do not store a credential ShelfWise
+ * replays - the retailer signs each delivery - so an owner provisions their own endpoint
+ * here and pastes the URL and secret into that retailer's webhook settings. Before this
+ * existed, connecting one of these required an operator to configure the shared ingest
+ * API key, which is exactly the developer step a store owner should not need. The signing
+ * secret is displayed once and never returned again by any route. */
+function WebhookEndpointsPanel({ onChanged }: { onChanged?: () => void } = {}) {
+  const [endpoints, setEndpoints] = useState<WebhookEndpointRow[]>([])
+  const [systems, setSystems] = useState<string[]>([])
+  const [selected, setSelected] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [justProvisioned, setJustProvisioned] = useState<ProvisionedWebhookEndpoint | null>(null)
+
+  const refresh = useCallback(() => {
+    const controller = new AbortController()
+    fetchJson<{ endpoints?: WebhookEndpointRow[]; supported_systems?: string[] }>(
+      '/connectors/webhook-endpoints',
+      {},
+      controller.signal,
+    )
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        setEndpoints(Array.isArray(payload.endpoints) ? payload.endpoints : [])
+        const supported = Array.isArray(payload.supported_systems) ? payload.supported_systems : []
+        setSystems(supported)
+        setSelected((current) => current || supported[0] || '')
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => refresh(), [refresh])
+
+  const provision = async () => {
+    if (!selected) return
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      const payload = await fetchJson<ProvisionedWebhookEndpoint>(
+        `/connectors/${selected}/webhook-endpoint`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+        controller.signal,
+      )
+      setJustProvisioned(payload)
+      refresh()
+      onChanged?.()
+    } catch (provisionError) {
+      setError(provisionError instanceof Error ? provisionError.message : String(provisionError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async (endpointId: string) => {
+    setBusy(true)
+    setError(null)
+    const controller = new AbortController()
+    try {
+      await fetchJson(
+        `/connectors/webhook-endpoints/${encodeURIComponent(endpointId)}/revoke`,
+        { method: 'POST' },
+        controller.signal,
+      )
+      if (justProvisioned?.endpoint_id === endpointId) setJustProvisioned(null)
+      refresh()
+      onChanged?.()
+    } catch (revokeError) {
+      setError(revokeError instanceof Error ? revokeError.message : String(revokeError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <WorkspaceSection title="Connect a till or online store" count={pluralLabel(endpoints.length, 'endpoint')}>
+      <p className="workspace-empty">
+        Shopify, Square, Lightspeed, and Yoco send you sales and stock updates instead of
+        storing a key here. Create an endpoint below, then paste the address and signing
+        secret into that system's webhook settings. The secret is shown once and cannot be
+        read again - if you lose it, create a new endpoint and revoke the old one.
+      </p>
+      {error ? <p className="login-error">{error}</p> : null}
+      {justProvisioned ? (
+        <div className="connector-credential-form">
+          <p className="workspace-empty">
+            <strong>Save these now - the signing secret will not be shown again.</strong>
+          </p>
+          <label className="login-field">
+            <span>Webhook address</span>
+            <input type="text" readOnly value={justProvisioned.delivery_url} />
+          </label>
+          <label className="login-field">
+            <span>Signature header</span>
+            <input type="text" readOnly value={justProvisioned.signature_header} />
+          </label>
+          <label className="login-field">
+            <span>Signing secret</span>
+            <input type="text" readOnly value={justProvisioned.signing_secret} />
+          </label>
+          <div className="connector-credential-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => setJustProvisioned(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="workspace-list connector-credentials">
+        {endpoints.map((endpoint) => (
+          <div className="connector-credential-row" key={endpoint.endpoint_id}>
+            <WorkspaceRow
+              label={formatLabel(endpoint.system)}
+              meta={endpoint.endpoint_id}
+              value={endpoint.active ? 'active' : 'revoked'}
+              tone={endpoint.active ? 'ok' : undefined}
+            />
+            {endpoint.active ? (
+              <div className="connector-credential-actions" style={{ padding: '0 2px 12px' }}>
+                <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => revoke(endpoint.endpoint_id)}>
+                  Revoke
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div className="connector-credential-form">
+        <label className="login-field">
+          <span>System</span>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={busy}>
+            {systems.map((system) => (
+              <option key={system} value={system}>{formatLabel(system)}</option>
+            ))}
+          </select>
+        </label>
+        <div className="connector-credential-actions">
+          <button className="btn btn-primary" type="button" disabled={busy || !selected} onClick={provision}>
+            {busy ? 'Creating…' : 'Create endpoint'}
+          </button>
+        </div>
+      </div>
+    </WorkspaceSection>
+  )
+}
+
+function CsvImportPanel({ onCommitted }: { onCommitted?: () => void } = {}) {
+  const [kind, setKind] = useState('products')
+  const [csvText, setCsvText] = useState('')
+  const [result, setResult] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const run = async (commit: boolean) => {
+    if (!csvText.trim()) return
+    setBusy(true); setResult(null); setFailed(false)
+    try {
+      const payload = await fetchJson<Record<string, unknown>>(
+        commit ? '/intake/csv/commit' : '/intake/csv/preview',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, csv_text: csvText }) },
+        new AbortController().signal,
+      )
+      const count = Number(payload.accepted_rows ?? payload.records_committed ?? payload.row_count ?? 0)
+      setResult(commit ? `${count || 'Your'} rows were imported.` : `Preview completed. ${count || 'Review'} valid rows are ready to import.`)
+      if (commit) onCommitted?.()
+    } catch {
+      setFailed(true)
+      setResult('The file could not be processed. Check its columns and try the preview again.')
+    }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Import store data">
+    <p className="muted">Upload products first, then stock, expiry, and sales. Preview checks the data before any import.</p>
+    <label className="login-field"><span>Data type</span><select value={kind} onChange={(e) => setKind(e.target.value)}>{['products', 'stock', 'expiry', 'sales'].map((item) => <option key={item}>{item}</option>)}</select></label>
+    <label className="login-field"><span>CSV file</span><input type="file" accept=".csv,text/csv" onChange={async (e) => setCsvText(await e.target.files?.[0]?.text() ?? '')} /></label>
+    {result ? <p className={failed ? 'login-error' : 'workspace-empty'} role="status">{result}</p> : null}
+    <div className="workspace-actions"><button className="btn" type="button" disabled={busy || !csvText} onClick={() => run(false)}>Preview file</button><button className="btn btn-primary" type="button" disabled={busy || !csvText} onClick={() => run(true)}>Import approved file</button></div>
+  </WorkspaceSection>
+}
+
+function StoreSetupPanel({ onCreated }: { onCreated?: (storeId: string) => void } = {}) {
+  const [storeId, setStoreId] = useState('')
+  const [name, setName] = useState('')
+  const [areas, setAreas] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setMessage(null)
+    try {
+      const entities = areas.split(',').map((label) => label.trim()).filter(Boolean).map((label, index) => ({ local_id: `area_${index + 1}`, entity_type: 'area', display_name: label }))
+      await fetchJson('/twin/onboarding/self-service', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ store_id: storeId, display_name: name, entities }) }, new AbortController().signal)
+      setMessage(`${name} is ready for data import, connections, and operational monitoring.`)
+      onCreated?.(storeId)
+    } catch { setMessage('The store could not be created. Use a short store ID with letters, numbers, underscores, or hyphens.') }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Set up your store">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">Create the operational store record before importing stock or connecting systems.</p>
+      <label className="login-field"><span>Store name</span><input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+      <label className="login-field"><span>Store ID</span><input value={storeId} onChange={(e) => setStoreId(e.target.value)} placeholder="central-store" required /></label>
+      <label className="login-field"><span>Initial store areas</span><input value={areas} onChange={(e) => setAreas(e.target.value)} placeholder="Backroom, Dairy fridge, Front shelf" /></label>
+      {message ? <p className="login-error">{message}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy || !name || !storeId}>{busy ? 'Creating…' : 'Create store'}</button>
+    </form>
+  </WorkspaceSection>
+}
+
+function CompanyProfilePanel({ onSaved }: { onSaved?: () => void } = {}) {
+  const [form, setForm] = useState({ name: '', country: 'ZA', currency: 'ZAR', timezone: 'Africa/Johannesburg' })
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchBackendJson<{ profile?: Partial<typeof form> }>(
+      '/tenants/me',
+      { method: 'GET' },
+      controller.signal,
+    )
+      .then((payload) => {
+        if (!payload.profile) return
+        setForm((current) => ({
+          name: payload.profile?.name ?? current.name,
+          country: payload.profile?.country ?? current.country,
+          currency: payload.profile?.currency ?? current.currency,
+          timezone: payload.profile?.timezone ?? current.timezone,
+        }))
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setMessage(null)
+    try {
+      await fetchJson('/tenants/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }, new AbortController().signal)
+      setMessage('Company profile saved.')
+      onSaved?.()
+    } catch { setMessage('The company profile could not be saved. Try again.') }
+    finally { setBusy(false) }
+  }
+  return <WorkspaceSection title="Company profile">
+    <form className="login-card" onSubmit={submit}>
+      <p className="muted">Set the business identity used throughout this store’s operations.</p>
+      <label className="login-field"><span>Company name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
+      <label className="login-field"><span>Country</span><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} required /></label>
+      <label className="login-field"><span>Currency</span><input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} required /></label>
+      <label className="login-field"><span>Timezone</span><input value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} required /></label>
+      {message ? <p className="login-error">{message}</p> : null}
+      <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save company profile'}</button>
+    </form>
+  </WorkspaceSection>
+}
+
+type OnboardingStepId = 'company' | 'store' | 'data' | 'policies' | 'devices' | 'people' | 'review'
+
+const ONBOARDING_STEPS: Array<{
+  id: OnboardingStepId
+  label: string
+  optional?: boolean
+}> = [
+  { id: 'company', label: 'Company' },
+  { id: 'store', label: 'Store' },
+  { id: 'data', label: 'Data source' },
+  { id: 'policies', label: 'Policies' },
+  { id: 'devices', label: 'Devices', optional: true },
+  { id: 'people', label: 'People', optional: true },
+  { id: 'review', label: 'Review' },
+]
+
+function isOnboardingStepComplete(
+  status: OnboardingStatus,
+  stepId: OnboardingStepId,
+): boolean {
+  switch (stepId) {
+    case 'company':
+      return status.company.configured
+    case 'store':
+      return status.stores.length > 0
+    case 'data':
+      return status.data.configured
+    case 'policies':
+      return status.policies.configured
+    case 'devices':
+      return status.devices.active > 0
+    case 'people':
+      return status.accounts.active > 0
+    case 'review':
+      return status.ready_for_operations
+  }
+}
+
+function OnboardingStoreStep({
+  status,
+  onCreated,
+}: {
+  status: OnboardingStatus
+  onCreated: (storeId: string) => void
+}) {
+  return (
+    <>
+      {status.stores.length ? (
+        <WorkspaceSection title="Existing stores" count={pluralLabel(status.stores.length, 'store')}>
+          <div className="workspace-list">
+            {status.stores.map((store) => (
+              <WorkspaceRow
+                key={store.store_id}
+                label={store.display_name}
+                meta={store.store_id}
+                value={pluralLabel(store.entity_count, 'entity')}
+                tone="ok"
+              />
+            ))}
+          </div>
+        </WorkspaceSection>
+      ) : null}
+      <StoreSetupPanel onCreated={onCreated} />
+    </>
+  )
+}
+
+function OnboardingDataStep({
+  onChanged,
+  onNext,
+}: {
+  onChanged: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Choose how your store sends data" count="one required">
+        <p className="workspace-empty">
+          Connect an ERP/POS system for a live feed, or import a validated CSV to start.
+          Either path is enough to complete this required step; you can add the other later.
+        </p>
+      </WorkspaceSection>
+      <ConnectorCredentialsPanel onChanged={onChanged} />
+      <WebhookEndpointsPanel onChanged={onChanged} />
+      <CsvImportPanel onCommitted={onChanged} />
+      <div className="onboarding-step-actions">
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          Continue to policies
+        </button>
+      </div>
+    </>
+  )
+}
+
+type ProductPolicyTemplate = {
+  category: string
+  policy_id: string
+  expiry_review_days: number
+  minimum_margin_pct: number
+  cold_chain_sensitive: boolean
+  hitl_required: boolean
+  markdown_discount_pct: string
+  markdown_duration_hours: number
+}
+type OnboardingPoliciesPayload = {
+  templates: ProductPolicyTemplate[]
+  confirmations: Array<{ category: string; policy_id: string }>
+  current_confirmation_count: number
+}
+
+function OnboardingPoliciesStep({
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  const [payload, setPayload] = useState<OnboardingPoliciesPayload | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const next = await fetchJson<OnboardingPoliciesPayload>(
+        '/onboarding/policies',
+        {},
+        new AbortController().signal,
+      )
+      setPayload(next)
+      setSelected(next.confirmations.map((confirmation) => confirmation.category))
+    } catch {
+      setMessage('Product policies could not be loaded. Try again.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const confirm = async () => {
+    if (!selected.length) {
+      setMessage('Select at least one product family used by this store.')
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      await fetchJson(
+        '/onboarding/policies/confirm',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categories: selected }),
+        },
+        new AbortController().signal,
+      )
+      await load()
+      onChanged()
+      setMessage('Current product policy templates confirmed.')
+    } catch {
+      setMessage('Product policies could not be confirmed. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <WorkspaceSection title="Confirm product operating policies" count="one required">
+        <p className="workspace-empty">
+          Select the product families this store handles. These are the same versioned
+          rules ShelfWise uses for expiry review, margin protection, cold-chain checks,
+          and human approval.
+        </p>
+        <div className="workspace-list">
+          {(payload?.templates || []).map((template) => {
+            const checked = selected.includes(template.category)
+            return (
+              <label className="workspace-row onboarding-policy-option" key={template.policy_id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => setSelected((current) => (
+                    checked
+                      ? current.filter((category) => category !== template.category)
+                      : [...current, template.category]
+                  ))}
+                />
+                <span>
+                  <strong>{formatLabel(template.category)}</strong>
+                  <small>
+                    Review {template.expiry_review_days}d · minimum margin {template.minimum_margin_pct}% · markdown {Number(template.markdown_discount_pct) * 100}% for {template.markdown_duration_hours}h
+                  </small>
+                </span>
+                <span>{template.cold_chain_sensitive ? 'cold chain' : 'ambient'}</span>
+              </label>
+            )
+          })}
+        </div>
+        {message ? <p className="login-error" role="status">{message}</p> : null}
+        <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void confirm()}>
+          {busy ? 'Confirming…' : 'Confirm selected policies'}
+        </button>
+      </WorkspaceSection>
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button
+          className="btn btn-primary"
+          type="button"
+          disabled={!payload?.current_confirmation_count}
+          onClick={onNext}
+        >
+          Continue to devices
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingDevicesStep({
+  status,
+  selectedStoreId,
+  onStoreChange,
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  status: OnboardingStatus
+  selectedStoreId: string
+  onStoreChange: (storeId: string) => void
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Store for this device" count="optional">
+        <p className="workspace-empty">
+          Skip this step if the shop has no compatible camera, people counter, or sensor.
+          ShelfWise accepts structured derived events and never raw camera footage.
+        </p>
+        {status.stores.length ? (
+          <label className="login-field onboarding-store-picker">
+            <span>Store</span>
+            <select value={selectedStoreId} onChange={(event) => onStoreChange(event.target.value)}>
+              {status.stores.map((store) => (
+                <option key={store.store_id} value={store.store_id}>
+                  {store.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="login-error">Create a store before registering its devices.</p>
+        )}
+      </WorkspaceSection>
+      {selectedStoreId ? (
+        <EdgeDeviceRegistrationPanel storeId={selectedStoreId} onChanged={onChanged} />
+      ) : null}
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          {status.devices.active ? 'Continue' : 'Skip for now'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingPeopleStep({
+  hasAccounts,
+  onChanged,
+  onBack,
+  onNext,
+}: {
+  hasAccounts: boolean
+  onChanged: () => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <>
+      <WorkspaceSection title="Delegate access when the team is ready" count="optional">
+        <p className="workspace-empty">
+          A single owner can operate ShelfWise alone. Add named work accounts when managers,
+          inventory staff, analysts, or auditors need their own access.
+        </p>
+      </WorkspaceSection>
+      <PeopleAccessPanel onChanged={onChanged} />
+      <div className="onboarding-step-actions">
+        <button className="btn btn-secondary" type="button" onClick={onBack}>Back</button>
+        <button className="btn btn-primary" type="button" onClick={onNext}>
+          {hasAccounts ? 'Continue' : 'Skip for now'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+function OnboardingReviewStep({
+  status,
+  onNavigate,
+}: {
+  status: OnboardingStatus
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  const storeNames = status.stores.map((store) => store.display_name).join(', ')
+  const connectedSystems = status.data.connector_systems.map(formatLabel).join(', ')
+  const dataDetail = connectedSystems
+    ? `Connected: ${connectedSystems}`
+    : status.data.has_imported_records
+      ? 'Validated CSV records have been imported.'
+      : 'Connect a system or import a validated CSV.'
+  return (
+    <WorkspaceSection
+      title={status.ready_for_operations ? 'Ready for store operations' : 'Required setup remains'}
+      count={status.ready_for_operations ? 'ready' : 'not ready'}
+    >
+      <div className="workspace-list">
+        <WorkspaceRow
+          label="Company profile"
+          detail={status.company.name || 'Save the business identity used throughout ShelfWise.'}
+          value={status.company.configured ? 'complete' : 'required'}
+          tone={status.company.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('company')}
+        />
+        <WorkspaceRow
+          label="Operational store"
+          detail={storeNames || 'Create at least one exact-store record.'}
+          value={status.stores.length ? pluralLabel(status.stores.length, 'store') : 'required'}
+          tone={status.stores.length ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('store')}
+        />
+        <WorkspaceRow
+          label="Store data"
+          detail={dataDetail}
+          value={status.data.configured ? 'complete' : 'required'}
+          tone={status.data.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('data')}
+        />
+        <WorkspaceRow
+          label="Product policies"
+          detail="Owner-confirmed rules for the product families this store handles."
+          value={status.policies.configured ? `${status.policies.confirmed_categories.length} confirmed` : 'required'}
+          tone={status.policies.configured ? 'ok' : 'warn'}
+          onSelect={() => onNavigate('policies')}
+        />
+        <WorkspaceRow
+          label="Camera and sensor devices"
+          detail="Optional for stores with compatible structured-event systems."
+          value={status.devices.active ? `${status.devices.active} active` : 'optional'}
+          tone={status.devices.active ? 'ok' : 'info'}
+          onSelect={() => onNavigate('devices')}
+        />
+        <WorkspaceRow
+          label="Work accounts"
+          detail="Optional until another member of staff needs access."
+          value={status.accounts.active ? `${status.accounts.active} active` : 'optional'}
+          tone={status.accounts.active ? 'ok' : 'info'}
+          onSelect={() => onNavigate('people')}
+        />
+      </div>
+      <p className={status.ready_for_operations ? 'onboarding-ready' : 'login-error'} role="status">
+        {status.ready_for_operations
+          ? 'Required setup is complete. Continue to Connections, Store twin, or People & access whenever you need to expand the configuration.'
+          : 'Complete every required item above. Optional devices and work accounts do not block the store.'}
+      </p>
+    </WorkspaceSection>
+  )
+}
+
+function OnboardingStepContent({
+  step,
+  status,
+  selectedStoreId,
+  onStoreChange,
+  onChanged,
+  onNavigate,
+}: {
+  step: OnboardingStepId
+  status: OnboardingStatus
+  selectedStoreId: string
+  onStoreChange: (storeId: string) => void
+  onChanged: () => void
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  switch (step) {
+    case 'company':
+      return <CompanyProfilePanel onSaved={() => { onChanged(); onNavigate('store') }} />
+    case 'store':
+      return <OnboardingStoreStep status={status} onCreated={(storeId) => {
+        onStoreChange(storeId)
+        onChanged()
+        onNavigate('data')
+      }} />
+    case 'data':
+      return <OnboardingDataStep onChanged={onChanged} onNext={() => onNavigate('policies')} />
+    case 'policies':
+      return <OnboardingPoliciesStep
+        onChanged={onChanged}
+        onBack={() => onNavigate('data')}
+        onNext={() => onNavigate('devices')}
+      />
+    case 'devices':
+      return <OnboardingDevicesStep
+        status={status}
+        selectedStoreId={selectedStoreId}
+        onStoreChange={onStoreChange}
+        onChanged={onChanged}
+        onBack={() => onNavigate('policies')}
+        onNext={() => onNavigate('people')}
+      />
+    case 'people':
+      return <OnboardingPeopleStep
+        hasAccounts={status.accounts.active > 0}
+        onChanged={onChanged}
+        onBack={() => onNavigate('devices')}
+        onNext={() => onNavigate('review')}
+      />
+    case 'review':
+      return <OnboardingReviewStep status={status} onNavigate={onNavigate} />
+  }
+}
+
+function OnboardingProgress({
+  status,
+  step,
+  onNavigate,
+}: {
+  status: OnboardingStatus
+  step: OnboardingStepId
+  onNavigate: (stepId: OnboardingStepId) => void
+}) {
+  return (
+    <>
+      <div className="workspace-metrics">
+        <WorkspaceMetric
+          label="Required setup"
+          value={`${status.required_steps.completed}/${status.required_steps.total}`}
+          tone={status.ready_for_operations ? 'ok' : 'warn'}
+        />
+        <WorkspaceMetric label="Stores" value={String(status.stores.length)} />
+        <WorkspaceMetric
+          label="Data source"
+          value={status.data.configured ? 'connected' : 'required'}
+          tone={status.data.configured ? 'ok' : 'warn'}
+        />
+        <WorkspaceMetric
+          label="Operational state"
+          value={status.ready_for_operations ? 'ready' : 'setup'}
+          tone={status.ready_for_operations ? 'ok' : 'info'}
+        />
+      </div>
+      <nav className="onboarding-steps" aria-label="Setup steps">
+        {ONBOARDING_STEPS.map((item, index) => {
+          const isComplete = isOnboardingStepComplete(status, item.id)
+          return (
+            <button
+              key={item.id}
+              className={`onboarding-step${step === item.id ? ' is-current' : ''}${isComplete ? ' is-complete' : ''}`}
+              type="button"
+              aria-current={step === item.id ? 'step' : undefined}
+              onClick={() => onNavigate(item.id)}
+            >
+              <span>{isComplete ? 'Done' : index + 1}</span>
+              <strong>{item.label}</strong>
+              <small>{item.optional ? 'optional' : isComplete ? 'complete' : 'required'}</small>
+            </button>
+          )
+        })}
+      </nav>
+    </>
+  )
+}
+
+/** Guided first-store setup backed by GET /onboarding/status.
+ *
+ * Progress is rebuilt from durable server stores every time this screen opens. The browser
+ * cannot mark a step complete on its own, and optional hardware/team steps never block a
+ * small owner-operated shop from becoming ready.
+ */
+function OnboardingWizard() {
+  const [status, setStatus] = useState<OnboardingStatus | null>(null)
+  const [step, setStep] = useState<OnboardingStepId>('company')
+  const [selectedStoreId, setSelectedStoreId] = useState('')
+  const [loadState, setLoadState] = useState<LoadState>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const initialStepSelected = useRef(false)
+
+  const refresh = useCallback(async () => {
+    setLoadState('loading')
+    setError(null)
+    try {
+      const nextStatus = await fetchJson<OnboardingStatus>(
+        '/onboarding/status',
+        {},
+        new AbortController().signal,
+      )
+      setStatus(nextStatus)
+      if (!initialStepSelected.current) {
+        setStep(nextStatus.required_steps.next)
+        initialStepSelected.current = true
+      }
+      setLoadState('ready')
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError))
+      setLoadState('error')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    if (!status?.stores.length) {
+      setSelectedStoreId('')
+      return
+    }
+    if (!status.stores.some((store) => store.store_id === selectedStoreId)) {
+      setSelectedStoreId(status.stores[0].store_id)
+    }
+  }, [selectedStoreId, status?.stores])
+
+  const changed = () => {
+    void refresh()
+  }
+
+  if (loadState === 'loading' && !status) {
+    return <WorkspaceSection title="Loading setup progress"><WorkspaceEmpty>Reading the current tenant configuration…</WorkspaceEmpty></WorkspaceSection>
+  }
+  if (loadState === 'error' && !status) {
+    return (
+      <WorkspaceSection title="Setup progress unavailable">
+        <p className="login-error">{error || 'The setup status could not be loaded.'}</p>
+        <button className="btn btn-secondary" type="button" onClick={() => void refresh()}>Retry</button>
+      </WorkspaceSection>
+    )
+  }
+  if (!status) return null
+
+  return (
+    <>
+      <OnboardingProgress status={status} step={step} onNavigate={setStep} />
+      {error ? <p className="login-error">Progress refresh failed: {error}</p> : null}
+      <OnboardingStepContent
+        step={step}
+        status={status}
+        selectedStoreId={selectedStoreId}
+        onStoreChange={setSelectedStoreId}
+        onChanged={changed}
+        onNavigate={setStep}
+      />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 function App() {
+  const [accountLifecycleRequested, setAccountLifecycleRequested] = useState(() => (
+    /(?:^#|&)(?:activate|reset-password)=/.test(window.location.hash)
+  ))
   const [dataDomain, setDataDomain] = useState<DataDomain>('operational_twin')
   const [data, setData] = useState<GoldenScenario | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
@@ -3231,6 +4853,10 @@ function App() {
   const [agenticRuns, setAgenticRuns] = useState<Record<string, AgenticRunStatus>>({})
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [authRequired, setAuthRequired] = useState(false)
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loggingIn, setLoggingIn] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   // Sidebar is persistent on desktop (open by default), an overlay on mobile (closed by default).
   const [sidebarOpen, setSidebarOpen] = useState(() => !isOverlayViewport())
@@ -3251,16 +4877,10 @@ function App() {
     return Array.from(byId.values()).filter((d) => (d.status ?? 'pending').toLowerCase() !== 'pending')
   }, [decisions, data])
 
-  // Value recovered by decisions resolved today - one honest number, summed from real outcomes.
-  const recoveredToday = useMemo(() => {
-    let cents = 0
-    for (const d of resolved) {
-      if (dayLabel(d.updated_at ?? d.created_at) !== 'Today') continue
-      const minor = moneyMinorUnits(d.outcome?.rand_recovered)
-      if (minor && minor > 0) cents += minor
-    }
-    return cents > 0 ? `R${Math.round(cents / 100).toLocaleString('en-ZA')}` : null
-  }, [resolved])
+  const verifiedThisMonth = useMemo(() => {
+    const minorUnits = Number(ops.valueStatement.verified_recovered_minor_units ?? 0)
+    return minorUnits > 0 ? formatZarMinor(minorUnits) : null
+  }, [ops.valueStatement.verified_recovered_minor_units])
 
   const recents = useMemo<Recent[]>(() => {
     const firstUser = messages.find((m) => m.role === 'user')
@@ -3285,7 +4905,19 @@ function App() {
     setError(null)
     setOps(emptyOps(dataDomain))
     async function load() {
-      await ensureBrowserSession(controller.signal)
+      try {
+        const sessionPayload = await ensureBrowserSession(controller.signal)
+        setPasswordChangeRequired(Boolean(sessionPayload.session?.must_change_password))
+      } catch (sessionError) {
+        if (controller.signal.aborted) return
+        if (isUnauthorizedError(sessionError)) {
+          setAuthRequired(true)
+          setLoadState('idle')
+          return
+        }
+        throw sessionError
+      }
+      setAuthRequired(false)
       const payload = dataDomain === 'world_simulation'
         ? await fetchScenario(SCENARIO_PATH, controller.signal)
         : ({} as GoldenScenario)
@@ -3311,6 +4943,7 @@ function App() {
         platformToolsPayload,
         platformToolAuditPayload,
         writebackPayload,
+        valueReportPayload,
         learningPayload,
         productAttentionPayload,
         modelRunsPayload,
@@ -3327,7 +4960,10 @@ function App() {
         fetchIfAvailable<JsonObject>('/health'),
         fetchIfAvailable<JsonObject>('/readiness'),
         fetchIfAvailable<JsonObject>('/inference/config'),
-        fetchIfAvailable<DecisionLogResponse>(withDataDomain('/decisions', dataDomain), '/decisions'),
+        fetchIfAvailable<DecisionLogResponse>(
+          `${withDataDomain('/decisions', dataDomain)}&queue_view=assigned`,
+          '/decisions',
+        ),
         fetchIfAvailable<{ conversations?: ConversationSummary[] }>(
           withDataDomain('/chat/conversations', dataDomain),
           '/chat/conversations',
@@ -3347,6 +4983,9 @@ function App() {
         fetchIfAvailable<{ tools?: JsonObject[] }>(withDataDomain('/tools/platform', dataDomain), '/tools/platform'),
         fetchIfAvailable<{ events?: JsonObject[] }>(withDataDomain('/tools/platform/audit', dataDomain), '/tools/platform/audit'),
         fetchIfAvailable<{ tasks?: WritebackTaskRow[] }>(withDataDomain('/writeback/tasks', dataDomain), '/writeback/tasks'),
+        dataDomain === 'operational_twin'
+          ? fetchIfAvailable<{ report?: ValueStatement }>('/reports/value-recovered')
+          : Promise.resolve(null),
         fetchIfAvailable<{ thresholds?: JsonObject; events?: JsonObject[] }>(withDataDomain('/learning', dataDomain), '/learning'),
         fetchIfAvailable<ProductAttentionPayload>(withDataDomain('/products/attention?limit=20', dataDomain), '/products/attention'),
         fetchIfAvailable<{ model_runs?: JsonObject[] }>(withDataDomain('/mlops/model-runs', dataDomain), '/mlops/model-runs'),
@@ -3386,6 +5025,7 @@ function App() {
         platformTools: asArray<JsonObject>(platformToolsPayload?.tools),
         platformToolAudit: asArray<JsonObject>(platformToolAuditPayload?.events),
         writebackTasks: asArray<WritebackTaskRow>(writebackPayload?.tasks),
+        valueStatement: valueReportPayload?.report ?? {},
         learningThresholds: asObject(learningPayload?.thresholds),
         learningEvents: asArray<JsonObject>(learningPayload?.events),
         productAttention: productAttentionPayload ?? {},
@@ -3431,6 +5071,30 @@ function App() {
   }, [])
 
   const conn = loadState === 'ready' ? 'live' : loadState === 'error' ? 'error' : 'loading'
+
+  const handleLogin = async (email: string, password: string) => {
+    setLoggingIn(true)
+    setLoginError(null)
+    const controller = new AbortController()
+    try {
+      const sessionPayload = await postLogin(email, password, controller.signal)
+      setAuthRequired(false)
+      setPasswordChangeRequired(Boolean(sessionPayload.session?.must_change_password))
+      setReloadKey((key) => key + 1)
+    } catch (loginErr) {
+      setLoginError(loginErr instanceof Error ? loginErr.message : String(loginErr))
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
+  const handleAuthenticated = () => {
+    setAuthRequired(false)
+    setPasswordChangeRequired(false)
+    setAccountLifecycleRequested(false)
+    setLoginError(null)
+    setReloadKey((key) => key + 1)
+  }
 
   // Opening a surface (approvals) or starting a new chat must reveal the chat on mobile, where the
   // sidebar is a full overlay; on desktop the persistent sidebar stays put.
@@ -3687,6 +5351,19 @@ function App() {
       })
   }
 
+  if (authRequired || passwordChangeRequired || accountLifecycleRequested) {
+    return (
+      <WorkforceLoginScreen
+        request={fetchJson}
+        onLogin={handleLogin}
+        onAuthenticated={handleAuthenticated}
+        error={loginError}
+        busy={loggingIn}
+        forcePasswordChange={passwordChangeRequired}
+      />
+    )
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -3702,7 +5379,7 @@ function App() {
         data={data}
         seed={seed}
         ops={ops}
-        recoveredToday={recoveredToday}
+        verifiedThisMonth={verifiedThisMonth}
       />
 
       <div className="app-main">
@@ -3737,7 +5414,7 @@ function App() {
               type="button"
               className={dataDomain === 'world_simulation' ? 'is-active' : ''}
               aria-pressed={dataDomain === 'world_simulation'}
-              title="Generated test scenarios"
+              title="Operational validation"
               onClick={() => selectDataDomain('world_simulation')}
             >
               Simulation
@@ -3780,7 +5457,8 @@ function App() {
               seed={seed}
               queue={queue}
               ops={ops}
-              recoveredToday={recoveredToday}
+              verifiedThisMonth={verifiedThisMonth}
+              onRefresh={() => setReloadKey((key) => key + 1)}
               agenticRuns={agenticRuns}
               onRunAgentic={runAgenticScenario}
             />

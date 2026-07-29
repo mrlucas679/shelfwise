@@ -1,4 +1,544 @@
-# HANDOFF — current continuation state as of 2026-07-15
+# HANDOFF — current continuation state as of 2026-07-29
+
+## Adaptive failure attribution and final readiness pass — BUILT, 2026-07-29
+
+Plan 017 is complete. ShelfWise adapts the useful one-class-success principle from *Tracing
+Agentic Failure from the Flow of Success* without adopting the paper as a replacement
+architecture. The existing trace registry remains the trajectory surface; existing
+TraceSpan, ModelCall, ToolExecution, EvidenceObject, and Decision receipts are converted into
+bounded structural representations only when
+`SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED=true`.
+
+The feature defaults off and preserves the previous trace payload and failed-model behavior.
+When enabled, successful references are isolated by tenant, data domain, and trajectory family;
+failed inference and post-model schema/tool/grounding boundaries produce safe correlated
+diagnostics. No raw prompts, model text, tool payloads, errors, secrets, or personal data enter
+the representation. Attribution never replays, trains, writes back, or promotes anything
+automatically, and operational-twin traces are categorically training-ineligible.
+
+Final local evidence from the completed source state:
+
+- 951 Python tests passed, 21 environment-gated tests skipped.
+- Ruff, the 249-record capability contract, frontend typecheck, and production build passed.
+- All 12 isolated Chromium product flows passed on ports 5187/8017.
+- Dependency resolution and the Node production advisory scan are clean.
+- Exact implementation commit `abe6924` passed GitHub CI with 971 tests, 1 skip, 12 browser
+  flows, fresh Postgres/Redis, wheel import, Compose validation, production-topology smoke, and
+  deployment shakedown. Both push and pull-request capability-contract checks passed.
+- Live provider/hardware/retailer proof remains external and must not be inferred from local or
+  hosted deterministic tests.
+
+The detailed evidence set is under `reports/`, and
+`docs/ADAPTIVE_FAILURE_ATTRIBUTION.md` is the operator/developer guide.
+
+## One-command shop startup — BUILT, 2026-07-28
+
+`provision_new_shop.py` generated a shop's secrets but stopped there: an operator still had
+to paste the fragment into a `.env`, know which Compose file to run, and know how to tell when
+the stack was actually ready. That was the remaining developer step between "downloaded the
+application" and "signed in as the owner".
+
+`scripts/start_shelfwise.py` closes it. One command provisions the shop (only if not already
+provisioned), brings the Compose stack up, polls the real `/health` endpoint, and prints the
+console URL plus first-login credentials:
+
+```
+python scripts/start_shelfwise.py --company "Boxer Bramley" --owner-email owner@example.com
+```
+
+Design points that are correctness, not polish:
+
+- **An existing `.env` is never regenerated or overwritten.** Re-minting
+  `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` would make every stored connector credential, webhook
+  secret, and device secret permanently undecryptable, and a new password hash would lock the
+  owner out of their own instance. Re-running only restarts the stack.
+- **An empty `.env` still counts as unprovisioned**, so a half-created file is not mistaken
+  for a configured shop.
+- **The health wait is bounded and fails closed.** A stack that never becomes healthy reports
+  a clear failure instead of hanging and looking like a successful start; `ok: false` is
+  treated as not-ready rather than ready.
+- **The plaintext owner password never reaches the env file** - only its scrypt hash - and a
+  password the owner supplied is not echoed back as if generated.
+- Missing Docker produces an installable instruction, not a traceback.
+
+Tests: `tests/test_start_shelfwise.py` (11), covering each of the above.
+
+**Verification boundary, stated precisely.** The script *was* executed for real against this
+machine's Docker, and that run proved two of its three paths:
+
+- **The `.env` preservation guard works in the real script**, not only in tests: the run
+  reported "`.env` already exists - keeping the existing setup and secrets" and left the
+  existing file untouched. This is the behaviour that protects an owner's password and every
+  stored connector/webhook/device secret from being silently invalidated by a re-run.
+- **The Docker-failure path behaves as designed**: when Compose could not start the stack, the
+  script printed the intended actionable message (Docker Desktop not running, or ports 8000 /
+  5173 already in use) and exited non-zero, rather than emitting a traceback or hanging
+  forever while looking like a successful start.
+
+**What is still unproven: the happy path** - a successful `compose up`, `/health` going green,
+and the console URL/credentials being printed. That could not be reached here for a purely
+environmental reason: this machine's C: drive is effectively full (it fell from ~1.6 GB to
+297 MB free during the attempt) and the Docker Desktop Linux engine became unresponsive
+(`context deadline exceeded` on its named pipe). No amount of application change fixes that.
+
+Whoever picks this up: **free real disk space first** (a backend + frontend image build needs
+several GB), confirm `docker compose version` and `docker info` both respond, then run
+`python scripts/start_shelfwise.py --company "..." --owner-email ...` once end to end in a
+clean directory and confirm the printed URL actually serves the console.
+
+**Scope, stated plainly:** this deploys ShelfWise on the machine that runs it, which is what a
+single shop evaluating the product needs. It is not a hosted multi-tenant sign-up service and
+provisions no cloud infrastructure; that remains a separate, larger piece of work.
+
+## Self-serve retailer webhook endpoints — BUILT, 2026-07-28
+
+Closes the last connector gap that still required a developer. The 2026-07-23 credential
+work explicitly recorded its own exclusion: "Webhook-based systems (Shopify, Square,
+Lightspeed, Yoco) still require operator-side configuration - they authenticate via a shared
+webhook secret, not a stored credential a store owner enters themselves." Because
+`/connectors/{system}/intake` is gated by `INGEST_AUTH_DEP` (the operator's shared ingest API
+key), a shop owner could self-serve connect an ERP but **not** their own till or online store.
+
+Same shape as the two previous real gaps found this campaign (connector credentials, edge
+device registry): the HMAC machinery already existed and was correct, but had no self-serve
+front door.
+
+**Built:**
+- `shelfwise_connectors/webhook_endpoints.py` — per-tenant, per-system endpoint identity with
+  an encrypted-at-rest signing secret (same `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` mechanism as
+  connector credentials and edge devices), memory + Postgres, in the central `schema.sql`.
+  Deliberately **not** RLS-scoped, for exactly the documented edge-device reason:
+  `get_active(endpoint_id)` is what resolves *which* tenant an unauthenticated delivery belongs
+  to, before any tenant is known, so binding a tenant to find the tenant is circular and RLS
+  would match zero rows and permanently break delivery. Tenant scoping for list/revoke is
+  enforced with explicit application-layer predicates instead.
+- `routes_webhook_endpoints.py` — owner-only provision/list/revoke, plus
+  `POST /connectors/webhook/{endpoint_id}`, which authenticates on the tenant's own signature
+  alone and carries no operator API key. Deliveries run through the *same*
+  `_process_inbound_record` pipeline as the keyed intake route (injected, not imported), so
+  dedup, validation, and projection behaviour are identical.
+- `WebhookEndpointsPanel` in the console, in both the Connections workspace and the guided
+  setup's data step. The owner picks a system, gets a delivery URL and signing secret shown
+  exactly once, and pastes them into that retailer's webhook settings.
+
+**Security properties under test** (`tests/test_webhook_endpoints.py`, 10 tests): a tampered
+body no longer matches its signature; a revoked endpoint stops accepting previously valid
+deliveries; one tenant can neither list nor revoke another's endpoint; a delivery payload
+cannot name the tenant it lands in (attribution comes from the endpoint, not the body); an
+unknown endpoint id is indistinguishable from a bad signature, so the route cannot be used to
+probe which ids exist; poll-based systems are refused an endpoint they could never deliver to.
+
+Verification on this tree:
+
+- `943 passed, 21 skipped` — complete Python suite (including the startup-script tests).
+- Ruff clean; frontend TypeScript check and production build clean.
+- Capability contract: 248 capabilities,
+  `sha256:4572676304541c4f4e3fb104515af9195c8fa10a4c3620c4ccaa597f2bd5ca43`.
+- Playwright **11/11** on isolated ports 5187/8017, including a new browser test that drives
+  the real provisioning route end to end.
+
+**Still not built, stated plainly:** raw camera video ingestion and computer vision; outbound
+write-back to a source POS/ERP; and self-serve *deployment* (an operator still stands up the
+instance). What is now true is narrower and real: a store owner can connect every one of the
+nine supported source systems themselves, from the product, with no developer.
+
+## Plans 013-016 — BUILT and gate-verified, 2026-07-28
+
+The four remaining IN PROGRESS plans are implemented and their done criteria are met:
+
+- **013 category policy confirmation.** `product_policies.py` exposes serializable built-in
+  templates; a tenant-scoped memory/Postgres confirmation store with central-schema RLS records
+  them. Owner-only `GET /onboarding/policies` and `POST /onboarding/policies/confirm` persist by
+  tenant/category/template, and a superseded template ID no longer satisfies readiness
+  (`_current_policy_confirmations` re-checks each confirmation against the current template).
+  Setup readiness is now four required steps: company, store, data source, policies.
+- **014 role-personalized queues.** `decision_assignment.py` owns one server-side assignment
+  matrix; `GET /decisions?queue_view=assigned` derives the queue from the verified
+  `TenantContext.role` only, never a query parameter, and `queue_view=all` still returns the
+  complete tenant ledger. The browser approval queue consumes the assigned view.
+- **015 verified value reporting.** `value_reporting.py` plus `routes_reports.py` expose a
+  month-bounded `GET /reports/value-recovered`. Only explicitly recorded actual amounts count as
+  `verified_recovered`; modeled approval outcomes stay separately labelled and are never summed
+  into it, which is the specific overclaim the plan's HIGH risk flagged.
+- **016 operations controls.** `scripts/health_monitor.py` is a stdlib uptime probe that requires
+  both liveness and seed readiness, exits non-zero on failure, writes a bounded JSONL incident
+  receipt without copying response bodies, and rejects insecure or credential-bearing webhook
+  URLs. `docs/RELEASE_AND_OPERATIONS_RUNBOOK.md` and `docs/POPIA_OPERATIONS_CHECKLIST.md` record
+  release/rollback, support, and data-protection responsibilities. No paid dependency was added.
+
+Verification on this tree:
+
+- `921 passed, 21 skipped` — complete Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- Frontend TypeScript check and production build passed.
+- Capability contract: 244 deterministic capabilities,
+  `sha256:4f39cff655f653320b23765f80a6915d67e78126760fcb436d411418f1ade21d`.
+- Playwright **10/10** against isolated ShelfWise ports **5187/8017**.
+
+Browser-suite isolation note: an earlier run failed for an environmental reason, not a ShelfWise
+assertion — Playwright reused an unrelated MediChain server already listening on the default port
+5173. That external application was left running and unmodified; this suite is instead pinned to
+its own ports via `PLAYWRIGHT_FRONTEND_PORT`/`PLAYWRIGHT_BACKEND_PORT`, so it can only talk to
+this repository's servers. Re-run with those variables set, never on the shared default port.
+
+## Workforce productization, bounded retrieval, and POS inventory projection — BUILT, 2026-07-28
+
+Plan 012 is implemented against the existing dedicated-client architecture:
+
+- A platform-authorized, one-time browser bootstrap creates the configured client profile and
+  first opaque-ID owner. Configured legacy-owner credentials migrate idempotently and cannot
+  remain an implicit steady-state fallback unless emergency recovery is explicitly enabled.
+- Workforce accounts now have durable status, single-use invitation/reset digests, session
+  versions, and identity-only audit events in memory/Postgres stores with central-schema RLS.
+  Owner actions cover invitation/resend, role changes, recovery, deactivation/reactivation, and
+  last-owner/self-deactivation protection. Workers activate, reset, and replace temporary
+  passwords in the browser; role/password/activity changes invalidate earlier workforce JWTs.
+- Account email uses a provider-neutral standard SMTP contract. Missing delivery configuration
+  fails closed and tokens are carried in URL fragments, never returned by browser APIs or stored
+  as plaintext. A real mail account remains an operator credential boundary, not hidden software.
+- `retrieval_planning.py` builds a deterministic plan before chat state is read. Every answer
+  records selected partitions, counts, omissions, freshness, conflicts, inadequacy, and a hard
+  maximum-one-follow-up receipt. Support/account questions skip operational state; conflict,
+  risk, or inadequate evidence selects the actual strong model role.
+- Normalized operational stock updates and POS sales now project into the inventory ledger with
+  tenant-scoped replay receipts. Duplicate delivery cannot double-decrement, shortfalls never
+  make quantity negative, and missing baselines/fractional quantities remain visible receipts.
+  The existing Square, Shopify, Lightspeed, and Yoco paths supply these normalized events; live
+  retailer credentials are still required for external acceptance.
+
+Verification on the final local tree:
+
+- `907 passed, 21 skipped` — complete Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- Frontend TypeScript check and production build passed (288 modules).
+- Capability contract: 241 deterministic capabilities,
+  `sha256:3697ed095051760ab9146f1247320b68c175bfd4cc0b2abde5ca4a25aedc3f47`.
+- Playwright: 10/10 passed against isolated ShelfWise ports 5187/8017, including activation and
+  first-owner setup screens plus the existing onboarding, HITL, chat, connector, and device paths.
+
+Exact-head GitHub Actions passed on implementation commit `e656d1d`: both push and pull-request
+CI plus both capability-contract runs completed successfully. CI exercised 927 tests with fresh
+Postgres/Redis (1 environment-gated skip), the distributable wheel, production Compose topology,
+and deployment shakedown. Live MI300X/Fireworks, SMTP delivery, and retailer-sandbox traffic
+require external credentials and must not be inferred from local or CI success.
+
+## Guided first-store onboarding — BUILT and browser-verified, 2026-07-28
+
+ShelfWise now has a resumable **Setup guide** in the product instead of requiring a new
+client to assemble the runbook manually. The owner completes three required steps backed by
+authoritative tenant-scoped server state: company profile, store creation, and one real data
+source (encrypted connector credentials or a committed CSV import). Device provisioning and
+named work accounts are available in the same flow but remain optional, so an owner-operated
+shop without edge hardware is not blocked.
+
+The new owner-only `GET /onboarding/status` read model derives progress from the company
+profile store, durable twin onboarding manifests, configured connector credentials, imported
+records, edge devices, and work accounts. It never accepts browser completion flags. Store
+manifest listing is now bounded and tenant-scoped in both memory and Postgres.
+
+The browser campaign found and fixed two real defects:
+
+- An empty runtime `apiBase` incorrectly overrode `VITE_API_BASE`, so isolated deployments and
+  tests silently fell back to `localhost:8000`. Empty runtime values now correctly defer to the
+  build-time endpoint.
+- The company form merged the full server profile into editable form state, then posted
+  server-only fields (`tenant_id`, `status`, and timestamps) back to a strict endpoint, causing
+  a 422. The form now selects only the four editable company fields at the trust boundary.
+
+The Playwright harness now uses explicit isolated frontend/backend ports and invokes the local
+Vite executable directly, preventing it from reusing an unrelated server on port 5173. Its
+stale navigation smoke assertion was also corrected: dynamic simulation counts are matched as
+counts, while the dedicated delivery test continues to assert the exact 17-issue result.
+
+Verification on the final tree:
+
+- `892 passed, 21 skipped` — complete local Python suite.
+- Ruff clean across `src`, `tests`, and `scripts`.
+- TypeScript `tsc --noEmit` and the Vite production build passed (287 modules).
+- Capability contract: 231 deterministic capabilities,
+  `sha256:704b122afaf55b2157bb80a4ff2fa0c3c3f4c2965c3d0759a60392044fe7b582`.
+- Playwright golden path: 8/8 passed against disposable ShelfWise servers, including guided
+  onboarding, HITL approval, grounded chat, ERP connection, and edge-device registration.
+
+The first GitHub CI run on this work then found an older packaging debt that local dependency
+state had masked: `cryptography>=42` was declared in `pyproject.toml` but absent from
+`requirements.txt`, which is what CI and the backend Dockerfile install. The distributable
+wheel therefore failed to import its encrypted-credential module in a clean environment.
+`requirements.txt` is aligned, and `test_package_contract.py` now enforces that every runtime
+project dependency remains present in the deployment requirements file. A wheel-only import
+was reproduced successfully from outside the source tree before the follow-up push.
+
+The next clean CI run exposed a second production-only drift: the durable edge-device registry
+had a module-local auto-schema but was absent from the central `schema.sql` used when production
+disables runtime DDL. The central migration now creates the encrypted device table, and a static
+schema contract prevents another local/production split. The same run also proved that a raw
+connector-credential assertion was querying a forced-RLS table without binding its tenant; the
+test now reads the stored ciphertext through the restricted, tenant-bound application role.
+
+GitHub Actions is green on final implementation commit `2dc89b4`: **912 passed, 1 skipped**
+against fresh Postgres and Redis; the 33/33 eval gate, wheel-only import, 8/8 browser suite,
+amd64 production image build, public-origin smoke, and three-cycle deployment shakedown all
+passed. The separate capability-contract workflow also passed. CI did not have AMD endpoint
+credentials, so live MI300X/Fireworks response proof remains an external cloud-run boundary;
+the deployed stack correctly failed closed rather than manufacturing an offline chat answer.
+
+Local environment note: this machine's project `.venv` launcher currently points at a removed
+uv-managed Python installation. Verification therefore used the already-installed Hermes
+Python environment plus the bundled Node runtime. This is a local launcher repair, not an
+application or CI failure; do not claim that the broken `.venv` itself was tested.
+
+## Camera/sensor connectivity — BUILT, 2026-07-23 (real self-serve credential, not raw video)
+
+Direct follow-up after the login/credentials work below: the user pushed back that
+"cameras" specifically still needed to be connectable, not marked out of scope. Rather than
+fabricate video processing (genuinely impossible to build honestly in a session - real
+computer-vision/hardware work), investigated what a real answer looks like and found a
+second real, closeable gap underneath the first "explicitly out of scope" framing:
+
+**`edge_device_registry` (`shelfwise_edge`) had a `register()` method with no API route
+exposing it at all** - not even an operator could provision a camera/sensor device
+credential without hand-editing code. `/twin/edge/observations` (the real,
+HMAC-authenticated, media-free intake endpoint that already existed) had no working front
+door. Its own module docstring already said "process-local registry used until durable
+device provisioning is selected" - an honest, self-acknowledged placeholder, same pattern
+as the connector-credentials gap closed earlier today.
+
+**Built, completely:**
+- `PostgresEdgeDeviceRegistry` (`shelfwise_edge/registry.py`) - encrypted-at-rest (same
+  `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY`/Fernet mechanism as connector credentials, kept
+  package-local rather than importing `shelfwise_connectors` to avoid an unwanted layering
+  coupling), durable across restarts. **Deliberately NOT tenant-RLS-scoped** - a real
+  design finding caught before it shipped, not assumed: `get_active(device_id)` is exactly
+  how the edge-ingest route resolves *which* tenant a request belongs to, from an opaque
+  device_id alone, before any tenant is known. Binding a tenant to look up the tenant is
+  circular, and with no tenant bound, `current_setting('app.tenant_id')` is NULL, so RLS's
+  `tenant_id = current_setting(...)` policy would silently return zero rows for every
+  lookup - permanently breaking the endpoint. Tenant scoping for `list_devices`/`revoke` is
+  instead enforced at the application layer, which is correct for this table's actual
+  access pattern (device_id is an unguessable random token; possessing it alone grants
+  nothing without the paired HMAC secret).
+- `POST /twin/stores/{store_id}/devices` (owner-only) - provisions a device, returns the
+  HMAC secret exactly once. `POST /twin/stores/{store_id}/devices/{device_id}/revoke`
+  (owner-only, verifies tenant+store ownership before revoking).
+- `EdgeDeviceRegistrationPanel` (`frontend/src/App.tsx`, in the Store Twin workspace) - a
+  real self-serve UI: register, see the one-time secret, revoke. Help text states plainly
+  what this is and isn't: **most commercial retail camera/people-counting systems push
+  structured events via their own webhook/REST API rather than streaming raw video** - this
+  panel provisions the credential a shop points that existing integration at. It is
+  explicitly not a raw-video pipeline, and the UI says so rather than implying otherwise.
+
+Verified live end-to-end in the Browser pane: registered a real device, confirmed the
+one-time secret display, confirmed the list updates, revoked it, confirmed status flips to
+"Revoked". New tests: `tests/test_edge_device_registration.py` (6 tests - registration,
+secret-never-listed, **a freshly registered device can actually sign a real
+`/twin/edge/observations` batch end to end**, revoke blocks further batches, cross-tenant/
+cross-store revoke is rejected, owner-role required) and
+`tests/test_postgres_schema_contract.py::test_postgres_edge_device_secrets_are_encrypted_at_rest_and_survive_a_fresh_instance`
+(encryption-at-rest + durability across a fresh registry instance, simulating a restart).
+New Playwright E2E test (`golden-path.spec.ts`, "a store owner can self-serve register a
+camera/sensor device credential"). Full suite green after (858 passed, 21 skipped, up from
+852/20 - the new tests), manifest regenerated (221 capabilities, up from 219).
+
+**Still honestly out of scope, stated plainly:** raw video capture, streaming, storage, or
+computer-vision processing (people-counting from camera frames, etc.) is not built and was
+never attempted - that is a genuinely separate, much larger project. What's built is the
+real, complete, secure front door for camera/sensor SYSTEMS THAT ALREADY compute their own
+structured events (the overwhelming majority of commercial retail camera products) to
+connect to ShelfWise.
+
+## Self-serve login + "Connect your systems" credential UI — BUILT, 2026-07-23
+
+Answers the concrete question the user asked directly: "if a shop like Boxer downloads
+this and wants to connect their existing systems, how do they do it?" Investigation before
+writing any code found the deployment model is deliberately white-glove per
+`CLIENT_INTAKE_RUNBOOK.md` ("one dedicated stack per client, owner decision 2026-07-23") -
+the user confirmed via AskUserQuestion to keep that model but make the parts a client's own
+staff should self-serve actually self-serve, rather than requiring an operator to
+hand-edit env vars or curl the API.
+
+**Two real, severe gaps found and closed, not just the one originally asked about:**
+
+1. **There was no login screen at all.** `ensureBrowserSession()` calls `POST
+   /auth/session` on every load; in real client deployments (`SHELFWISE_AUTH_MODE=jwt`
+   with public demo sessions correctly disabled - the secure default) that 401s with no
+   session cookie yet, and the frontend had nothing to recover with - the entire app broke
+   silently. This is more severe than the credentials panel: without it, an owner
+   literally cannot open ANY page of a real deployment, let alone connect a system. Built
+   `LoginScreen` (`frontend/src/App.tsx`) wired to the real, already-existing, already
+   production-grade `/auth/login` (scrypt-verified, httpOnly JWT cookie) - the app now
+   detects a 401 specifically (`isUnauthorizedError`) and renders a real sign-in form
+   instead of a dead error screen.
+2. **The "Connections" tab was a raw API-endpoint explorer**, not a form a non-developer
+   could use - built for testing routes, not for a shop owner to type in their Odoo URL
+   and API key. Built `ConnectorCredentialsPanel`, a real self-serve form (per-system field
+   sets matching exactly what `connector_poll_service.py`'s resolver needs) wired to the
+   credential-storage API from earlier today (`POST/GET/DELETE
+   /connectors/{system}/credentials`). Values are never re-displayed once saved - only
+   whether a system is configured.
+
+**Real bug this local-dev/preview harness itself had, found while verifying live (not by
+reading code):** `.claude/launch.json`'s backend launch command ran `uvicorn` directly with
+no `--env-file`, so `.env` was silently never loaded for local dev/testing - unlike both
+`docker-compose.yml` and `docker-compose.production.yml`, which correctly use `env_file:`.
+Every `.env.example` var (including today's new
+`SHELFWISE_CREDENTIAL_ENCRYPTION_KEY`/`SHELFWISE_LOGIN_*`) was inert for anyone running the
+backend this way. Fixed permanently: added `--env-file .env` to the launch config (a real
+uvicorn flag, not a workaround).
+
+**Two more real bugs caught only by actually clicking through the feature in a live
+browser, not by reading the code:**
+- Three React list renders (`GATED_ENDPOINTS` in the debug endpoint explorer) used
+  `key={item.path}` - collided for the new GET/POST pairs sharing
+  `/connectors/{system}/credentials`, and pre-existed for other GET/POST pairs sharing a
+  path. Fixed to `key={`${item.method}:${item.path}`}` at all 3 render sites.
+- The Playwright E2E test added for this (`frontend/e2e/golden-path.spec.ts`, "a store
+  owner can self-serve connect an ERP system through the real credential API") initially
+  used `getByRole('region', ...)` to find the panel - `WorkspaceSection` renders a bare
+  `<section>` with no `aria-labelledby`, so it never gets an implicit accessible name/role
+  in browsers, meaning the query silently matched nothing. Fixed to a class + text locator.
+  Also added `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY` to `playwright.config.ts`'s test
+  webServer env (that config deliberately doesn't load `.env` either, by design, so the
+  new credential-write path needs its own explicit test key).
+
+**Verified live end-to-end**, not just via the new test: booted both servers with
+`SHELFWISE_AUTH_MODE=jwt` and a real scrypt-hashed login configured, cleared cookies,
+confirmed the login screen renders, typed real credentials, confirmed `/auth/login`
+succeeds and the full app loads; then in the Connections workspace, filled in real Odoo
+credentials, confirmed `POST .../credentials` returns 200 and the row flips to
+"Connected", confirmed the raw network response never contains the submitted value,
+reloaded the page and confirmed status persists from the server (not local-only state),
+then disconnected and confirmed it reverts to "Not connected". New Playwright test
+(`e2e/golden-path.spec.ts`) covers the same flow against a fresh server for regression
+protection. Full backend suite green after (852 passed, 20 skipped), manifest regenerated
+and content-verified unchanged in structure (219 capabilities).
+
+**Still explicitly out of scope, stated honestly rather than silently claimed as done:**
+- Raw camera/CCTV video integration is not built. Camera and sensor products that already
+  emit structured derived observations can now be provisioned self-service through the
+  device registry above; video capture, streaming, storage, and in-app computer vision
+  remain a separate hardware/computer-vision project.
+- Webhook-based systems (Shopify, Square, Lightspeed, Yoco) still require operator-side
+  configuration - they authenticate via a shared webhook secret, not a stored credential a
+  store owner enters themselves, so they're deliberately not in the new panel.
+- A pre-existing, unrelated E2E test failure was found and diagnosed while running the
+  suite (`golden-path.spec.ts`'s "every populated simulation workspace opens..." expects
+  "Sell first 12 products" but the live seeded count is now 16) - confirmed via a direct
+  `git stash`/re-test A/B check that this predates and is unrelated to every change in this
+  entry; not fixed here since it's outside this round's scope, flagged for whoever next
+  touches world-generation seed determinism.
+
+## Client-readiness verification pass — 2026-07-23 (real bug caught: dependency drift in `.venv`)
+
+Ran a real end-to-end check per an explicit "make sure the app is fully ready for a client"
+directive - not just re-reading test output, but actually booting both servers and hitting
+live routes.
+
+**Real bug found and fixed:** the project's own `.venv` (the interpreter
+`.claude/launch.json` actually uses to run `uvicorn`) was missing `cryptography` and
+`psycopg-pool` - both added to `pyproject.toml` this session but never installed into this
+specific venv. `preview_start` on `shelfwise-backend` failed outright with
+`ModuleNotFoundError: No module named 'cryptography'`. This had been silently masked all
+session: this shell's `PATH` puts an unrelated `hermes-agent` tool venv ahead of this
+project's `.venv`, so every `python -m pytest`/`ruff`/import-check run this session had been
+executing against that stray venv, which happened to already have `cryptography` installed
+from unrelated prior work - meaning **the actual deployment interpreter had never once been
+verified this session** until this pass. Fixed: `.venv/Scripts/python.exe -m pip install -e
+".[dev]"` to sync it for real. Re-ran everything that matters against the *correct*
+interpreter afterward: full suite (852 passed, 20 skipped, identical to the stray venv's
+result - the code itself was never wrong, only the dependency install was incomplete in the
+real venv), ruff (clean), capability manifest (219, byte-identical hash to what the stray
+venv produced).
+
+**Lesson for future sessions in this repo, on this machine:** always invoke
+`.venv/Scripts/python.exe` explicitly (or `.venv\Scripts\python.exe` in PowerShell) rather
+than bare `python` - this shell's PATH does not resolve to the project's own venv by default.
+
+**Live connectivity verified for real**, not just via pytest fixtures: started both
+`shelfwise-backend` (uvicorn) and `shelfwise-web` (vite) via the Browser pane, confirmed
+`/health` responds correctly, loaded the actual frontend at `localhost:5173`, and read its
+real network request log - **20 live API calls, all 200 OK**, including
+`/connectors/systems`, `/mlops/model-runs`, `/mlops/accountability`, `/tenants/me`, and
+every other route this session's work touched. No console errors, no failed requests, no
+error-boundary fallback rendered - the frontend genuinely renders live backend state
+("Queue clear. I'll surface exceptions as soon as they appear.").
+
+## Multi-tenant encrypted connector credentials — BUILT, 2026-07-23 (explicit user directive: fix everything, no deferral)
+
+## Multi-tenant encrypted connector credentials — BUILT, 2026-07-23 (explicit user directive: fix everything, no deferral)
+
+Closes the gap the 2026-07-14 connector-poll work explicitly scoped out as "its own future
+decision": credentials for Odoo/SAP/SYSPRO/Dynamics were read from process-wide env vars,
+correct for a single-tenant deployment but structurally unable to give two tenants different
+ERP credentials.
+
+**Built, completely:**
+- `src/shelfwise_connectors/credentials.py` - `InMemoryConnectorCredentialStore`/
+  `PostgresConnectorCredentialStore`, Fernet-encrypted at rest (key derived via SHA-256 from
+  `SHELFWISE_CREDENTIAL_ENCRYPTION_KEY`, same "any secret in, one valid key out" pattern
+  `TENANT_AUTH_SECRET` already uses), RLS-scoped like every other tenant table
+  (`shelfwise_connector_credentials` added to `TENANT_SCOPED_TABLES` and to
+  `src/shelfwise_storage/schema.sql`'s compose-init schema - caught by
+  `test_compose_init_schema_matches_tenant_scoped_tables`, which is exactly what that test
+  exists to catch). `resolve_connector_credentials()` prefers a tenant's stored credentials,
+  falling back to the env-var default only when the tenant has none configured.
+- `connector_poll_service.py`'s `build_configured_connectors` now takes an optional
+  `credential_store` and resolves each system's fields through it - a tenant with stored
+  Odoo credentials gets a connector built from ITS values, not the shared default, proven
+  end-to-end (not just at the resolver-function level) by
+  `tests/test_connector_poll_service.py::test_tenant_stored_credentials_take_priority_over_env_vars`.
+- `routes_connector_credentials.py` (new router, kept separate from the read-only
+  `routes_connectors.py` deliberately) - owner-only `GET`/`POST`/`POST .../delete` for a
+  tenant's own credentials. `GET` never returns values, only whether a system is configured -
+  verified by a test asserting the plaintext secret never appears in the response body.
+- `cryptography>=42` added as a real declared dependency (was previously only a transitive
+  import); `.env.example` documents the new var.
+
+**Deliberately NOT built, and why:** the background poll loop is still one process polling
+one tenant's connectors (`SHELFWISE_TENANT_ID`) per cycle - turning it into a true
+multi-tenant loop (N tenants, N schedules, per-tenant backpressure and failure isolation so
+one tenant's slow/broken ERP can't starve another's poll) is a separate, larger architecture
+change that deserves its own design pass. What's built today means a tenant who configures
+credentials gets tenant-specific behavior immediately in every credential-resolution call
+site, without waiting for that larger change - a real, additive step, not a stub.
+
+Tests: `tests/test_connector_credentials.py` (9, encryption round-trip, tenant isolation,
+error handling), `tests/test_connector_credential_routes.py` (6, owner-only auth, no
+plaintext leakage, cross-tenant isolation, 404 on unknown system),
+`tests/test_postgres_schema_contract.py::test_postgres_connector_credentials_are_encrypted_at_rest_and_tenant_isolated`
+(real Postgres: raw column never contains plaintext, cross-tenant read returns nothing),
+`tests/test_connector_poll_service.py` (+2). `test_database_schema.py`'s compose-init-schema
+contract test caught a missed step (forgot the static `schema.sql` file initially) - real
+value from that mechanical check, not a formality. Full suite pending confirmation in this
+same round; manifest regenerated (219 capabilities, +3 for the new router).
+
+## Executive-conclusion grounding — CLOSED, 2026-07-23 (explicit user directive: fix everything, no deferral)
+
+The smaller follow-on flagged when the critic-verdict finding was re-verified closed: the
+Executive's conclusion in all 6 agentic cascades (golden/markdown, procurement, sales,
+catalog-price, expiry-risk, cold-chain) is now grounding-checked against the same tool-result
+evidence pool the Critic used (`assert_conclusion_grounded_in_tool_results`), not left as
+unverified prose. For the 4 cascades with an autonomous-approval path (golden, procurement,
+sales, cold-chain), this is **conditional on the critic having actually passed** -
+`_enforce_critic_verdict` already forces the safe fallback action regardless of what the
+Executive says once the critic fails, so the existing adversarial tests that deliberately
+script an ungrounded, disagreeing Executive to prove that override holds (e.g.
+`test_critic_gate_overrides_an_executive_that_escalates_past_a_failed_critic`) still pass
+unchanged - grounding is only enforced in the path where the Executive's word is actually
+trusted forward. The other 2 cascades (catalog-price, expiry-risk) always hard-route to one
+fixed safe action regardless of the verdict, so their Executive grounding check is
+unconditional (already the case, no test needed updating).
+
+New regression test:
+`tests/test_agentic_golden_cascade.py::test_agentic_golden_cascade_rejects_an_agreeing_executives_ungrounded_conclusion`
+- scripts a Critic that passes with real cited figures and an Executive that agrees with the
+route but writes "Looks fine, approving it." with no citation; asserts this is now rejected,
+closing the actual gap (an agreeing-but-ungrounded Executive was previously accepted
+silently). Updated 2 existing fixtures in `test_agentic_golden_cascade.py`
+(`_scripted_messages` and the long-conclusion test) whose Executive conclusions didn't cite
+tool numbers, to genuinely cite them - this is what real Executive conclusions from a
+well-behaved model look like, not a workaround. 13/13 golden-cascade tests and all 40
+agentic-cascade tests across all 6 cascade files pass; full suite green after
+(manifest regenerated).
 
 > **Working-product branch boundary:** This continuation is implementation work after the
 > hackathon and belongs on `developers`. Treat `main` as the protected working-product branch;
@@ -7,6 +547,742 @@
 > **Read this section first.** The historical notes below remain as evidence, but many of
 > their branch names, counts, and deadlines are stale. The authoritative working branch is
 > `developers`; only `main` and `developers` exist locally and on `origin`.
+
+## Chat streaming claims-vs-reality gap — CLOSED, 2026-07-23 (explicit user directive: fix it, no deferral)
+
+The user directly overrode the earlier "deferred, needs its own session" framing: "fix
+everything... don't look at the risk... stick on that one thing until you finish it." This
+was investigated properly rather than built as a half-measure. Findings before writing any
+code:
+
+- The chat answer is produced by `AgentOrchestrator.run_messages`
+  (`src/shelfwise_inference/orchestration.py`) - the exact same bounded tool-calling loop
+  every production cascade shares. A turn cannot be known to be "the final answer" until
+  *after* its response arrives (the loop tries to parse a tool call first; only if there
+  isn't one does it attempt to parse the turn as the final JSON answer), and grounding
+  validation (`_assert_chat_grounded` in `chat.py`) only runs once the complete text exists.
+- This means genuine live-token capture (piping `shelfwise_inference.stream_chat_deltas`
+  straight from the provider to the client as tokens arrive) is fundamentally incompatible
+  with the safety invariant every other agentic surface in this app holds: nothing reaches a
+  caller that has not itself been validated. Streaming live would mean showing text before
+  grounding can reject it.
+- The alternative - re-invoking the model a second time with `stream=True` after the first
+  (blocking) call already produced a validated answer - was also rejected: a second sampled
+  call is not guaranteed to reproduce the exact validated text word-for-word, so the client
+  could end up seeing content that was never actually validated.
+- Modifying the shared `ModelRuntime`/`AgentOrchestrator` protocol to support genuine
+  mid-loop streaming *would* be possible in principle, but only by touching code shared with
+  every production cascade's tool-calling correctness guarantees - real risk to
+  safety-critical decision logic, not risk-aversion for its own sake.
+
+**What was actually built, completely, not as a stopgap:** `/chat/stream`
+(`src/shelfwise_backend/app.py`) now delivers the fully-computed, fully-validated answer to
+the client as a genuine sequence of incremental `delta` SSE events (word-chunked via the new
+`_chunk_answer_for_delta_events`), followed by the existing `answer`/`replayed` event
+(kept, unchanged, for backward compatibility with any client reading only the terminal
+payload) and `done`. This closes the actual defect - the route's docstring and the
+frontend's endpoint-panel label both previously claimed live per-token streaming and
+delivered none; now the client genuinely receives the answer incrementally, safely, with
+zero changes to the shared cascade-tool-calling pipeline. The docstring and frontend label
+were corrected to state precisely what this is (validated-answer chunking, not live provider
+tokens) and why, rather than re-asserting the false claim or reverting to silence.
+
+Verified: `tests/test_chat_conversations.py::test_chunk_answer_for_delta_events_reconstitutes_exactly`
+(chunking never drops or duplicates a character; empty/short/long inputs all reconstitute
+exactly) and the rewritten `test_chat_stream_emits_a_truthful_lifecycle_envelope` (asserts
+`delta` events are now present, concatenating them reproduces the terminal `answer` event's
+text byte-for-byte, and the replay path also delivers deltas). All 9
+`test_chat_conversations.py` tests pass; full suite and manifest regen pending confirmation
+in this same round.
+
+## Cold-chain profile invariant missing — fixed, 2026-07-23 (Design by Contract-grounded)
+
+Framed by Object-Oriented Software Construction (Meyer)'s Design by Contract before opening
+code: does the cold-chain domain (untouched beyond risk-math in the round-1 audit) enforce
+real preconditions/postconditions/invariants, or silently accept invalid states? Checking
+`src/shelfwise_resilience/thermal.py`'s `ColdChainProfile` (the dataclass defining a storage
+class's `safe_max_c`/`unsafe_above_c` thresholds) against that question found it had no
+`__post_init__` at all - constructible with an inverted or degenerate threshold
+(`safe_max_c >= unsafe_above_c`). `_status` (`feed.py`) happens to check `unsafe_above_c`
+first, so it wouldn't misclassify - but `predict_time_to_unsafe`'s
+`minutes_to_unsafe = (unsafe_above_c - current_temp) / slope` has no such ordering defense:
+with an inverted profile, a reading `_status` still calls "safe" could already be past the
+(lower) unsafe threshold, producing a self-contradictory "already unsafe by prediction, still
+safe by direct reading" alert pair. **Fixed** with a `__post_init__` invariant requiring
+`safe_max_c < unsafe_above_c`, matching the pattern this session's earlier round already
+found correctly applied in `expiry.py`/`cold_chain.py` (the decision-science layer) but
+missing here in the resilience/feed layer's own profile type. Both built-in profiles
+("chilled": 5.0/8.0, "frozen": -15.0/-12.0) already satisfy it. New test:
+`tests/test_resilience.py::test_cold_chain_profile_rejects_an_inverted_safety_threshold`.
+33 cold-chain/resilience/thermal tests pass; full suite green after.
+
+## Catalog identifier-conflict race fixed — 2026-07-23 (DDD-grounded)
+
+Framed by Domain-Driven Design (Evans) before opening code: DDD's specific warning that a
+product catalog's identifier resolution (GTIN/barcode/PLU cross-references onto variants) is
+a classic case where a shallow, non-atomic model silently lets "the same" identifier
+represent two different entities. Checking `src/shelfwise_catalog/store.py` against that
+warning found a real bug in `PostgresProductCatalogStore.upsert_identifier`: it checked for a
+conflicting remap with a `select`, then ran a separate, unconditional
+`insert ... on conflict (tenant_id, kind, value) do update set variant_id = excluded.variant_id`
+- classic check-then-act. A concurrent writer's insert landing between the select and the
+insert would be silently overwritten by the unconditional `do update`, defeating the exact
+guard `ConflictingIdentifierError` exists to enforce (its own error message says "resolve the
+conflict explicitly...instead of silently overwriting it," which the SQL could still do under
+a race). The in-memory store was never affected - it holds one process-wide lock around the
+whole check-and-write.
+
+**Fixed** by making the `do update` itself conditional
+(`where shelfwise_product_identifiers.variant_id = excluded.variant_id`) with `returning
+variant_id`: the database, not a race-prone two-step Python check, now decides atomically
+whether the write happens. When it doesn't (a real conflict), the code re-reads the actual
+current mapping only to build a useful error message - the safety decision itself was already
+made by the conditional `do update`. New regression test:
+`tests/test_postgres_schema_contract.py::test_concurrent_conflicting_identifier_upserts_cannot_both_win`
+(two variants race to claim the same GTIN via `ThreadPoolExecutor`; asserts exactly one wins
+and the other observes `ConflictingIdentifierError`, never both silently "winning" by landing
+in whichever order). Like the rest of that file's Postgres-only tests, it's skipped without
+`SHELFWISE_TEST_DATABASE_URL` set (no live Postgres in this session's environment) - the
+existing sequential `test_postgres_catalog_rejects_conflicting_identifier_remap` test in the
+same file still exercises the corrected code's non-concurrent contract and was re-read against
+the new SQL to confirm it still holds. In-memory catalog tests (6) and the full suite pass.
+
+## Multitenancy RLS coverage — exhaustively verified, 2026-07-23 (DDIA/SAiP-grounded)
+
+Framed explicitly by two books before touching code: DDIA's (Kleppmann) instruction to be
+explicit about which isolation/consistency guarantee a piece of code actually needs, and
+Software Architecture in Practice's (Bass/Clements/Kazman) method of naming the specific
+quality attribute (here: security/tenant-isolation) before judging whether a mechanism
+delivers it. The earlier round-1 audit had spot-checked RLS on a sample of tables and called
+it "genuinely fail-closed and well defended-in-depth" - this round replaced the sample with
+exhaustive coverage: every `create table if not exists` statement in the codebase (33
+tables) was diffed against `TENANT_SCOPED_TABLES`
+(`src/shelfwise_storage/rls.py`) in both directions, and every `apply_tenant_rls(...)` call
+site (26, across every `*_store.py`/registry module) was enumerated to confirm each
+tenant-scoped table's schema-creation path actually wires RLS, not just declares it eligible.
+Result: zero gaps either direction - no tenant-scoped table lacks RLS, no RLS-declared table
+is missing its `apply_tenant_rls` call. Stated plainly because it's a real result, not a
+skipped check: multitenant data isolation at the storage layer is comprehensively enforced,
+not merely claimed.
+
+## Broad domain survey, round 4 — 2026-07-23: HITL audit trail, learning loop, chat streaming
+
+Done directly (not via subagent) after a background audit agent failed mid-run when the
+account hit its monthly Claude spend limit - noting this so a stopped/incomplete-looking
+audit thread isn't mistaken for a silent skip.
+
+### Fixed and regression-tested
+
+- **HITL approve/reject audit trail recorded the wrong reviewer.** `decision_store.approve()`/
+  `.reject()` (`src/shelfwise_action/store.py`) accept a `reviewer` keyword and genuinely build
+  a real `review: {reviewer, status, reviewed_at}` audit record - the infrastructure itself is
+  solid. The bug was upstream: both call sites in `src/shelfwise_backend/app.py`
+  (`approve_decision`/`reject_decision`) had `ctx: TenantContext` (the real authenticated
+  reviewer, `ctx.user_id`) available but never passed it through, so every decision's audit
+  trail recorded the hardcoded default `"demo_manager"` regardless of who actually clicked
+  approve/reject - a real bug, not an honest gap, since the audit-trail *field itself* existed
+  and looked legitimate. Fixed by passing `reviewer=ctx.user_id` at both call sites. New test:
+  `tests/test_tenant_auth.py::test_approve_and_reject_record_the_real_authenticated_reviewer`
+  (two distinct authenticated users approve/reject separate decisions; asserts the recorded
+  reviewer is each one's real identity, not a shared placeholder).
+
+### Confirmed genuinely solid, no fix needed
+
+- **The learning loop is real, not decorative.** `learning_store.thresholds()`
+  (`src/shelfwise_memory/__init__.py`) computes a real monotonic high-water-mark per
+  SKU/metric from approved decisions (`greatest(...)` on conflict), and it is genuinely
+  consulted both in chat grounding (`app.py`'s `_new_chat_response`) and cited as evidence in
+  the decision cascade (`cascade.py`'s `_learned_threshold_evidence`) - correctly as evidence
+  for the human reviewer, never as a critic gate (this was deliberately designed that way in
+  an earlier campaign session, task "Close the learning loop safely," and remains correct).
+
+### Chat streaming — CLOSED (superseded, see "Chat streaming claims-vs-reality gap — CLOSED" at the top of this file)
+
+The entry below described the state at the time it was written; it was closed later the same
+day per an explicit user directive to stop deferring. Left in place as evidence, not as the
+current status - do not re-read it as "still open."
+
+`/chat/stream`'s own docstring (`app.py:1090-1100`) explicitly claims: "Token deltas from a
+live endpoint slot into this same envelope as `delta` events via
+`shelfwise_inference.stream_chat_deltas` once the answer turn streams from a live provider."
+This is false as implemented - the route body always calls the blocking, non-streaming
+`chat()` function, waits for the complete answer, and emits exactly one `accepted` →
+`answer`/`replayed` → `done` sequence. `stream_chat_deltas` (`shelfwise_inference/client.py`)
+is a real, correctly-implemented, unit-tested token-delta parser
+(`tests/test_chat_conversations.py::test_stream_chat_deltas_parses_real_wire_chunks_and_fails_closed_offline`)
+- it is simply never called from the endpoint. The frontend's own label ("SSE chat with a
+truthful lifecycle envelope... deltas only from a live provider") repeats the same claim.
+
+**Why this wasn't fixed in this session:** wiring real token-by-token streaming into
+`/chat/stream` is a genuine feature addition, not a bug fix - it changes the SSE contract's
+runtime behavior (the frontend's SSE consumer currently expects the three-event shape and
+would need updating to actually render incremental `delta` events instead of waiting for one
+`answer` event), and needs its own dedicated testing pass against a live provider. Rushing
+that under a broad survey pass risks exactly the half-finished streaming feature the "no
+temporary fixes" rule warns against. **Immediate, low-risk interim step for whoever picks
+this up:** correct the docstring (and the frontend label) to state what the route actually
+does today, so the claims-vs-reality gap is closed even before the real streaming feature is
+built - false documentation is worse than an honest "not yet streaming" note.
+
+## Broad domain survey, round 3 — 2026-07-23: twin/worldgen fidelity + MLOps eval gate closed
+
+- **MLOps skill-promotion evaluation gate — CLOSED.** The deferred finding from round 2
+  (`SkillPromotionBody.measured_pass_rate` trusting an arbitrary client-supplied float) is
+  now fixed: a real `EvaluationRecord`/`InMemoryEvaluationRegistry`/`PostgresEvaluationRegistry`
+  (`src/shelfwise_mlops/registry.py`) mirroring the existing `ModelRun` pattern, wired into
+  `promote()` (`skill_registry.py`) which now requires `evaluation_id`, looks up the recorded
+  evaluation, and checks both `gate_passed` and the recorded `pass_rate` against
+  `manifest.minimum_pass_rate` - the caller can no longer just assert a number. `evaluate.py`'s
+  `run_evaluation` records the real result. `routes_mlops.py`'s promotion body now takes
+  `evaluation_id: str`, not a float. Full test suite green after (830 passed). This closes the
+  single highest-severity finding of the whole survey - do not reopen the old
+  `measured_pass_rate` contract.
+- **Twin scenario predictions were contaminating operational reads - fixed.** Following up
+  the twin/worldgen audit: `TwinStore.list_properties`/`list_observations` (both in-memory and
+  Postgres backends, `src/shelfwise_twin/store.py`) now exclude `PREDICTED`-lane rows by
+  default, with an explicit `include_predicted=True` opt-in for the one legitimate caller that
+  needs them (`scenario.py`'s `compare()`). Before this, running any what-if scenario for a
+  store silently changed what `get_store()`/`fidelity()` reported as the tenant's real
+  operational state and governance fidelity score - a scenario's predicted stock level could
+  leak into what the twin dashboard and `governed_execution.py`'s fidelity gate treated as
+  fact. New regression test:
+  `tests/test_twin_scenarios.py::test_get_store_and_fidelity_are_not_contaminated_by_scenario_predictions`
+  (fails on the old code - confirmed by reproducing the failure before the fix). The one
+  existing test that asserted the old (buggy) unfiltered-read behavior
+  (`test_scenario_isolated_from_reported_state`) was updated to assert the new fail-closed
+  contract instead of the old fail-open one.
+- **Event-domain boundary (`operational_twin` vs `world_simulation`) confirmed genuinely
+  enforced**, not decorative - `DataDomainBoundaryError` is actually raised and caught at both
+  real call sites (`projection_worker.py`, `twin_projection.py`). No fix needed there.
+- Manifest regenerated (`python scripts/compare_capability_manifests.py --write`), full suite
+  830 passed / 18 skipped, confirmed clean after these fixes.
+
+## Broad domain survey, round 2 — 2026-07-23: inventory/procurement/POS, connectors, MLOps
+
+Continuation of the same two-lens survey into the remaining domains. One more well-scoped
+bug found and fixed (below); one more large finding deliberately documented, not rushed
+(the MLOps skill-promotion gate — see "Deferred" section below, second entry).
+
+### Findings that needed no fix (stated plainly, not just "looked fine")
+
+- **Reorder-point math** (`shelfwise_decision_science/inventory.py`) is genuinely solid:
+  handles zero lead time, zero demand variance, negative-input rejection, and the
+  `available == reorder_point` equality edge case with a documented deliberate choice. Not
+  a finding - explicitly noting it so it isn't miscounted as unaudited debt.
+- **Connector dedup/quarantine/durability** (`shelfwise_connectors/`, `ingest_pipeline.py`)
+  matches the source-systems research's flagged risks (malformed records, dedup,
+  publish-before-mark durability) with real, tested logic - not just claimed.
+- **No live POS/cashier stock-decrement path exists anywhere in the codebase** (confirmed by
+  full-tree search for sale/checkout/decrement code - the only sale-adjacent code is a Yoco
+  webhook mapped into an after-the-fact analytics event in
+  `shelfwise_connectors/connectors/systems/yoco.py`). This is an honest absence, not a bug:
+  nothing claims real-time stock decrement exists. Flagging because it's a genuine capability
+  gap for "build the whole store, every position" (see CLAUDE.md's mandate) - POS/cashier is
+  explicitly named as in-scope and isn't built yet.
+
+  **Re-examined 2026-07-23 under an explicit "fix everything, no deferral" directive - traced
+  fully, not deferred out of caution.** `record_sale` (the sales cascade's recommended action)
+  was followed all the way through: an approved `record_sale` decision only ever creates a
+  human-facing manager task via `writeback_sink.create_task(...)`, whose own
+  `rollback_instructions` explicitly declare
+  `"policy": "recommend_only_no_source_mutation"` - this is not an accidental gap, it is the
+  application's actual, deliberate architecture: **ShelfWise never writes back to a source
+  POS/ERP system.** Every connector in `shelfwise_connectors` is inbound-only (pull/webhook
+  *from* Odoo/SAP/SYSPRO/Dynamics *into* ShelfWise); there is no outbound write method to any
+  of them anywhere in the codebase.
+
+  A genuine fix has exactly two forms, and neither is buildable responsibly in this
+  environment: (1) real outbound writes to each connected ERP's live API to actually
+  decrement its stock - requires per-vendor API credentials and live sandbox access this
+  environment does not have, and code written against an API you cannot reach cannot be
+  honestly claimed as tested; (2) a shadow inventory ledger inside ShelfWise that decrements
+  independently of the real POS/ERP - this would be a **regression**, not a fix: it creates a
+  *new* false claim (the app implying it tracks live stock) while the actual source of truth
+  was never touched, which is exactly the class of technical debt this campaign exists to
+  remove, not add. **This is a resource/access constraint, not risk-aversion** - the honest
+  "not built" state stands, and building around it dishonestly would be worse than leaving it
+  open. Whoever picks this up needs real ERP sandbox credentials for at least one connected
+  system before writing the outbound integration.
+
+### Fixed and regression-tested (round 2)
+
+- **`neutralise_formula_text` corrupts quoted CSV fields containing commas**
+  (`src/shelfwise_connectors/gateway.py`) — it defanged formula-injection cells by splitting
+  raw CSV lines on `,` before the real `csv.reader` (which understands quoting) ever runs, so
+  a quoted value like `"Smith, John"` silently split into two cells. Called from
+  `quarantine_intake`, the front door for all CSV intake - a "built but silently wrong" bug,
+  not an honest gap. Fixed by rewriting `neutralise_formula_text` to parse/rewrite with the
+  real `csv` module (`csv.reader`/`csv.writer`) instead of `line.split(",")`, which
+  understands quoting and is byte-identical to the old output for the common unquoted case.
+  New test: `tests/test_connectors.py::test_quarantine_preserves_quoted_fields_containing_commas`.
+
+### "Open order" store vs PO lifecycle — CLOSED (naming corrected)
+
+Re-checked 2026-07-23 per the explicit "fix everything" directive: `open_orders.py`'s module
+docstring no longer overclaims - it now reads "Shipment-backed inbound-order reconciliation
+ledger... intentionally does not create, approve, or transmit purchase orders." No remaining
+reference anywhere in `open_orders.py` or `shelfwise_decision_science/sourcing.py` claims a
+PO create/approve/transmit lifecycle; `sourcing.py`'s `expedite_supplier_order` is an
+honestly-labeled advisory recommendation, not a claim of a real PO being sent. The
+claims-vs-reality gap is closed via the correction path (accurate naming), not the
+build-the-real-lifecycle path - a genuine PO create/send/approve system remains unbuilt, but
+nothing in the codebase claims it exists.
+
+### Deferred #2: MLOps skill promotion doesn't actually gate on evaluation — HIGH severity
+
+`src/shelfwise_backend/routes_mlops.py:400-431`'s `SkillPromotionBody.measured_pass_rate` is
+a client-supplied float, passed straight into `skill_registry.promote()`
+(`src/shelfwise_mlops/skill_registry.py:321-339`), which only checks it against
+`manifest.minimum_pass_rate` — a number the caller invented, never verified against a real
+evaluation run. `SkillManifest.evaluation_ids` exists on the manifest but nothing ever reads
+it or looks up an actual recorded result. **Anyone with the approval role can promote any
+draft skill by posting `{"measured_pass_rate": 1.0}` with zero evaluations ever executed.**
+The docstrings ("only past its own evaluation bar", "the enforcement point that makes the
+lifecycle real") explicitly claim gating the code does not perform. There's also a
+lower-severity TOCTOU race between `promote()`/`retire()` (get-then-set-status, no
+compare-and-swap, in both the in-memory and Postgres registries) that can un-retire a skill
+via a racing promote.
+
+**Why this wasn't fixed in this session:** a correct fix means a real evaluation-results
+store that both the training harness (runs on a separate host per the training/production
+split - see memory `training-vs-production-environments`) and the backend API can share, plus
+changing `promote()`'s contract from `measured_pass_rate: float` to `evaluation_id: str`
+(looked up, not trusted) - a cross-subsystem persistence change, not a patch, and it touches
+6 existing test call sites (`tests/test_conversation_assistant.py`) that currently assert the
+old trust-the-caller contract. Building a shallow, unwired "evaluation_results table" that
+nothing in the training harness actually populates would just relocate the claims-vs-reality
+gap, not close it.
+
+**Recommended design for whoever picks this up:**
+1. New `EvaluationRecord` dataclass + `InMemoryEvaluationRegistry`/`PostgresEvaluationRegistry`
+   + `create_evaluation_registry()` in `shelfwise_mlops`, mirroring `registry.py`'s `ModelRun`
+   pattern exactly (same `SHELFWISE_STORE_BACKEND`/`DATABASE_URL` env wiring, so training-host
+   and backend-host share one Postgres table the same way `model_run_registry` already does).
+2. `shelfwise/training/evaluate.py`'s `run_evaluation` records one `EvaluationRecord` (id,
+   pass_rate derived from the real `_evaluation_summary`, `gate.passed`, timestamp) after
+   writing `eval_summary.json` - this becomes the only place a pass rate is legitimately
+   produced.
+3. Change `promote()`'s signature to `evaluation_id: str` instead of
+   `measured_pass_rate: float`; it looks up the record, verifies `manifest.evaluation_ids`
+   actually references that record's evaluation, and compares the *recorded* pass rate
+   against `manifest.minimum_pass_rate`.
+4. Update the 6 test call sites in `tests/test_conversation_assistant.py` (lines ~362-533) to
+   seed a fake `EvaluationRecord` instead of passing a bare float, and add a new adversarial
+   test proving an unrecorded/mismatched `evaluation_id` is rejected.
+5. Fix the TOCTOU race as a small follow-on: wrap `promote`/`retire`'s get+set-status in the
+   same per-skill lock the in-memory registry already holds elsewhere, and a
+   `WHERE status = ...` conditional update for the Postgres path (same pattern already used
+   for decision approve/reject - see `[[decision-store-concurrency]]` precedent in this
+   file's earlier HITL race-condition fix).
+
+## Broad domain survey (Phase 4) — 2026-07-23: logic-correctness + claims-vs-reality audit
+
+Four parallel research passes across the highest-risk domains (decision-science math,
+multi-tenant isolation/auth, agentic guardrails), asking two questions per finding: is the
+logic actually right, and does the code/docstring/test claim more than it delivers. Three
+concrete, well-scoped bugs found this way were fixed and regression-tested immediately
+(see below); one larger structural finding was believed unfixed at the time this section was
+first written, but was found already closed on re-verification later the same session — see
+"Critic verdict self-report gap — RE-VERIFIED CLOSED" further down.
+
+### Fixed and regression-tested
+
+- **Training eval gate used naive substring matching** (`src/shelfwise/training/evaluate.py`)
+  — `risk_classification` checked `risk in lower` (a bare `in`), so `"low"` matched inside
+  unrelated text ("**low**er", "be**low**"); `actionability_score`/`evidence_grounding_score`/
+  `finding_recall` only required the *first two tokens* of a reference phrase to appear
+  anywhere in the output, so a generic two-word overlap could satisfy an entire recommended
+  action. Since `_evaluation_summary` gates training acceptance on these scores, this
+  overstated how good a model actually was. Fixed with `_contains_word` (word-boundary regex)
+  for risk classification and `_phrase_covered` (majority of a phrase's non-stopword tokens
+  must appear as whole words, not just the first two) for the phrase-overlap scores. No
+  existing test locked in the old substring behavior; ran `tests/test_training_evaluation_gate.py`
+  and `tests/test_mlops.py` clean after.
+- **Write-rate limiter was tenant-blind** (`src/shelfwise_backend/security/gateway.py`,
+  `deps.py`) — `WRITE_LIMIT_DEP` keyed its token bucket on the shared write API key or the
+  caller's IP, never on the authenticated tenant. Since the write API key is one shared
+  secret (not per-tenant) and tenants can share an egress IP/gateway, one tenant could
+  exhaust another's write-rate budget with ordinary traffic — a real cross-tenant DoS, not a
+  theoretical one. Made `rate_limit()`'s identity resolver injectable and added
+  `_write_rate_limit_identity` in `deps.py`, which keys on the verified tenant_id from
+  `_tenant_id_from_request` (already-verified JWT, never trusts a client-supplied header)
+  when `SHELFWISE_AUTH_MODE=jwt`, falling back to the original IP/key identity otherwise
+  (there's only one tenant to separate in non-jwt mode anyway). New test:
+  `tests/test_write_rate_limit_tenant_isolation.py`.
+- **Decision-access tenant check was fail-open on missing data**
+  (`src/shelfwise_backend/decision_access.py`) — `decision_tenant_id`'s fallback-to-caller
+  behavior (correct for *display*, e.g. labeling an untagged decision in a response) was
+  reused for the *ownership* check too, so a decision row with no `tenant_id` (a legacy row,
+  a code path that forgot to stamp it) silently matched *whichever* tenant happened to be
+  asking — fail-open for exactly the row shape that's least trustworthy. Added a separate
+  `_owned_by` helper used only for the ownership checks (`tenant_scoped_decisions`,
+  `decision_belongs_to_other_tenant`) that treats an unstamped decision as belonging to
+  nobody; `decision_tenant_id`'s original fallback behavior is untouched for its legitimate
+  display call site (`app.py`). New test: `tests/test_decision_access_tenant_isolation.py`.
+
+All three: `python -m ruff check` clean, full suite green (822 passed, 18 skipped) after,
+`capabilities/manifest.json` regenerated (line/fingerprint-only diff, confirmed via
+`git diff capabilities/manifest.json | grep -c '"name"'` → 0 both directions).
+
+### Critic verdict self-report gap — RE-VERIFIED CLOSED, 2026-07-23 (corrects the entry below)
+
+The "deferred, not fixed" entry originally written here for this finding was wrong by the
+time it was re-checked the same day: `_server_verified_critic_passed`
+(`src/shelfwise_backend/agentic_cascade.py:469`) already exists and is already wired into
+all 4 cascades where it matters - `run_golden_cascade_via_agents` (markdown, line 587),
+`run_procurement_cascade_via_agents` (line 848), `run_sales_cascade_via_agents` (line 1107),
+and `run_cold_chain_cascade_via_agents` (line 1874) - each with its own domain-specific
+evidence predicate (`_markdown_evidence_supports_action`,
+`_procurement_evidence_supports_action`, `_price_evidence_supports_clean_sale`,
+`_cold_chain_evidence_supports_dispatch`) computed from the real tool result, not the
+model's self-report. It fails closed: `reported and evidence_supports_action`, so a Critic
+that reports `critic_passed: true` without matching tool evidence is overridden. Confirmed
+with a real adversarial unit test
+(`tests/test_agentic_golden_cascade.py::test_server_evidence_overrides_a_critic_that_approves_a_loss`,
+a model reporting `critic_passed=True` after `simulate_markdown` returned a loss is
+overridden to `False`) plus full end-to-end critic-gate-override tests in all 4 cascade test
+files. All 30 relevant tests pass.
+
+The other 2 cascades (`run_catalog_price_check_via_agents`, `run_expiry_risk_check_via_agents`)
+don't need this check structurally, not because of an oversight: both hard-require
+`requires_human_review=True` and reject any executive action other than the one fixed safe
+route (`review_price_exception`/`review_expiry_markdown`) regardless of `critic_passed` -
+there is no autonomous-approval branch for a manipulated verdict to unlock, so
+`critic_passed` is informational there, never a gate.
+
+The smaller related gap noted in the original entry - grounding was enforced on the Critic's
+conclusion only, never the Executive's - is now CLOSED too; see "Executive-conclusion
+grounding — CLOSED" at the top of this file.
+
+## `/scenarios/*` extraction complete — 2026-07-23 (final step of the app.py God-file campaign)
+
+The `app.py` God-file extraction described below is now **finished**, not "explicitly not
+finished" — this was the last and largest remaining piece
+(`_agentic_unavailable`/`_agentic_deadline_exceeded`/`_cascade_deadline`/
+`_production_execution_mode`, both `/scenarios/worldgen-runs*` routes, and the full
+`_SCENARIO_MUTATION_DEPS` block through `demo_worldgen_drill` — ~700 lines) moved into a new
+`routes_scenarios.py`, following the exact same `APIRouter` + `state.py`/`deps.py` sharing
+pattern as `routes_catalog.py`/`routes_connectors.py`/`routes_mlops.py`. Two small prerequisite
+modules were split out first to make this possible without a circular import:
+`model_runs.py` (`record_model_run`, used by `/inference/smoke`, `/chat`, and every
+`ExecutionContext` — not scenario-specific, so it couldn't move into `routes_scenarios.py`
+itself) and the already-existing `decision_governance.py`/`twin_projection.py`/
+`ingest_pipeline.py`/`decision_access.py` from earlier steps.
+
+`app.py` is now **2,191 lines**, down from 3,766 at the campaign's start — genuinely done, not
+an interim number.
+
+**What broke and was fixed during this extraction** (all caught by the full test suite, not
+assumed clean):
+- 4 tests monkeypatched agentic-cascade functions (`run_golden_cascade_via_agents`,
+  `run_cold_chain_cascade_via_agents`) and `_DEMO_DRILL_POLL_S` directly on
+  `shelfwise_backend.app` — those names now live in `routes_scenarios.py`, so patching
+  `app_module` silently no-opped instead of erroring (the route body reads the name from its
+  own module's namespace). Fixed by monkeypatching `shelfwise_backend.routes_scenarios`
+  instead, in `tests/test_agentic_http_errors.py`, `tests/test_agentic_operational_twin.py`,
+  `tests/test_recall_workflow.py`. **This is a real, general risk for any future App→router
+  extraction**: `grep` test files for `monkeypatch.setattr(app_module, ...)` / `setattr(app, ...)`
+  targeting anything that moved, before declaring an extraction done — a wrong-module
+  monkeypatch fails silently (the mock just never gets hit) rather than raising.
+- 2 test files imported `_demo_event` / `_production_execution_mode` directly from
+  `shelfwise_backend.app` — updated to import from `shelfwise_backend.routes_scenarios`
+  (`tests/test_backend_observability_tools.py`, `tests/test_track3_contract.py`).
+- `routes_scenarios.py` initially imported `operational_facts_for_query` from the wrong module
+  (`.operational_facts`, where `OperationalFactsProvider` lives); the actual function is in
+  `.state`. Fixed at import time (caught immediately — `python -c "from shelfwise_backend import app"` raised `ImportError` before any test ran).
+- `capabilities/manifest.json` regenerated twice (once after the extraction, once after the
+  `operational_facts_for_query` import fix shifted line numbers again) via
+  `python scripts/compare_capability_manifests.py --write`; both times confirmed the diff was
+  only `line`/`fingerprint` fields (`git diff capabilities/manifest.json | grep -c '"name"'` →
+  0 additions/removals both times) — no capability was silently gained or dropped.
+
+**Full suite status:** 816 passed, 17 skipped, 1 failed on the run right after the extraction —
+the 1 failure (`test_committed_capability_snapshot_matches_deterministic_discovery`) was a stale
+manifest from the import-path fix landing after the first regen; a second regen fixed it and it
+now passes both in isolation and in the full run. A second full run turned up 5 more failures
+(`test_full_system_harness`, `test_multimodal` x2, `test_provenance_boundaries` x2) — traced to
+`OSError: [Errno 28] No space left on device`, not a code regression: **the C: drive has 152 MB
+free out of 454 GB**, and these tests write real temp files. All 5 pass cleanly in isolation.
+`test_worker_journal.py`'s 2 timing-sensitive tests remain the same known-flaky-under-load pair
+documented earlier in this file — pass in isolation every time, occasionally fail under full-suite
+system load.
+
+**Docker verification was skipped for this step** — a `docker build` needs real disk headroom
+this machine does not currently have (152 MB free); attempting it risked failing outright or
+destabilizing the environment further. Every extraction before this one in the campaign got a
+real `docker build && docker run` check; this is the one exception, and it's an environment
+constraint, not a shortcut taken on the code. **Whoever picks this up next should free disk space
+first, then run:** `docker build -t shelfwise-backend . && docker run --rm -p 8000:8000 shelfwise-backend`
+and hit a real `/scenarios/*` route (e.g. `POST /scenarios/golden`) against the running container
+before treating this extraction as fully closed.
+
+## Library-driven technical-debt campaign — 2026-07-23
+
+Two linked passes, both on `developers`, full backend suite green throughout
+(**813 passed, 17 skipped** as of the last run in this campaign; every step below was
+individually verified against the real suite, not assumed). Nothing here has been committed
+yet — treat everything in this section as uncommitted working-tree state until reviewed.
+
+### Method (read this before adding more work here)
+
+1. Mined the 27-book engineering library at `Books-master` against the real running
+   code — not generic advice, specific claims checked by reading the actual file, then
+   fixed only what was confirmed real. Findings that turned out to already be correctly
+   engineered (see "Verified correct, no bug" below) were left alone deliberately —
+   manufacturing a fix for a non-bug is itself technical debt.
+2. Every fix followed: read the code → confirm the defect is real → fix → add/extend a
+   test that would have caught it → run the *actual* affected tests → run the *full*
+   suite → regenerate `capabilities/manifest.json` if source moved → run the full suite
+   again. Do not shortcut this loop for future debt-removal work; two of the real bugs
+   found this session (the Dockerfile `data/` regression, the capability-discovery glob
+   gap) were only caught *because* the full suite and manifest regen ran after every
+   change, not just after the "big" changes.
+3. "No half-finished implementations" was applied literally: several plausible-looking
+   improvements (auto-adaptive critic thresholds fed from `learning_store`; automatic
+   `PlanRunner` compensation execution; a full `/mlops/*` route extraction) were
+   investigated and **deliberately not built** because they would have been genuinely new,
+   unrequested behavior or required a prerequisite refactor not yet done — see "Explicitly
+   deferred" below. Building them speculatively would have been new debt, not debt removal.
+
+### Real bugs found and fixed
+
+- **`critic_gate` receipt logic duplicated** across `agentic_cascade.py` and `cascade.py` —
+  two independent research passes (Clean Code's DRY, the DI book's Constructor
+  Over-Injection finding) converged on the same 4+ duplicated call sites for the
+  Critic→Executive override contract. Consolidated into one shared `_enforce_critic_verdict`
+  / `_critic_gate_receipt` pair in `cascade.py`; `agentic_cascade.py` now imports it.
+  Regression risk this closes: the override rule could drift out of sync across cascade
+  families if only some call sites were updated on a future change.
+- **3 of 4 agentic cascade families had zero proof the critic gate can't be bypassed** —
+  only the golden cascade had a test forcing a disagreeing executive through the gate.
+  Added the same adversarial test to procurement, sales, and cold-chain
+  (`tests/test_agentic_{procurement,sales,cold_chain}_cascade.py`).
+- **`worker/plans.py` module docstring was stale** — claimed plan execution "is
+  intentionally not wired to any route or worker yet," which stopped being true the day
+  after that comment was written (`governed_execution.py` wires `POST /mlops/plans/execute`
+  live). Rewritten to state the real, current wiring status and the real reason
+  compensation is recorded but not auto-executed (every registered write capability today
+  is single-step; there is nothing yet for automatic rollback to walk back through).
+- **`_money()` in `shelfwise_multimodal/text_normalize.py`** (found in the prior session's
+  bounded pass) silently dropped the fractional part of any monetary figure with a k/m
+  multiplier suffix before being spoken by the voice interface — "R1.5k" was read aloud as
+  "one thousand rand." Fixed to scale the full decimal value before splitting into
+  rand/cents; covered by new test cases alongside the 5 existing ones.
+- **Orphaned dead code in `shelfwise_mlops`** — `gate.py::release_gate` and
+  `registry.py::release_gate` were two competing, unwired implementations of the
+  blueprint's "release eval gate" concept (`plot/domains/11-mlops-finetuning-product.md`
+  §1.2). Traced the real, live evaluation gate to `shelfwise/training/evaluate.py`'s
+  `_evaluation_summary` (already wired, already tested, a better fit for the actual Gemma
+  eval rubric) before concluding these two were superseded, not half-finished — deleted
+  `gate.py` outright, removed `release_gate` from `registry.py`, updated
+  `shelfwise_mlops/__init__.py` exports and `tests/test_mlops.py`.
+- **Capability-discovery governance gap (self-inflicted, then fixed)** — extracting
+  `routes_catalog.py` the same way `routes_twin.py` was previously extracted revealed that
+  `_discover_openapi_routes` in `shelfwise_capabilities/discovery.py` scanned a
+  *hardcoded* tuple of router filenames. The new router's 7 routes worked fine over HTTP
+  and in pytest, but silently vanished from `capabilities/manifest.json` with no error.
+  Fixed the root cause: glob `routes_*.py` instead of naming each file, so the next
+  extraction can't repeat this. Added
+  `tests/test_capability_contract.py::test_every_routes_module_contributes_its_routes_to_discovery`,
+  verified it actually fails when the hardcoded-list bug is reintroduced.
+- **Constructor Over-Injection in `agentic_cascade.py`** — all 6
+  `run_*_cascade_via_agents` entry points took 9 keyword parameters spanning 4 unrelated
+  concerns (event/execution-control/persistence/observability). Bundled
+  `audit`/`model_run_recorder`/`deadline` into one `ExecutionContext` dataclass per the DI
+  book's own prescribed fix (9 params → 7). Updated all 6 function signatures, `app.py`'s
+  6 call sites, and the one test file that passed those kwargs directly
+  (`tests/test_agentic_golden_cascade.py`); the other ~30 test call sites needed no
+  change since they rely on defaults.
+- **Docker production image shipped dead weight** — `Dockerfile` copied `tests/` (4.3MB,
+  never read by any runtime path; confirmed CI runs pytest on the runner, never inside
+  this image) into the deployable image. **Correction made mid-fix:** an initial pass also
+  dropped `data/`, which broke
+  `tests/test_infra_config.py::test_backend_image_contains_seeded_runtime_datasets` — a
+  real, deliberate contract this session's own reasoning had missed. `data/` restored;
+  only `tests/` removed. Verified three ways: full test suite, a real `docker build` +
+  `docker run` + `/health` check, and direct inspection inside the running container.
+
+### `app.py` God-file — real progress, explicitly not finished
+
+`app.py` was 3,766 lines at the start of this campaign (89 routes, one file). Two clean
+extractions landed, following the project's own pre-existing `routes_twin.py` /
+`intelligence_api.py` precedent exactly (an `APIRouter` per cohesive domain, wired via
+`app.include_router(...)`, sharing `state.py` singletons and `deps.py` dependencies):
+
+- **`routes_catalog.py`** (158 lines) — the 7 `/catalog/*` product/variant/identifier CRUD
+  + resolve routes. Zero coupling to app.py-local helpers.
+- **`routes_connectors.py`** (54 lines) — the 3 read-only `/connectors/*` routes
+  (`systems`, `me`, `inbound-records`). The 2 write routes
+  (`/connectors/{system}/intake`, `/connectors/poll/status`) deliberately stayed in
+  `app.py` — they depend on `_process_inbound_record`, an app.py-local helper shared with
+  the CSV-intake routes; extracting only the read half would have relocated the coupling,
+  not resolved it.
+
+`app.py` is currently **~3,800 lines** (the extractions removed ~210 lines; the
+`ExecutionContext` migration added some back). This is real, verified progress, not a
+finished refactor — do not report "app.py is fixed" without doing the next step below.
+
+**What's actually blocking further extraction** (checked directly, not assumed):
+
+- `_auth_mode` and `_is_production_deployment` are **already** properly factored into
+  `deps.py` and imported — they are not blockers.
+- `_chat_data_domain` (defined at the bottom of `app.py`, ~34 call sites across the file)
+  depends on nothing but `os.getenv` and the already-shared `_is_production_deployment` —
+  it is a **safe, low-risk move** to `deps.py` right next to
+  `_is_production_deployment`, and doing that is very likely the actual unblock for
+  extracting more of `/mlops/*` and the remaining `/scenarios/*` routes. This was
+  identified but **not yet done** when this note was written — pick it up first.
+- `_process_inbound_record` (defined in `app.py`, used by both the connector-intake and
+  CSV-intake routes) is the real blocker for the rest of `/connectors/*` and all of
+  `/intake/csv/*` — **and, checked directly by reading the route bodies, also for most of
+  `/scenarios/*`**: `demo_recall` and `demo_inventory_exception` (and, transitively, every
+  agentic/demo scenario route via `_resolve_demo_pipeline_cascade`) call
+  `_record_pipeline_event` too. This is the one shared core both remaining big groups
+  actually need moved first.
+  **Full call graph, traced function-by-function, not estimated:**
+  `_record_pipeline_event` → `_cascade_for_event` → `_record_cascade` →
+  `_attach_decision_governance` → `_measured_model_call_tokens` /
+  `_estimate_cascade_tokens` / `_inference_rate`; plus `_project_twin_event`,
+  `_same_event_payload`, `_resolve_demo_pipeline_cascade`, `_await_worker_cascade`,
+  `_scenario_drill_wait_seconds`. That's **~12 interdependent functions across four
+  concerns** (durable-store-first ingest idempotency, twin projection, cascade dispatch,
+  decision economics/governance), plus the module-level singletons `event_store`,
+  `open_order_store`, `event_bus`, `cascade_dispatcher`, `decision_store`,
+  `trace_registry`, `twin_service`, and `worker_enabled()`.
+  `_record_pipeline_event` specifically is the exact durable-store-first ingest core
+  (event record → self-heal-safe publish → `mark_published`) this campaign's earlier
+  session stress-tested for crash-window idempotency
+  (`tests/test_event_ingest.py::test_ingest_self_heals_when_the_crash_lands_after_publish_but_before_mark_published`).
+  **This is not a leaf helper move like `_chat_data_domain` was, and not a same-afternoon
+  mechanical relocation like the catalog/connectors router extractions.** It is the
+  application's safety-critical spine, spanning four distinct concerns that each deserve
+  their own home rather than one dumping-ground module. **Deliberately not extracted this
+  session** — attempting it under time pressure is exactly how "removing debt" becomes
+  "introducing a subtle ingest bug in the one place that must never have one."
+  **Recommended approach for whoever does this:** don't do it as one big move. Split by
+  concern across 2-3 sessions — e.g. (1) **done, 2026-07-23:** decision
+  governance/economics (`_attach_decision_governance` + its 3 helpers) moved into
+  `decision_governance.py` (public names, no underscore prefix - `attach_decision_governance`,
+  `measured_model_call_tokens`, `estimate_cascade_tokens`, `inference_rate`); `app.py`'s 3
+  call sites and the 3 test files that imported it directly
+  (`test_agentic_{golden,procurement,cold_chain}_cascade.py`) updated to the new module,
+  verified against the two tests below plus the full suite (813 passed, 0 failed).
+  `app.py` was ~3,716 lines after step 1. (2) **done, 2026-07-23:** twin projection
+  (`_project_twin_event`) moved into `twin_projection.py` (public name
+  `project_twin_event`, its own module logger rather than sharing `app.py`'s `_LOGGER`)
+  next to `routes_twin.py`. `app.py`'s 1 call site and `test_live_tool_boundary.py`'s
+  direct import updated; verified against the crash-window test, `test_decision_identity.py`,
+  and `test_live_tool_boundary.py` first, then the full suite (813 passed, 0 failed).
+  `app.py` was ~3,696 lines after step 2. (3) **done, 2026-07-23:** the ingest core
+  (`_record_pipeline_event`, `_cascade_for_event`, `_record_cascade`, `_same_event_payload`)
+  moved into `ingest_pipeline.py` (public names `record_pipeline_event`,
+  `cascade_for_event`, `record_cascade`), now that decision-governance and twin-projection
+  were already out of its way. `_scenario_drill_wait_seconds`/`_await_worker_cascade`/
+  `_resolve_demo_pipeline_cascade` deliberately stayed in `app.py` - they depend on
+  `_request_timeout_seconds`, which is genuinely app-wide config (used by the deadline
+  middleware itself), not an ingest-core concern, and moving them would have recreated a
+  tangle instead of resolving one. 16 `record_cascade(` call sites, 9
+  `record_pipeline_event(` call sites, and 2 `cascade_for_event(` call sites in `app.py`
+  updated. **Verified with more rigor than the previous two steps, given this was
+  explicitly the highest-risk piece:** the crash-window self-heal test and
+  `test_decision_identity.py` first (22 passed), then `test_event_store.py` +
+  `test_worker_journal.py` + both golden-cascade test files (59 passed), then the full
+  suite (813 passed, 0 failed), then — beyond what the previous two steps did — a real
+  `docker build` + `docker run` + a genuine `POST /ingest` call against the running
+  container, confirming a real event produces `status: accepted`, a real cascade, and a
+  decision ID in the correct deterministic format
+  (`dec_sa_retail_demo_world_simulation_evt_docker_verify_1`) end-to-end, not just inside
+  pytest. **`app.py` is now ~3,623 lines**, down from 3,766 at the start of this
+  campaign. All three steps of this sequence are complete.
+
+  **What this unblocks:** `/scenarios/*` (21 routes) and the write half of
+  `/connectors/*` can now be extracted as pure route-shuffling — the core logic they call
+  (`record_pipeline_event`, `record_cascade`) is a clean import from `ingest_pipeline.py`,
+  no longer entangled with app.py-local state.
+
+  **`/mlops/*` blocker also resolved, 2026-07-23:** `_tenant_scoped_decisions`,
+  `_decision_belongs_to_other_tenant`, `_reject_cross_tenant_decision_access`,
+  `_decision_action`, `_decision_tenant_id` (5 functions, one cohesive concern - decision
+  tenant-scoping and cross-tenant access control, zero test-file coupling) moved into
+  `decision_access.py` (public names, no underscore). ~22 call sites in `app.py` updated.
+  Verified against the tenant-scope/approve/reject-focused test selection first (13
+  passed), then the full suite (813 passed, 0 failed). `app.py` is now **~3,578 lines**.
+  `/mlops/*`'s 11 routes are now unblocked for the same kind of clean extraction the
+  catalog/connectors routers got.
+
+  **`/mlops/*` routes themselves extracted too, 2026-07-23:** all 12 routes
+  (`model-runs`, `prompts`, `accountability`, `observability`, `tenant-facts`,
+  `consolidate-memory`, `skills/mined`, `skills/mined/{id}/activate`, `skills`,
+  `skills/{id}/promote`, `skills/{id}/retire`, `plans/execute`) plus their 4 local
+  helpers (`_mined_skill_drafts`, `_learning_outcome_records`,
+  `_memory_consolidation_worker`, `_memory_evidence_refs`) and the `SkillPromotionBody`
+  model moved into `routes_mlops.py`. This one turned out tractable in the same session
+  because, unlike `/scenarios/*`, its routes mostly just aggregate from many `state.py`
+  singletons directly - only 4 small, already-simple local helpers, no intricate
+  idempotency-key logic. 14 now-unused imports in `app.py` cleaned up via `ruff --fix`
+  and verified they were genuinely unused (not silently broken). Verified: mlops/skill
+  test selection first (28 passed), full suite (813 passed, 0 failed), manifest regen
+  (confirms the glob-based discovery fix from earlier this session picked up the new
+  router automatically, no manual list update needed), and - given the size of this
+  change - a real `docker build` + `docker run` hitting all 7 GET `/mlops/*` routes
+  against the running container, all 200 with correct response shapes. **`app.py` is now
+  ~3,156 lines**, down from 3,766 at the start of this campaign (-610 lines, seven
+  modules split out total).
+
+  **Still genuinely open, deliberately not attempted this session:** `/scenarios/*` (21
+  routes) is the one remaining large group. Read through its full cluster before
+  attempting it: it has 11+ of its own helper functions (`_demo_occurrence_suffix`,
+  `_demo_event`, `_agentic_cascade_context`, `_demo_catalog_price_event`,
+  `_demo_expiry_risk_event`, and more) with genuinely intricate, load-bearing logic - in
+  particular `_demo_occurrence_suffix`'s pending-vs-resolved decision-id reuse logic is
+  precise and easy to subtly break if rushed. This is a materially larger, more
+  intricate extraction than any of the seven done this session and deserves its own
+  dedicated read-through and test pass. After each step: run
+  `tests/test_event_ingest.py::test_ingest_self_heals_when_the_crash_lands_after_publish_but_before_mark_published`
+  and `tests/test_decision_identity.py` specifically before trusting the full suite's
+  green as sufficient - those two are the ones that would go red first on a subtle
+  regression here, and they're fast enough to run after every single edit, not just at
+  the end.
+- `/mlops/*` (11 routes total, not contiguous in the file, interleaved with other groups)
+  is the largest remaining opportunity by route count but was correctly **not** attempted
+  this session — see the point above.
+- `/scenarios/*` (21 routes, the largest single group) was surveyed but not started —
+  expect deep coupling to `decision_store`, `learning_store`, `world_facts`, `tool_audit`,
+  `_record_model_run`, `_cascade_deadline`, `_record_cascade`, `_agentic_cascade_context`,
+  and several demo-event builder helpers. This is the highest-value, highest-effort
+  extraction remaining; do not start it without budgeting for moving or sharing several of
+  those helpers too, the same trap `/mlops/*` set.
+
+### Explicitly deferred (investigated, real reasons not to build them now)
+
+- **Auto-adaptive critic thresholds.** `learning_store.thresholds()` is read by agent
+  tools but never consulted by the *deterministic* cascades' hardcoded critic bars
+  (`incremental_profit.cents > 0`, `coverage >= 0.60`, etc.). `InMemoryLearningStore`'s own
+  docstring calls it "memory layer for the demo's visible learning moment" — a
+  proof-of-learning ledger, not a designed control input. Wiring it into the critic bar
+  without a real spec for direction/magnitude/safety-floor would risk building a critic
+  that gets quietly more permissive over time for the wrong reasons — worse than the
+  current honest "records but doesn't yet act on" state. If this is wanted, it needs a
+  real design pass, not a mechanical wire-up.
+- **Automatic `PlanRunner` compensation execution.** `compensation` on a `PlanStep` is
+  validated as required and journaled, but never automatically invoked when a later step
+  in the same plan fails. Confirmed (via a new characterization test in
+  `tests/test_worker_journal.py`) this matches the documented, current contract exactly —
+  every write capability registered today is exercised by single-step plans only, so there
+  is nothing yet for automatic rollback to walk back through. Build the rollback executor
+  when the first genuinely multi-step write plan is added, not before.
+- **Full `/mlops/*` and `/scenarios/*` route extraction.** See above — real prerequisite
+  work identified, not done yet. Don't attempt either without first moving
+  `_chat_data_domain` (mlops) and doing the bigger `_process_inbound_record` /
+  demo-helper untangling (scenarios).
+
+### Standing rule for whoever picks this up next
+
+Every future debt-removal step must close with the same loop this session used: fix →
+test → **full suite** → **manifest regen if any file moved** → full suite again. The
+capability-discovery bug above is the concrete proof of what happens when that loop gets
+shortened to "just run the file I touched." Do not skip the manifest regen step even for
+changes that look purely mechanical.
 
 ## Phase C break campaign COMPLETE — 2026-07-15
 
@@ -232,8 +1508,10 @@ plus a `PostgresCursorStore` assertion added to `test_postgres_schema_contract.p
 verification: 613 passed (1 known-flaky async worker-loop test re-confirmed in isolation), Ruff
 clean, capability manifest 201/201, frontend typecheck/build clean, Playwright E2E 3/3.
 
-Explicitly not built: real multi-tenant encrypted credential storage - scoped out as its own
-future decision, not something to bolt on under this env-var-based single-tenant design.
+Explicitly not built at the time this entry was written: real multi-tenant encrypted
+credential storage - scoped out as its own future decision. Built later, 2026-07-23, per an
+explicit user directive to stop deferring; see "Multi-tenant encrypted connector
+credentials — BUILT" at the top of this file.
 
 ## Redis image CVE fix — 2026-07-14 (later still)
 

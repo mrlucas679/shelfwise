@@ -46,6 +46,45 @@ def test_pending_upsert_preserves_evidence_fields_omitted_by_agentic_update() ->
     assert updated["expected_outcome"] == {"stock_at_risk_minor_units": 220_777}
 
 
+def test_upsert_cannot_revert_a_decision_a_human_already_resolved() -> None:
+    """A cascade re-run (self-heal replay, retried worker delivery) must never win a
+    race against a human's approve/reject on the same decision id.
+
+    `upsert()` is the write path every cascade rerun goes through - not just first
+    runs. If it always won regardless of status, then a decision a human just rejected
+    could be silently reopened back to "pending" (with a fresh action payload) by an
+    unrelated retry that shares the same deterministic decision id, and the human's
+    own resolution would be the one to disappear.
+    """
+    store = InMemoryDecisionStore()
+    store.upsert(
+        {
+            "id": "dec_race_terminal",
+            "status": "pending",
+            "action": {"type": "apply_markdown", "params": {"sku": "SKU-1"}},
+        }
+    )
+    rejected = store.reject("dec_race_terminal")
+    assert rejected is not None
+    assert rejected["status"] == "rejected"
+
+    replayed = store.upsert(
+        {
+            "id": "dec_race_terminal",
+            "status": "pending",
+            "action": {"type": "apply_markdown", "params": {"sku": "SKU-1", "retry": True}},
+        }
+    )
+
+    assert replayed["status"] == "rejected", (
+        "a cascade rerun's upsert reverted a human rejection back to pending"
+    )
+    assert replayed["action"]["params"].get("retry") is not True, (
+        "the rerun's action payload overwrote the resolved decision's recorded action"
+    )
+    assert store.get("dec_race_terminal")["status"] == "rejected"
+
+
 def test_store_factories_default_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SHELFWISE_STORE_BACKEND", raising=False)
     monkeypatch.delenv("SHELFWISE_BUS_BACKEND", raising=False)

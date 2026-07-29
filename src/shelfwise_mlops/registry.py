@@ -4,7 +4,6 @@ import hashlib
 import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Any
 
 from shelfwise_storage import auto_schema_enabled, connect
@@ -57,6 +56,56 @@ class ModelRun:
 
 
 @dataclass(frozen=True, slots=True)
+class EvaluationRecord:
+    """Immutable result of one completed model evaluation, suitable for governance gates."""
+
+    id: str
+    tenant_id: str
+    pass_rate: float
+    gate_passed: bool
+    created_at: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id or not self.tenant_id:
+            raise ValueError("evaluation id and tenant_id are required")
+        if not 0.0 <= self.pass_rate <= 1.0:
+            raise ValueError("evaluation pass_rate must be between 0 and 1")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "pass_rate": self.pass_rate,
+            "gate_passed": self.gate_passed,
+            "created_at": self.created_at or datetime.now(UTC).isoformat(),
+        }
+
+
+class InMemoryEvaluationRegistry:
+    """Tenant-scoped, idempotent evaluation evidence registry."""
+
+    def __init__(self) -> None:
+        self._records: dict[tuple[str, str], EvaluationRecord] = {}
+
+    def record(self, record: EvaluationRecord) -> EvaluationRecord:
+        stored = record if record.created_at else replace(
+            record, created_at=datetime.now(UTC).isoformat()
+        )
+        key = (stored.tenant_id, stored.id)
+        existing = self._records.get(key)
+        if existing is not None and existing != stored:
+            raise ValueError(f"evaluation {stored.id} already has different content")
+        self._records[key] = stored
+        return stored
+
+    def get(self, evaluation_id: str, *, tenant_id: str) -> EvaluationRecord | None:
+        return self._records.get((tenant_id, evaluation_id))
+
+    def clear(self) -> None:
+        self._records.clear()
+
+
+@dataclass(frozen=True, slots=True)
 class PromptVersion:
     id: str
     tenant_id: str
@@ -97,12 +146,15 @@ class InMemoryModelRunRegistry:
         *,
         tenant_id: str | None = None,
         data_domain: str | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRun]:
         runs = list(self._runs)
         if tenant_id is not None:
             runs = [run for run in runs if run.tenant_id == tenant_id]
         if data_domain is not None:
             runs = [run for run in runs if run.data_domain == data_domain]
+        if correlation_id is not None:
+            runs = [run for run in runs if run.correlation_id == correlation_id]
         return runs
 
     def clear(self) -> None:
@@ -232,6 +284,7 @@ class PostgresModelRunRegistry:
         *,
         tenant_id: str | None = None,
         data_domain: str | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRun]:
         clauses: list[str] = []
         params: list[object] = []
@@ -241,6 +294,9 @@ class PostgresModelRunRegistry:
         if data_domain is not None:
             clauses.append("data_domain = %s")
             params.append(data_domain)
+        if correlation_id is not None:
+            clauses.append("correlation_id = %s")
+            params.append(correlation_id)
         where = f"where {' and '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(
@@ -290,6 +346,70 @@ class PostgresModelRunRegistry:
                 """
             )
             apply_tenant_rls(conn, ("shelfwise_model_runs",))
+            conn.commit()
+
+    def _connect(self) -> Any:
+        return connect(self._database_url)
+
+
+class PostgresEvaluationRegistry:
+    """Durable, tenant-scoped evaluation evidence used by promotion gates."""
+
+    def __init__(self, database_url: str) -> None:
+        if not database_url:
+            raise ValueError("DATABASE_URL is required for PostgresEvaluationRegistry")
+        self._database_url = database_url
+        if auto_schema_enabled():
+            self._ensure_schema()
+
+    def record(self, record: EvaluationRecord) -> EvaluationRecord:
+        stored = record if record.created_at else replace(
+            record, created_at=datetime.now(UTC).isoformat()
+        )
+        existing = self.get(stored.id, tenant_id=stored.tenant_id)
+        if existing is not None:
+            if existing != stored:
+                raise ValueError(f"evaluation {stored.id} already has different content")
+            return existing
+        with self._connect() as conn:
+            conn.execute(
+                """
+                insert into shelfwise_evaluations
+                    (tenant_id, id, pass_rate, gate_passed, created_at)
+                values (%s, %s, %s, %s, %s)
+                """,
+                (
+                    stored.tenant_id,
+                    stored.id,
+                    stored.pass_rate,
+                    stored.gate_passed,
+                    stored.created_at,
+                ),
+            )
+            conn.commit()
+        return stored
+
+    def get(self, evaluation_id: str, *, tenant_id: str) -> EvaluationRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                select tenant_id, id, pass_rate, gate_passed, created_at
+                from shelfwise_evaluations
+                where tenant_id = %s and id = %s
+                """,
+                (tenant_id, evaluation_id),
+            ).fetchone()
+        return _evaluation_from_row(row) if row else None
+
+    def clear(self) -> None:
+        with self._connect() as conn:
+            conn.execute("delete from shelfwise_evaluations")
+            conn.commit()
+
+    def _ensure_schema(self) -> None:
+        with self._connect() as conn:
+            conn.execute(_EVALUATION_SCHEMA_SQL)
+            apply_tenant_rls(conn, ("shelfwise_evaluations",))
             conn.commit()
 
     def _connect(self) -> Any:
@@ -440,6 +560,16 @@ def create_model_run_registry() -> InMemoryModelRunRegistry | PostgresModelRunRe
     raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
 
 
+def create_evaluation_registry() -> InMemoryEvaluationRegistry | PostgresEvaluationRegistry:
+    """Create the immutable evaluation evidence store for the configured runtime."""
+    backend = os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower()
+    if backend == "memory":
+        return InMemoryEvaluationRegistry()
+    if backend == "postgres":
+        return PostgresEvaluationRegistry(os.getenv("DATABASE_URL", ""))
+    raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
+
+
 def create_prompt_registry() -> InMemoryPromptRegistry | PostgresPromptRegistry:
     backend = os.getenv("SHELFWISE_STORE_BACKEND", "memory").strip().lower()
     if backend == "memory":
@@ -447,27 +577,6 @@ def create_prompt_registry() -> InMemoryPromptRegistry | PostgresPromptRegistry:
     if backend == "postgres":
         return PostgresPromptRegistry(os.getenv("DATABASE_URL", ""))
     raise ValueError(f"unsupported SHELFWISE_STORE_BACKEND: {backend}")
-
-
-def release_gate(
-    candidate_scores: dict[str, Decimal],
-    baseline_scores: dict[str, Decimal],
-    *,
-    max_regression: Decimal = Decimal("0.02"),
-) -> dict[str, object]:
-    regressions: dict[str, str] = {}
-    for metric, baseline in baseline_scores.items():
-        candidate = candidate_scores.get(metric)
-        if candidate is None:
-            regressions[metric] = "missing"
-            continue
-        if candidate + max_regression < baseline:
-            regressions[metric] = f"{candidate} < {baseline} - {max_regression}"
-    return {
-        "passed": not regressions,
-        "regressions": regressions,
-        "metrics_checked": sorted(baseline_scores),
-    }
 
 
 def _prompt_identity(version: PromptVersion) -> tuple[str, str, str, str, str, str]:
@@ -507,6 +616,16 @@ def _model_run_from_row(row: dict[str, Any]) -> ModelRun:
         user_message=str(row.get("user_message") or ""),
         response_text=str(row.get("response_text") or ""),
         error_detail=str(row.get("error_detail") or ""),
+    )
+
+
+def _evaluation_from_row(row: dict[str, Any]) -> EvaluationRecord:
+    return EvaluationRecord(
+        id=str(row["id"]),
+        tenant_id=str(row["tenant_id"]),
+        pass_rate=float(row["pass_rate"]),
+        gate_passed=bool(row["gate_passed"]),
+        created_at=_iso(row["created_at"]),
     )
 
 
@@ -553,6 +672,19 @@ create index if not exists idx_shelfwise_model_runs_tenant_created
 on shelfwise_model_runs (tenant_id, created_at desc);
 create index if not exists idx_shelfwise_model_runs_tenant_domain_created
 on shelfwise_model_runs (tenant_id, data_domain, created_at desc);
+"""
+
+_EVALUATION_SCHEMA_SQL = """
+create table if not exists shelfwise_evaluations (
+    tenant_id text not null,
+    id text not null,
+    pass_rate double precision not null check (pass_rate >= 0 and pass_rate <= 1),
+    gate_passed boolean not null,
+    created_at timestamptz not null,
+    primary key (tenant_id, id)
+);
+create index if not exists idx_shelfwise_evaluations_tenant_created
+on shelfwise_evaluations (tenant_id, created_at desc);
 """
 
 _PROMPT_VERSION_SCHEMA_SQL = """

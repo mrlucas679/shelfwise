@@ -40,6 +40,7 @@ happens.
 - [API Reference](#api-reference)
 - [Demo & Evidence](#demo--evidence)
 - [Deployment](#deployment)
+- [Operations](#operations)
 - [Project Structure](#project-structure)
 - [Current Scope](#current-scope)
   - [Digital Twin](#digital-twin-software-layer-implemented-and-tested)
@@ -187,7 +188,7 @@ All arithmetic lives in tested Python decision-science tools — never hidden in
 - **Inference:** AMD Instinct MI300X (AMD Developer Cloud) · vLLM 0.23 on ROCm · google/gemma-4-E4B-it routine tier plus google/gemma-4-31B-it strong tier with native tool calling
 - **Backend:** Python 3.11+ · FastAPI · Pydantic · custom decision-science layer (reorder policy, demand forecasting, expiry & cold-chain risk, markdown simulation, sourcing optimisation, robust anomaly detection)
 - **Frontend:** React 19 · TypeScript · Vite · react-markdown
-- **Quality:** pytest (755 passing, 16 environment-gated skips) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
+- **Quality:** pytest (892 local passing, 21 environment-gated skips; 912 passing and 1 skipped in fresh Postgres/Redis CI) · ruff · GitHub Actions CI · committed capability manifest with drift-failing contract tests
 
 ## Getting Started
 
@@ -315,7 +316,14 @@ A few endpoints worth knowing by name (used throughout this README):
 | `POST /scenarios/{golden,procurement,sales,cold-chain}/agentic` | Live agentic cascades |
 | `GET /inference/smoke` | Confirms whether a call is offline, generic OpenAI-compatible, Fireworks, or explicitly declared AMD MI300X |
 | `GET /submission/readiness` | Track 3 gate self-check |
-| `GET /decisions` · `POST /decisions/{id}/approve\|reject` | HITL queue |
+| `GET /decisions?queue_view=assigned` · `POST /decisions/{id}/approve\|reject` | Role-derived HITL queue; the unfiltered tenant ledger remains available with `queue_view=all` |
+| `GET /onboarding/status` · `GET /onboarding/policies` · `POST /onboarding/policies/confirm` | Owner-only progress for company, store, data source, current product policies, devices, and work accounts |
+| `GET /reports/value-recovered` | Monthly operational value backed only by explicit completion receipts; estimates remain separate |
+| `GET /auth/setup-status` · `POST /platform/bootstrap` | One-time dedicated-client company and first-owner setup |
+| `POST /auth/activate` · `POST /auth/password-reset/request\|consume` · `POST /auth/change-password` | Signed single-use activation, recovery, forced password replacement, and session invalidation |
+| `GET /accounts` · `POST /accounts/invitations` · `GET /accounts/audit` · `POST /accounts/{id}/role` · `POST /accounts/{id}/deactivate\|reactivate` | Owner-managed named work accounts, least-privilege roles, email invitations, and identity-only audit |
+| `POST /intake/csv/preview` · `POST /intake/csv/commit` | Validated, idempotent browser-led CSV onboarding |
+| `POST /connectors/{system}/credentials/test` | Live credential and endpoint check without exposing stored secrets |
 | `GET /scenarios/worldgen-runs` | Digital-twin world simulation runs |
 | `GET /twin/stores/{store_id}` · `GET /twin/entities/{twin_id}` | Exact-store topology, current state, and provenance |
 | `GET /twin/observations` · `GET /twin/fidelity` · `POST /twin/observations` | Derived observations, fidelity guards, and tenant-bound intake |
@@ -338,6 +346,31 @@ A few endpoints worth knowing by name (used throughout this README):
 
 ## Deployment
 
+### Starting ShelfWise for one shop
+
+Requires Docker. One command sets the shop up, starts everything, and waits until the backend
+is genuinely healthy before telling you it is ready:
+
+```bash
+python scripts/start_shelfwise.py --company "Boxer Bramley" --owner-email owner@example.com
+```
+
+It writes this shop's `.env` (tenant id, session secret, owner login hash, credential
+encryption key), brings the Compose stack up, polls `/health`, then prints the console URL and
+the first-login credentials. Re-running it restarts the stack and **never** regenerates
+existing secrets — doing so would invalidate the owner's password and make every stored
+connector credential undecryptable, so an already-provisioned `.env` is left untouched.
+
+After signing in, connecting the shop's own systems is self-serve in the browser: ERP/POS
+credentials with a live connection test, signed webhook endpoints for tills and online stores,
+camera/sensor device credentials, CSV import, and staff accounts.
+
+Scope, stated plainly: this deploys ShelfWise on the machine that runs it, which is what a
+single shop evaluating the product needs. It is not a hosted multi-tenant sign-up service, and
+it provisions no cloud infrastructure.
+
+### Running Compose directly
+
 ```bash
 docker compose up --build
 ```
@@ -345,6 +378,17 @@ docker compose up --build
 The production Nginx image proxies frontend and API traffic through one origin. With the supplied
 Compose mapping, open `http://<host>:5173`; judge browsers never call their own localhost. A custom
 backend can still be selected at build time with `VITE_API_BASE`.
+
+## Operations
+
+- [Release and operations runbook](docs/RELEASE_AND_OPERATIONS_RUNBOOK.md) defines the exact-head
+  evidence gate, deployment/rollback boundary, incident handoff, and recurring controls.
+- [POPIA operations checklist](docs/POPIA_OPERATIONS_CHECKLIST.md) inventories application data
+  and marks operator/legal acceptance items honestly external.
+- `scripts/client_backup.sh` and `scripts/client_restore_verify.sh` implement the client backup
+  and isolated restore-verification procedure.
+- `scripts/health_monitor.py` probes public health/readiness without extra dependencies and can
+  write bounded incident receipts or notify an approved HTTPS webhook.
 
 ## Project Structure
 
@@ -360,7 +404,7 @@ src/
   shelfwise_worldgen/          World simulation and scenario generation
   shelfwise/training/          Gemma 4 multimodal LoRA training harness
 frontend/                      React/Vite chat-first operations console
-tests/                         755 passing tests (16 environment-gated skips): contracts, cascades, security, agentic paths
+tests/                         891 passing tests (21 environment-gated skips): contracts, cascades, security, agentic paths
 capabilities/                  Machine-verified capability manifest (CI-enforced)
 reports/                       Committed evidence: soak receipts, audits, evidence report
 data/datasets/                 Legacy source CSV fixtures retained for regression coverage
@@ -393,11 +437,18 @@ Built now:
   Yoco accepts a succeeded checkout as a sale only when it supplies explicit SKU, quantity, and
   location metadata and the checkout total has an exact minor-unit unit-price split.
 - MLOps run/prompt registries, accountability reporting, observability snapshot, and eval gate.
+- Optional OAT-inspired adaptive failure attribution over the existing trace registry
+  (`SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED=false` by default); see
+  [`docs/ADAPTIVE_FAILURE_ATTRIBUTION.md`](docs/ADAPTIVE_FAILURE_ATTRIBUTION.md).
 - Postgres store with tenant-scoped RLS schema; offline-safe OpenAI-compatible inference gateway
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow
-  workspaces, FEFO lot drill-down, decision log, inference routing, and HITL approval.
-- 755 passing tests (16 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
+  workspaces, FEFO lot drill-down, decision log, inference routing, HITL approval, and a
+  resumable first-store Setup guide backed by server-derived progress.
+- Browser-led first-owner bootstrap and owner-managed named work accounts with work identity,
+  signed email invitations, bounded roles, normal sign-in, role
+  changes, and deactivate/reactivate lifecycle.
+- 891 passing tests (21 environment-gated skips) across contracts, cascades, stores, connectors, MLOps, worldgen, multimodal, and
   security; backend/frontend Dockerfiles and Compose services; CI for lint/tests/eval/build.
 
 Deployment acceptance scope (the software and its gates are implemented; these require external
@@ -681,9 +732,11 @@ flowchart TB
     HITL --> WRITE
 ```
 
-Neither diagram above is implemented yet — today's chat is a single dual-model role router with a
-12-message window and no skill catalogue or hierarchical memory. See the plan doc's Sections 41-43
-for the implementation-ready code blueprint and phased rollout before either is claimed as built.
+The conversation-memory and progressive-skill parts of these diagrams are implemented. Chat keeps
+a provenance-tracked rolling summary beyond the recent-turn window, discovers only promoted,
+role-appropriate skills, and records the exact preflight context budget used for each inference
+request. The diagrams remain an architectural overview: they do not claim token streaming, an
+unbounded memory store, or automatic write execution without human approval.
 
 ## Inference Strategy
 

@@ -26,6 +26,18 @@ def test_connector_catalog_lists_available_and_roadmap_systems() -> None:
     } <= systems
 
 
+def test_connector_capability_exposes_credential_manifest_for_poll_systems() -> None:
+    by_system = {item.system: item.to_dict() for item in list_connector_capabilities()}
+
+    odoo_fields = {field["key"] for field in by_system[SourceSystem.ODOO]["credential_fields"]}
+    assert odoo_fields == {"base_url", "database", "uid", "api_key"}
+    assert by_system[SourceSystem.ODOO]["connection_test_supported"] is True
+
+    # Webhook-authenticated systems have no store-entered credential form and no live test.
+    assert by_system[SourceSystem.SHOPIFY]["credential_fields"] == []
+    assert by_system[SourceSystem.SHOPIFY]["connection_test_supported"] is False
+
+
 def test_connector_status_reflects_tenant_policy_and_mapper_coverage() -> None:
     rows = connector_status_for_policy({"allowed_systems": ["CSV", "odoo", "syspro"]})
     by_system = {row["system"]: row for row in rows}

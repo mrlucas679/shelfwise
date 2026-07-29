@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -50,6 +50,22 @@ class SalesLine:
     quantity: int
     unit_price: Money
     sold_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ExpiryEntry:
+    """A batch-on-hand observation with its expiry date, per SKU and location.
+
+    Kept separate from `InventoryState` because expiry is a distinct observed fact with
+    its own event type and evidence rules — folding it into the stock row would make
+    "no expiry data" indistinguishable from "not perishable".
+    """
+
+    tenant_id: str
+    sku: str
+    location_id: str
+    quantity: Decimal
+    expiry_date: date
 
 
 @dataclass(frozen=True, slots=True)

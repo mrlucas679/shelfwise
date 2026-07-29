@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 import shelfwise_backend.app as app_module
+import shelfwise_backend.routes_scenarios as scenarios_module
 from shelfwise_backend.agentic_cascade import AgenticCascadeDeadlineError, AgenticCascadeError
 
 
@@ -10,7 +11,7 @@ def test_agentic_provider_details_are_logged_not_returned_to_clients(monkeypatch
     def fail(*args, **kwargs):
         raise AgenticCascadeError("provider https://secret.example/v1 failed with token=hidden")
 
-    monkeypatch.setattr(app_module, "run_golden_cascade_via_agents", fail)
+    monkeypatch.setattr(scenarios_module, "run_golden_cascade_via_agents", fail)
 
     response = TestClient(app_module.app).post("/scenarios/golden/agentic")
 
@@ -33,7 +34,7 @@ def test_agentic_deadline_exceeded_returns_structured_503_with_progress(monkeypa
             elapsed_ms=9500,
         )
 
-    monkeypatch.setattr(app_module, "run_cold_chain_cascade_via_agents", deadline_hit)
+    monkeypatch.setattr(scenarios_module, "run_cold_chain_cascade_via_agents", deadline_hit)
 
     response = TestClient(app_module.app).post("/scenarios/cold-chain/agentic")
 

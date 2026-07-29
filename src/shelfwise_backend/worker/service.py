@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from contextlib import suppress
@@ -9,6 +10,8 @@ from typing import Any
 from shelfwise_backend.event_bus import stale_consumer_idle_ms
 
 from .worker import CascadeWorker, WorkerResult
+
+_LOG = logging.getLogger("shelfwise.cascade_worker")
 
 
 class WorkerLoopService:
@@ -48,6 +51,7 @@ class WorkerLoopService:
         self._last_status = "idle"
         self._last_error: str | None = None
         self._next_reclaim_at = 0.0
+        self._stop_requested = asyncio.Event()
 
     async def start(self) -> None:
         if not worker_enabled():
@@ -56,13 +60,17 @@ class WorkerLoopService:
             return
         self._last_error = None
         self._next_reclaim_at = 0.0
+        self._stop_requested.clear()
         self._task = asyncio.create_task(self._run(), name="shelfwise-cascade-worker")
 
     async def stop(self) -> None:
         task = self._task
         if task is None:
             return
-        task.cancel()
+        # A cancellation here can interrupt `to_thread(process_one)` after it has
+        # persisted a decision but before `_record` updates service diagnostics. Ask
+        # the loop to stop instead so one in-flight, journaled unit completes cleanly.
+        self._stop_requested.set()
         with suppress(asyncio.CancelledError):
             await task
         self._task = None
@@ -83,19 +91,20 @@ class WorkerLoopService:
         }
 
     async def _run(self) -> None:
-        while True:
+        while not self._stop_requested.is_set():
             try:
                 await self._reclaim_if_due()
                 result = await asyncio.to_thread(self._worker.process_one)
                 self._record(result)
                 if not result.processed:
-                    await asyncio.sleep(self._poll_s)
+                    await _wait_for_stop(self._stop_requested, self._poll_s)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception:
                 self._last_status = "crashed"
-                self._last_error = str(exc)[:200]
-                await asyncio.sleep(self._poll_s)
+                self._last_error = "worker_failed"
+                _LOG.exception("cascade worker loop crashed")
+                await _wait_for_stop(self._stop_requested, self._poll_s)
 
     async def _reclaim_if_due(self) -> None:
         now = time.monotonic()
@@ -107,11 +116,11 @@ class WorkerLoopService:
                 self._worker.reclaim_stale,
                 min_idle_ms=self._reclaim_idle_ms,
             )
-        except Exception as exc:
-            message = str(exc)[:200]
+        except Exception:
             self._reclaim_errors += 1
-            self._last_reclaim_error = message
-            self._last_error = message
+            self._last_reclaim_error = "reclaim_failed"
+            self._last_error = "reclaim_failed"
+            _LOG.exception("cascade worker stale-message reclaim failed")
             return
         self._last_reclaimed = reclaimed
         self._reclaimed += reclaimed
@@ -121,7 +130,7 @@ class WorkerLoopService:
         if result.processed:
             self._processed += 1
         if result.error:
-            self._last_error = result.error[:200]
+            self._last_error = "event_processing_failed"
 
 
 def worker_enabled() -> bool:
@@ -133,3 +142,9 @@ def _float_env(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
     except ValueError:
         return default
+
+
+async def _wait_for_stop(stop_requested: asyncio.Event, timeout: float) -> None:
+    """Wait for either the next poll interval or a graceful shutdown request."""
+    with suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(stop_requested.wait(), timeout=timeout)

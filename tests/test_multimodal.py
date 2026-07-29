@@ -478,6 +478,19 @@ def test_money_is_spoken_like_a_person():
     )
 
 
+def test_money_with_a_fractional_multiplier_scales_the_whole_value():
+    """"R1.5k" is R1,500, not R1,000 - the fraction must scale by the multiplier, not
+    be discarded by it. Reproduced live before the fix: "R2.25m" was spoken as "two
+    million rand" with the 250,000 silently dropped.
+    """
+    assert normalize_for_speech("exposure is R1.5k for this SKU") == (
+        "exposure is one thousand five hundred rand for this SKU"
+    )
+    assert normalize_for_speech("recovered R2.25m from the markdown") == (
+        "recovered two million two hundred and fifty thousand rand from the markdown"
+    )
+
+
 def test_sku_date_percent_and_markdown():
     assert "item four oh one one" in normalize_for_speech("SKU 4011 is slow")
     assert "the thirtieth of June" in normalize_for_speech("expires 2026-06-30")

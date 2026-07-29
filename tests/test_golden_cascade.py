@@ -76,6 +76,66 @@ def test_critic_rejection_cascade_downgrades_unsupported_action() -> None:
     assert any(fact["fact"] == "critic_passed" and fact["value"] == "False" for fact in support)
 
 
+def test_golden_cascade_cites_learned_high_water_mark_without_changing_the_decision() -> None:
+    """Closing the loop means giving the reviewer the system's own memory, never gating on
+    it - the seeded threshold must appear as evidence and change nothing else.
+    """
+    from shelfwise_memory import InMemoryLearningStore
+
+    baseline = run_golden_cascade()
+    learning = InMemoryLearningStore()
+    seeded_decision = dict(baseline["decision"])
+    seeded_decision["status"] = "approved"
+    seeded_decision["data_domain"] = "world_simulation"
+    learning.record_approved_decision(seeded_decision)
+
+    result = run_golden_cascade(learning=learning)
+
+    history = [
+        item
+        for item in result["evidence"]
+        if item["agent"] == "opportunity" and "previously proven" in item["conclusion"]
+    ]
+    assert len(history) == 1
+    assert history[0]["sources"], "cited evidence must carry a real source, never an empty one"
+    fact = next(
+        f
+        for f in history[0]["supporting_data"]
+        if f["fact"] == "previous_high_water_mark_minor_units"
+    )
+    assert int(fact["value"]) > 0
+
+    assert result["decision"]["status"] == baseline["decision"]["status"]
+    assert result["decision"]["action"] == baseline["decision"]["action"]
+    assert result["decision"]["critic_verdict"] == baseline["decision"]["critic_verdict"]
+    assert result["decision"]["critic_gate"] == baseline["decision"]["critic_gate"]
+
+
+def test_golden_cascade_omits_learned_evidence_with_no_prior_threshold() -> None:
+    """A SKU's first-ever decision must be unaffected - the citation is purely additive."""
+    from shelfwise_memory import InMemoryLearningStore
+
+    result = run_golden_cascade(learning=InMemoryLearningStore())
+
+    history = [item for item in result["evidence"] if "previously proven" in item["conclusion"]]
+    assert history == []
+
+
+def test_golden_cascade_default_call_is_unaffected_by_the_learning_parameter() -> None:
+    """The default `learning=None` must reproduce today's exact evidence agent list."""
+    result = run_golden_cascade()
+
+    assert [item["agent"] for item in result["evidence"]] == [
+        "inventory",
+        "demand",
+        "expiry",
+        "opportunity",
+        "simulation",
+        "critic",
+        "executive",
+    ]
+
+
 def test_procurement_cascade_uses_reorder_policy_and_supplier_ranking() -> None:
     result = run_procurement_cascade()
     agents = [item["agent"] for item in result["evidence"]]
@@ -98,6 +158,40 @@ def test_procurement_cascade_uses_reorder_policy_and_supplier_ranking() -> None:
     )
     assert any(fact["fact"] == "suggested_order_units" for fact in support)
     assert any(fact["fact"] == "supplier_coverage" for fact in support)
+
+
+def test_procurement_cascade_cites_learned_high_water_mark_without_changing_the_decision() -> (
+    None
+):
+    from shelfwise_memory import InMemoryLearningStore
+
+    baseline = run_procurement_cascade()
+    learning = InMemoryLearningStore()
+    seeded_decision = dict(baseline["decision"])
+    seeded_decision["status"] = "approved"
+    seeded_decision["data_domain"] = "world_simulation"
+    learning.record_approved_decision(seeded_decision)
+
+    result = run_procurement_cascade(learning=learning)
+
+    history = [
+        item
+        for item in result["evidence"]
+        if item["agent"] == "opportunity" and "previously proven" in item["conclusion"]
+    ]
+    assert len(history) == 1
+    assert result["decision"]["status"] == baseline["decision"]["status"]
+    assert result["decision"]["action"] == baseline["decision"]["action"]
+    assert result["decision"]["critic_verdict"] == baseline["decision"]["critic_verdict"]
+
+
+def test_procurement_cascade_omits_learned_evidence_with_no_prior_threshold() -> None:
+    from shelfwise_memory import InMemoryLearningStore
+
+    result = run_procurement_cascade(learning=InMemoryLearningStore())
+
+    history = [item for item in result["evidence"] if "previously proven" in item["conclusion"]]
+    assert history == []
 
 
 def test_demo_procurement_decision_carries_governance_and_economics() -> None:

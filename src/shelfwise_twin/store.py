@@ -44,7 +44,12 @@ class TwinStore(Protocol):
     def record_observation(self, value: TwinObservation) -> bool: ...
 
     def list_observations(
-        self, tenant_id: str, *, store_id: str | None = None, limit: int = 200
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        limit: int = 200,
+        include_predicted: bool = False,
     ) -> list[TwinObservation]: ...
 
     def get_property(
@@ -60,7 +65,11 @@ class TwinStore(Protocol):
     def upsert_property(self, value: TwinPropertyState) -> None: ...
 
     def list_properties(
-        self, tenant_id: str, *, store_id: str | None = None
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        include_predicted: bool = False,
     ) -> list[TwinPropertyState]: ...
 
     def clear(self) -> None: ...
@@ -143,9 +152,20 @@ class InMemoryTwinStore:
             return True
 
     def list_observations(
-        self, tenant_id: str, *, store_id: str | None = None, limit: int = 200
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        limit: int = 200,
+        include_predicted: bool = False,
     ) -> list[TwinObservation]:
-        """Return newest immutable observations for one tenant."""
+        """Return newest immutable observations for one tenant.
+
+        Excludes `PREDICTED`-lane (scenario what-if) observations by default - same reason
+        as `list_properties`: a scenario run must not change observation counts, source
+        agreement, or any other quantity computed from this list for operational/fidelity
+        reporting.
+        """
         _validate_limit(limit)
         with self._lock:
             rows = [
@@ -153,6 +173,7 @@ class InMemoryTwinStore:
                 for (row_tenant, _), observation in self._observations.items()
                 if row_tenant == tenant_id
                 and (store_id is None or observation.store_id == store_id)
+                and (include_predicted or observation.lane is not StateLane.PREDICTED)
             ]
         rows.sort(key=lambda item: (item.observed_at, item.observation_id), reverse=True)
         return deepcopy(rows[:limit])
@@ -185,15 +206,27 @@ class InMemoryTwinStore:
             self._properties[key] = value
 
     def list_properties(
-        self, tenant_id: str, *, store_id: str | None = None
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        include_predicted: bool = False,
     ) -> list[TwinPropertyState]:
-        """Return current projected properties, optionally narrowed to a store."""
+        """Return current projected properties, optionally narrowed to a store.
+
+        Excludes `PREDICTED`-lane (scenario what-if) rows by default - every caller that
+        reads this as the tenant's real operational state (`get_store`, `fidelity`,
+        `snapshot`, `get_entity`) must never see hypothetical scenario values mixed in with
+        reported/estimated/desired facts. Callers that legitimately need predicted rows
+        (scenario comparison) pass `include_predicted=True` explicitly.
+        """
         with self._lock:
             rows = [
                 value
                 for (row_tenant, twin_id, _, _, _), value in self._properties.items()
                 if row_tenant == tenant_id
                 and (store_id is None or self._entity_in_store(twin_id, tenant_id, store_id))
+                and (include_predicted or value.lane is not StateLane.PREDICTED)
             ]
         return deepcopy(sorted(rows, key=lambda item: (item.twin_id, item.property_name)))
 
@@ -368,9 +401,18 @@ class PostgresTwinStore:
         return row is not None
 
     def list_observations(
-        self, tenant_id: str, *, store_id: str | None = None, limit: int = 200
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        limit: int = 200,
+        include_predicted: bool = False,
     ) -> list[TwinObservation]:
-        """Return newest immutable observations for the tenant."""
+        """Return newest immutable observations for the tenant.
+
+        Excludes `predicted`-lane (scenario what-if) observations by default - see the
+        in-memory store's `list_observations` docstring.
+        """
         _validate_limit(limit)
         query = """
             select observation_id, tenant_id, store_id, twin_id, property_name, lane, value,
@@ -383,6 +425,9 @@ class PostgresTwinStore:
         if store_id is not None:
             query += " and store_id = %s"
             params.append(store_id)
+        if not include_predicted:
+            query += " and lane <> %s"
+            params.append(StateLane.PREDICTED.value)
         query += " order by observed_at desc, observation_id desc limit %s"
         params.append(limit)
         with self._connect(tenant_id) as conn:
@@ -456,9 +501,17 @@ class PostgresTwinStore:
             conn.commit()
 
     def list_properties(
-        self, tenant_id: str, *, store_id: str | None = None
+        self,
+        tenant_id: str,
+        *,
+        store_id: str | None = None,
+        include_predicted: bool = False,
     ) -> list[TwinPropertyState]:
-        """Return projected properties, optionally narrowed by endpoint store."""
+        """Return projected properties, optionally narrowed by endpoint store.
+
+        Excludes `predicted`-lane (scenario what-if) rows by default - see the in-memory
+        store's `list_properties` docstring for why this must not be the caller's job.
+        """
         query = """
             select p.tenant_id, p.twin_id, p.property_name, p.lane, p.value, p.unit,
                    p.observation_id, p.observed_at, p.projected_at, p.source_system,
@@ -475,6 +528,9 @@ class PostgresTwinStore:
         if store_id is not None:
             query += " and e.store_id = %s"
             params.append(store_id)
+        if not include_predicted:
+            query += " and p.lane <> %s"
+            params.append(StateLane.PREDICTED.value)
         query += " order by p.twin_id, p.property_name"
         with self._connect(tenant_id) as conn:
             rows = conn.execute(query, params).fetchall()

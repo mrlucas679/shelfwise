@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from shelfwise_backend.app import app
+from shelfwise_backend.chat import _build_prompt_context_receipt
 from shelfwise_backend.context_budget import (
     ContextAllocation,
     build_context_receipt,
@@ -32,7 +33,13 @@ from shelfwise_backend.conversation_routing import (
     RouteReason,
     choose_conversation_route,
 )
+from shelfwise_backend.retrieval_planning import (
+    build_retrieval_receipt,
+    plan_retrieval,
+)
 from shelfwise_backend.tenant import encode_hs256_token
+from shelfwise_backend.tools.mcp_surface import PlatformTool
+from shelfwise_mlops import EvaluationRecord, InMemoryEvaluationRegistry
 from shelfwise_mlops.skill_registry import (
     InMemorySkillRegistry,
     SkillManifest,
@@ -134,6 +141,63 @@ def test_routing_is_deterministic_and_auditable(request_kwargs, tier, reason) ->
     assert route.tier is tier
     assert route.reason is reason
     assert route.to_dict()["policy_version"] == "conversation-route-v1"
+
+
+def test_account_help_does_not_load_operational_evidence() -> None:
+    plan = plan_retrieval("How do I reset my password?", has_conversation=False)
+
+    assert plan.partitions == ()
+    receipt = build_retrieval_receipt(plan, {})
+    assert receipt["counts"] == {}
+    assert receipt["insufficient_evidence"] is False
+    assert set(receipt["omissions"]) == {
+        "live_facts",
+        "decisions",
+        "learning",
+        "traces",
+        "conversation_memory",
+        "skills",
+    }
+
+
+def test_operational_question_selects_bounded_fact_and_skill_partitions() -> None:
+    plan = plan_retrieval(
+        "How much yoghurt stock is on hand?",
+        has_conversation=False,
+    )
+
+    assert plan.partitions == ("live_facts", "skills")
+    assert plan.max_followups == 1
+    receipt = build_retrieval_receipt(plan, {"live_facts": {}, "skills": []})
+    assert receipt["insufficient_evidence"] is True
+    assert receipt["follow_up"]["allowed"] is True
+    assert receipt["follow_up"]["used"] == 0
+
+
+def test_conflicting_retrieval_evidence_is_visible_and_routes_strong() -> None:
+    plan = plan_retrieval("Why is this decision pending?", has_conversation=False)
+    receipt = build_retrieval_receipt(
+        plan,
+        {
+            "live_facts": {"source_conflict": True},
+            "decisions": [{"id": "dec_1", "status": "pending"}],
+            "skills": [{"id": "decision-explanation"}],
+        },
+    )
+    route = choose_conversation_route(
+        ConversationRouteRequest(
+            domains=("inventory",),
+            risk_tier=plan.risk_tier,
+            asks_for_scenario=False,
+            has_source_conflict=bool(receipt["conflicts"]),
+            has_memory_conflict=False,
+            insufficient_evidence=bool(receipt["insufficient_evidence"]),
+        )
+    )
+
+    assert receipt["conflicts"]
+    assert route.tier is ConversationTier.STRONG
+    assert route.reason is RouteReason.STRONG_SOURCE_CONFLICT
 
 
 # --- hierarchical conversation memory ------------------------------------------------
@@ -268,6 +332,30 @@ def test_context_receipt_fails_closed_on_overflow_before_network_io() -> None:
     assert receipt.to_dict()["selected_skill_ids"] == ["stock_lookup_test"]
 
 
+def test_prompt_receipt_accounts_for_the_selected_tool_schema() -> None:
+    async def lookup_stock(sku: str) -> dict[str, object]:
+        return {"sku": sku}
+
+    receipt = _build_prompt_context_receipt(
+        system="system instructions",
+        prompt="user prompt",
+        tools=[
+            PlatformTool(
+                name="get_stock",
+                description="Look up stock for a SKU.",
+                read_only=True,
+                fn=lookup_stock,
+            )
+        ],
+        selected_memory_ids=("mem_summary",),
+        selected_skill_ids=("stock_lookup_test",),
+    )
+
+    assert receipt["section_tokens"]["tool_schemas"] > 0
+    assert receipt["selected_tools"] == ["get_stock"]
+    assert receipt["selected_memory_ids"] == ["mem_summary"]
+
+
 # --- skill registry and lifecycle -----------------------------------------------------
 
 
@@ -327,22 +415,49 @@ def test_discovery_surfaces_only_promoted_role_matched_skills_ranked_by_relevanc
 
 def test_promotion_gate_requires_the_skills_own_evaluation_bar() -> None:
     registry = InMemorySkillRegistry()
+    evaluations = InMemoryEvaluationRegistry()
     registry.upsert(
-        _manifest(id="candidate_skill", status="draft", minimum_pass_rate=0.9),
+        _manifest(
+            id="candidate_skill",
+            status="draft",
+            minimum_pass_rate=0.9,
+            tenant_id="tenant_a",
+            evaluation_ids=("eval_low", "eval_pass"),
+        ),
         known_agents=_KNOWN_AGENTS, known_tools=_KNOWN_TOOLS,
     )
+    evaluations.record(EvaluationRecord("eval_low", "tenant_a", 0.8, True))
+    evaluations.record(EvaluationRecord("eval_pass", "tenant_a", 0.95, True))
 
     with pytest.raises(ValueError, match="below the skill's required"):
-        promote(registry, "candidate_skill", measured_pass_rate=0.8)
-    assert registry.get("candidate_skill").status == "draft"
+        promote(
+            registry,
+            "candidate_skill",
+            evaluation_registry=evaluations,
+            evaluation_id="eval_low",
+            tenant_id="tenant_a",
+        )
+    assert registry.get("candidate_skill", tenant_id="tenant_a").status == "draft"
 
-    promoted = promote(registry, "candidate_skill", measured_pass_rate=0.95)
+    promoted = promote(
+        registry,
+        "candidate_skill",
+        evaluation_registry=evaluations,
+        evaluation_id="eval_pass",
+        tenant_id="tenant_a",
+    )
     assert promoted.status == "promoted"
 
-    retired = retire(registry, "candidate_skill")
+    retired = retire(registry, "candidate_skill", tenant_id="tenant_a")
     assert retired.status == "retired"
     with pytest.raises(ValueError, match="retired skill cannot be promoted"):
-        promote(registry, "candidate_skill", measured_pass_rate=1.0)
+        promote(
+            registry,
+            "candidate_skill",
+            evaluation_registry=evaluations,
+            evaluation_id="eval_pass",
+            tenant_id="tenant_a",
+        )
 
 
 def test_default_platform_catalogue_validates_against_the_real_surface() -> None:
@@ -408,7 +523,20 @@ def test_chat_carries_memory_route_and_context_receipts_end_to_end(monkeypatch) 
     assert meta["conversation_route"]["tier"] in {"routine", "strong"}
     assert meta["context_receipt"]["model_window"] == 8_192
     assert meta["context_receipt"]["estimated_input_tokens"] >= 1
+    assert {
+        "system",
+        "user_prompt",
+        "tool_schemas",
+        "final_answer_schema",
+    } <= set(meta["context_receipt"]["section_tokens"])
     assert meta.get("skills"), "a stock question must discover the stock skill"
+    assert meta["retrieval_plan"]["policy_version"] == "retrieval-plan-v1"
+    assert meta["retrieval_receipt"]["selected_partitions"] == [
+        "live_facts",
+        "conversation_memory",
+        "skills",
+    ]
+    assert meta["retrieval_receipt"]["follow_up"]["maximum"] == 1
 
     summary = conversation_memory_store.active_summary(
         tenant_id="assistant_test_tenant",
@@ -466,7 +594,12 @@ def test_compaction_extracts_objective_and_corrections_as_first_class_items() ->
 def test_skill_lifecycle_is_operable_over_http(monkeypatch) -> None:
     """promote/retire existed only as functions - governance is half-implemented if no
     operator can actually flip a skill's lifecycle in the running product."""
-    from shelfwise_backend.state import skill_registry as live_registry
+    from shelfwise_backend.state import (
+        evaluation_registry as live_evaluations,
+    )
+    from shelfwise_backend.state import (
+        skill_registry as live_registry,
+    )
 
     headers = _jwt_headers(monkeypatch)
     client = TestClient(app)
@@ -476,6 +609,7 @@ def test_skill_lifecycle_is_operable_over_http(monkeypatch) -> None:
             id="http_lifecycle_skill",
             status="draft",
             minimum_pass_rate=0.9,
+            evaluation_ids=("http_eval_low", "http_eval_pass"),
             allowed_roles=("manager", "owner", "associate"),
         ),
         known_agents={"inventory"},
@@ -486,17 +620,23 @@ def test_skill_lifecycle_is_operable_over_http(monkeypatch) -> None:
     assert listed.status_code == 200
     assert any(s["id"] == "http_lifecycle_skill" for s in listed.json()["skills"])
 
+    live_evaluations.record(
+        EvaluationRecord("http_eval_low", "assistant_test_tenant", 0.5, True)
+    )
+    live_evaluations.record(
+        EvaluationRecord("http_eval_pass", "assistant_test_tenant", 0.95, True)
+    )
     rejected = client.post(
         "/mlops/skills/http_lifecycle_skill/promote",
         headers=headers,
-        json={"measured_pass_rate": 0.5},
+        json={"evaluation_id": "http_eval_low"},
     )
     assert rejected.status_code == 422
 
     promoted = client.post(
         "/mlops/skills/http_lifecycle_skill/promote",
         headers=headers,
-        json={"measured_pass_rate": 0.95},
+        json={"evaluation_id": "http_eval_pass"},
     )
     assert promoted.status_code == 200
     assert promoted.json()["skill"]["status"] == "promoted"
