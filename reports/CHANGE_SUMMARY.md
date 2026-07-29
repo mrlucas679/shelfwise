@@ -31,6 +31,8 @@ Scope: ShelfWise adaptive failure attribution and evidence-backed readiness only
 
 - Bounded failed-run lookup at the model-run registry/SQL layer by correlation ID.
 - Removed one proven redundant full-system report assignment.
+- Updated GitHub checkout, Python, and Node setup actions to their Node 24 majors after the
+  exact-head run exposed the platform deprecation annotation.
 - Audited declared capabilities, empty/dead code, technical debt, literals/secrets,
   dependencies, schema/integrity, end-to-end paths, and production boundaries.
 - Added the required evidence artifacts under `reports/` and completed Plan 017.
