@@ -28,6 +28,7 @@ until plans 001-003 are complete. Execute in order and update status after each 
 | 014 | Personalize decision queues by workforce role | P1 | S | 012 | DONE |
 | 015 | Report monthly value recovered from verified outcome receipts | P1 | M | 014 | DONE |
 | 016 | Close product operations controls without paid dependencies | P1 | M | 013-015 | DONE |
+| 017 | Integrate adaptive failure attribution | P1 | M | 006 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED | REJECTED.
 

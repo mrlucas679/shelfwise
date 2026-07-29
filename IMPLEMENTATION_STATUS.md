@@ -4,17 +4,38 @@
 > on `developers`. Keep changes on `developers`; `main` is the protected working-product branch
 > and is not an accidental commit target.
 
-Date: 2026-07-28 (supersedes the 2026-07-23 update below; that entry is kept as history)
-Branch: `developers` · Final local gates: **943 passed / 21 environment-gated skips**;
+Date: 2026-07-29 (supersedes the 2026-07-28 update below; older entries are kept as history)
+Branch: `developers` · Final local gates: **951 passed / 21 environment-gated skips**;
 Ruff clean; frontend `tsc --noEmit` clean; frontend production build clean;
-capability manifest **248 capabilities**, contract-verified
-(`sha256:457267630...`); Playwright golden path **11/11 passed** against isolated disposable
+capability manifest **249 capabilities**, contract-verified
+(`sha256:5e0a4aa76d4f89e93365463cb52231e76daeef0e3830d8a0d5918b33e152a048`);
+Playwright golden path **12/12 passed** against isolated disposable
 ShelfWise servers using frontend port 5187 and backend port 8017. The project `.venv` and
 installed frontend toolchain ran these gates directly.
-GitHub CI on implementation commit `e656d1d` passed **927 tests / 1 skip** with fresh
-Postgres/Redis, the distributable wheel, the production Compose topology, and the deployment
-shakedown. Live AMD-model proof was not run because that CI environment has no endpoint
-credentials; this remains explicitly external rather than being inferred from the green build.
+Exact-head GitHub CI is intentionally recorded after the 2026-07-29 commit is pushed. The prior
+implementation commit `e656d1d` remains green with fresh Postgres/Redis, the distributable
+wheel, the production Compose topology, and the deployment shakedown. Live AMD-model proof was
+not run because CI has no endpoint credentials; this remains explicitly external rather than
+being inferred from a green build.
+
+## 2026-07-29 adaptive attribution and production-readiness pass
+
+- ✅ ShelfWise now derives bounded, privacy-preserving step representations from its existing
+  TraceSpan, ModelCall, ToolExecution, EvidenceObject, and Decision receipts. It learns only
+  from structurally verified successes and reports warming, normal, suspicious, or failed
+  state through the existing trace API and Operations interface.
+- ✅ The capability is disabled by default. With the flag off, the prior trace response shape
+  and failed-model behavior are unchanged. It adds no event bus, trajectory store, database
+  migration, automatic replay, automatic training, or operational write.
+- ✅ References are isolated by tenant, data domain, and trajectory family. Failed model and
+  post-model schema/tool/grounding paths produce safe correlated traces without raw errors,
+  prompts, tool payloads, response text, secrets, or personal data.
+- ✅ Operational-twin traces can never become training candidates. Simulation candidates remain
+  review-only and replay always requires human approval.
+- ✅ Repository-wide completion, dead-code, technical-debt, hardcoding, dependency, database,
+  end-to-end, and production-readiness artifacts are under `reports/`. External live inference,
+  accelerator training, retailer pilot, and legal acceptance remain explicitly outside local
+  proof.
 
 ## 2026-07-28 one-command startup and self-serve connection completeness
 

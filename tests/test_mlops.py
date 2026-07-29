@@ -56,6 +56,8 @@ def test_model_run_registry_records_runs_per_tenant() -> None:
     assert registry.list(tenant_id="other") == []
     assert registry.list(data_domain="world_simulation") == [run]
     assert registry.list(data_domain="operational_twin") == []
+    assert registry.list(correlation_id="cor_1") == [run]
+    assert registry.list(correlation_id="other") == []
     assert registry.list()[0].to_dict()["created_at"]
 
 

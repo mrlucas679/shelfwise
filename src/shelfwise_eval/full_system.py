@@ -2207,7 +2207,6 @@ class _FullSystemDriver:
         self.totals["agentic_executions_by_cascade"] = dict(
             sorted(self.agentic_executions_by_cascade.items())
         )
-        self.totals["agentic_executions_by_cascade"] = dict(self.agentic_executions_by_cascade)
         audited = audit_full_system_integrity(
             decision_trail=self.trail,
             feature_receipts=self.features,

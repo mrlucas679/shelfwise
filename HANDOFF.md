@@ -1,4 +1,32 @@
-# HANDOFF — current continuation state as of 2026-07-28
+# HANDOFF — current continuation state as of 2026-07-29
+
+## Adaptive failure attribution and final readiness pass — BUILT, 2026-07-29
+
+Plan 017 is complete. ShelfWise adapts the useful one-class-success principle from *Tracing
+Agentic Failure from the Flow of Success* without adopting the paper as a replacement
+architecture. The existing trace registry remains the trajectory surface; existing
+TraceSpan, ModelCall, ToolExecution, EvidenceObject, and Decision receipts are converted into
+bounded structural representations only when
+`SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED=true`.
+
+The feature defaults off and preserves the previous trace payload and failed-model behavior.
+When enabled, successful references are isolated by tenant, data domain, and trajectory family;
+failed inference and post-model schema/tool/grounding boundaries produce safe correlated
+diagnostics. No raw prompts, model text, tool payloads, errors, secrets, or personal data enter
+the representation. Attribution never replays, trains, writes back, or promotes anything
+automatically, and operational-twin traces are categorically training-ineligible.
+
+Final local evidence from the completed source state:
+
+- 951 Python tests passed, 21 environment-gated tests skipped.
+- Ruff, the 249-record capability contract, frontend typecheck, and production build passed.
+- All 12 isolated Chromium product flows passed on ports 5187/8017.
+- Dependency resolution and the Node production advisory scan are clean.
+- Postgres-dependent integrity checks remain CI-owned; live provider/hardware/retailer proof
+  remains external and must not be inferred from local deterministic tests.
+
+The detailed evidence set is under `reports/`, and
+`docs/ADAPTIVE_FAILURE_ATTRIBUTION.md` is the operator/developer guide.
 
 ## One-command shop startup — BUILT, 2026-07-28
 

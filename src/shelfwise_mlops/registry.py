@@ -146,12 +146,15 @@ class InMemoryModelRunRegistry:
         *,
         tenant_id: str | None = None,
         data_domain: str | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRun]:
         runs = list(self._runs)
         if tenant_id is not None:
             runs = [run for run in runs if run.tenant_id == tenant_id]
         if data_domain is not None:
             runs = [run for run in runs if run.data_domain == data_domain]
+        if correlation_id is not None:
+            runs = [run for run in runs if run.correlation_id == correlation_id]
         return runs
 
     def clear(self) -> None:
@@ -281,6 +284,7 @@ class PostgresModelRunRegistry:
         *,
         tenant_id: str | None = None,
         data_domain: str | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRun]:
         clauses: list[str] = []
         params: list[object] = []
@@ -290,6 +294,9 @@ class PostgresModelRunRegistry:
         if data_domain is not None:
             clauses.append("data_domain = %s")
             params.append(data_domain)
+        if correlation_id is not None:
+            clauses.append("correlation_id = %s")
+            params.append(correlation_id)
         where = f"where {' and '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
             rows = conn.execute(

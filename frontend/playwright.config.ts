@@ -69,6 +69,10 @@ export default defineConfig({
         // that real write path, so this must be set for it to run at all, matching what a
         // real deployment's own SHELFWISE_CREDENTIAL_ENCRYPTION_KEY would provide.
         SHELFWISE_CREDENTIAL_ENCRYPTION_KEY: 'e2e-test-only-key-not-for-production',
+        // Exercise the optional trace extension in browser CI while production/local
+        // defaults remain disabled unless an operator explicitly enables it.
+        SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED: 'true',
+        SHELFWISE_ATTRIBUTION_MIN_SUCCESSES: '2',
       },
       timeout: 60_000,
     },

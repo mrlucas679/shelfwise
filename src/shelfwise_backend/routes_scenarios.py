@@ -62,7 +62,7 @@ from .deps import (
     write_path_guard,
 )
 from .ingest_pipeline import record_cascade, record_pipeline_event
-from .model_runs import record_model_run
+from .model_runs import record_agentic_execution_failure, record_model_run
 from .state import (
     decision_store,
     learning_store,
@@ -85,19 +85,25 @@ _SCENARIO_PREVIEW_DEPS = [Depends(write_path_guard), WRITE_LIMIT_DEP]
 _DEMO_DRILL_POLL_S = 0.2  # poll frequency while waiting (how often we look, not a bound)
 
 
-def _agentic_unavailable(exc: AgenticCascadeError) -> HTTPException:
+def _agentic_unavailable(exc: AgenticCascadeError, *, event: Event) -> HTTPException:
     """Log provider diagnostics without exposing endpoint or credential details to clients."""
+    record_agentic_execution_failure(event, failure_code="agentic_cascade_error")
     _LOGGER.warning("agentic inference unavailable: %s", str(exc)[:500])
     return HTTPException(status_code=503, detail="Live agentic inference is unavailable")
 
 
-def _agentic_deadline_exceeded(exc: AgenticCascadeDeadlineError) -> HTTPException:
+def _agentic_deadline_exceeded(
+    exc: AgenticCascadeDeadlineError,
+    *,
+    event: Event,
+) -> HTTPException:
     """Return a structured 503 when a cascade stops itself before the response deadline.
 
     This is the deliberate alternative to letting the request run past
     `_request_timeout_seconds()` and get killed by `enforce_request_deadline` - the cascade
     reports how far it got instead of leaving the caller with a bare timeout.
     """
+    record_agentic_execution_failure(event, failure_code="agentic_deadline_exceeded")
     _LOGGER.warning("agentic cascade stopped before its deadline: %s", str(exc)[:500])
     return HTTPException(
         status_code=503,
@@ -635,9 +641,9 @@ def demo_golden_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     return record_cascade(result)
 
 
@@ -681,9 +687,9 @@ def demo_procurement_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     return record_cascade(result)
 
 
@@ -726,9 +732,9 @@ def demo_sales_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     return record_cascade(result)
 
 
@@ -748,9 +754,10 @@ def demo_catalog_price_agentic(
     """
     _reject_operational_domain_for_synthetic_drill(data_domain, drill="catalog-price")
     mode = _production_execution_mode(live_required)
+    event = _demo_catalog_price_event(ctx)
     try:
         result = run_catalog_price_check_via_agents(
-            _demo_catalog_price_event(ctx),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -762,9 +769,9 @@ def demo_catalog_price_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     if result is None:
         raise HTTPException(status_code=500, detail="Catalog-price demo did not produce a decision")
     return record_cascade(result)
@@ -785,9 +792,10 @@ def demo_expiry_risk_agentic(
     """
     _reject_operational_domain_for_synthetic_drill(data_domain, drill="expiry-risk")
     mode = _production_execution_mode(live_required)
+    event = _demo_expiry_risk_event(ctx)
     try:
         result = run_expiry_risk_check_via_agents(
-            _demo_expiry_risk_event(ctx),
+            event,
             execution_mode=mode,
             decisions=decision_store,
             memory=learning_store,
@@ -799,9 +807,9 @@ def demo_expiry_risk_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     if result is None:
         raise HTTPException(status_code=500, detail="Expiry-risk demo did not produce a decision")
     return record_cascade(result)
@@ -846,9 +854,9 @@ def demo_cold_chain_agentic(
             ),
         )
     except AgenticCascadeDeadlineError as exc:
-        raise _agentic_deadline_exceeded(exc) from exc
+        raise _agentic_deadline_exceeded(exc, event=event) from exc
     except AgenticCascadeError as exc:
-        raise _agentic_unavailable(exc) from exc
+        raise _agentic_unavailable(exc, event=event) from exc
     return record_cascade(result)
 
 

@@ -437,6 +437,9 @@ Built now:
   Yoco accepts a succeeded checkout as a sale only when it supplies explicit SKU, quantity, and
   location metadata and the checkout total has an exact minor-unit unit-price split.
 - MLOps run/prompt registries, accountability reporting, observability snapshot, and eval gate.
+- Optional OAT-inspired adaptive failure attribution over the existing trace registry
+  (`SHELFWISE_ADAPTIVE_ATTRIBUTION_ENABLED=false` by default); see
+  [`docs/ADAPTIVE_FAILURE_ATTRIBUTION.md`](docs/ADAPTIVE_FAILURE_ATTRIBUTION.md).
 - Postgres store with tenant-scoped RLS schema; offline-safe OpenAI-compatible inference gateway
   (any OpenAI-compatible endpoint works, MI300X/vLLM in production).
 - React/Vite chat-first console: agentic chat, bounded attention sidebar, product/workflow

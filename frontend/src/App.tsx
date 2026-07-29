@@ -684,6 +684,19 @@ function fieldNumber(row: JsonObject | undefined, key: string): number {
   const n = Number(row?.[key])
   return Number.isFinite(n) ? n : 0
 }
+function traceAttributionDetail(trace: JsonObject): string {
+  const attribution = asObject(trace.adaptive_attribution)
+  const state = fieldText(attribution, 'state', '')
+  if (!state) return formatValue(trace.evidence_agents ?? [])
+  const references = fieldNumber(attribution, 'reference_successes')
+  const suspected = asObject(attribution.suspected_step)
+  const suspectedName = fieldText(suspected, 'name', '')
+  return [
+    `Attribution ${state}`,
+    `${references} verified reference${references === 1 ? '' : 's'}`,
+    suspectedName ? `suspected step: ${suspectedName}` : '',
+  ].filter(Boolean).join(' · ')
+}
 function optionalStatusTone(value: unknown): Tone | undefined {
   const status = String(value ?? '').toLowerCase()
   if (['enabled', 'live', 'ok', 'ready', 'running', 'accepted', 'approved', 'done'].includes(status)) return 'ok'
@@ -3423,9 +3436,11 @@ function WorkspaceScreen({
                 key={String(trace.correlation_id ?? index)}
                 label={fieldText(trace, 'scenario', 'Cascade trace')}
                 meta={fieldText(trace, 'correlation_id', 'Correlation')}
-                detail={formatValue(trace.evidence_agents ?? [])}
+                detail={traceAttributionDetail(trace)}
                 value={fieldText(trace, 'status', 'ok')}
-                tone={optionalStatusTone(trace.status ?? 'ok')}
+                tone={fieldText(asObject(trace.adaptive_attribution), 'state', '') === 'suspicious'
+                  ? 'risk'
+                  : optionalStatusTone(trace.status ?? 'ok')}
               />
             ))}
           </div>

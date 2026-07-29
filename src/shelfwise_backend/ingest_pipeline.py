@@ -23,6 +23,8 @@ guarantees, and moving them here would only recreate the tangle this extraction 
 
 from __future__ import annotations
 
+import logging
+from copy import deepcopy
 from typing import Any
 
 from fastapi import HTTPException
@@ -30,6 +32,12 @@ from fastapi import HTTPException
 from shelfwise_contracts import Event
 from shelfwise_runtime import DataDomain
 
+from .adaptive_attribution import (
+    adaptive_attribution_enabled,
+    build_attributed_trace,
+    load_attribution_config,
+    trajectory_family,
+)
 from .decision_governance import attach_decision_governance
 from .state import (
     cascade_dispatcher,
@@ -42,6 +50,8 @@ from .state import (
 )
 from .twin_projection import project_twin_event
 from .worker import worker_enabled
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def record_pipeline_event(event: Event) -> dict[str, Any]:
@@ -115,5 +125,28 @@ def record_cascade(result: dict[str, Any]) -> dict[str, Any]:
     decision = result.get("decision")
     if isinstance(decision, dict) and decision.get("id"):
         result["decision"] = decision_store.upsert(decision)
+    if adaptive_attribution_enabled():
+        try:
+            family = trajectory_family(result)
+            references = trace_registry.successful_representations(
+                tenant_id=str(result.get("tenant_id") or ""),
+                data_domain=str(
+                    result.get("data_domain") or DataDomain.WORLD_SIMULATION.value
+                ),
+                trajectory_family=family,
+            )
+            attributed = build_attributed_trace(
+                result,
+                references,
+                config=load_attribution_config(),
+            )
+            result["adaptive_attribution"] = deepcopy(attributed.attribution)
+            trace_registry.put(attributed)
+            return result
+        except Exception as exc:
+            _LOGGER.warning(
+                "adaptive attribution skipped; legacy trace retained (%s)",
+                type(exc).__name__,
+            )
     trace_registry.put(result)
     return result

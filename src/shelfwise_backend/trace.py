@@ -17,9 +17,13 @@ class CascadeTrace:
     evidence_agents: list[str] = field(default_factory=list)
     decision_id: str | None = None
     status: str = "ok"
+    attribution: dict[str, Any] | None = None
+    trajectory_family: str | None = None
+    verified_success: bool = False
+    representation: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "correlation_id": self.correlation_id,
             "tenant_id": self.tenant_id,
             "data_domain": self.data_domain,
@@ -29,6 +33,9 @@ class CascadeTrace:
             "evidence_agents": list(self.evidence_agents),
             "decision_id": self.decision_id,
         }
+        if self.attribution is not None:
+            payload["adaptive_attribution"] = deepcopy(self.attribution)
+        return payload
 
 
 class TraceRegistry:
@@ -76,6 +83,31 @@ class TraceRegistry:
                 if item in self._traces
                 and self._traces[item].tenant_id == tenant_id
                 and (data_domain is None or self._traces[item].data_domain == data_domain)
+            ]
+
+    def successful_representations(
+        self,
+        *,
+        tenant_id: str,
+        data_domain: str,
+        trajectory_family: str,
+    ) -> list[list[dict[str, Any]]]:
+        """Return bounded private representations for matching verified successes.
+
+        Public trace responses never expose this calibration input. The registry already
+        bounds retained trajectories, so attribution cannot create a second unbounded cache.
+        """
+
+        with self._lock:
+            return [
+                deepcopy(trace.representation)
+                for key in self._order
+                if (trace := self._traces.get(key)) is not None
+                and trace.tenant_id == tenant_id
+                and trace.data_domain == data_domain
+                and trace.trajectory_family == trajectory_family
+                and trace.verified_success
+                and trace.representation
             ]
 
     def clear(self) -> None:

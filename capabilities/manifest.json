@@ -1211,7 +1211,7 @@
       ],
       "sources": [
         {
-          "line": 1156,
+          "line": 1169,
           "path": "frontend/src/App.tsx",
           "symbol": "ApprovalPanel"
         }
@@ -1236,7 +1236,7 @@
       ],
       "sources": [
         {
-          "line": 3776,
+          "line": 3791,
           "path": "frontend/src/App.tsx",
           "symbol": "Composer"
         }
@@ -1261,7 +1261,7 @@
       ],
       "sources": [
         {
-          "line": 1246,
+          "line": 1259,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1286,7 +1286,7 @@
       ],
       "sources": [
         {
-          "line": 1247,
+          "line": 1260,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1311,7 +1311,7 @@
       ],
       "sources": [
         {
-          "line": 1245,
+          "line": 1258,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1331,7 +1331,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1240,
+          "line": 1253,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1360,7 +1360,7 @@
       ],
       "sources": [
         {
-          "line": 1249,
+          "line": 1262,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1380,7 +1380,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1248,
+          "line": 1261,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1409,7 +1409,7 @@
       ],
       "sources": [
         {
-          "line": 1241,
+          "line": 1254,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1438,7 +1438,7 @@
       ],
       "sources": [
         {
-          "line": 1250,
+          "line": 1263,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1463,7 +1463,7 @@
       ],
       "sources": [
         {
-          "line": 1244,
+          "line": 1257,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1488,7 +1488,7 @@
       ],
       "sources": [
         {
-          "line": 1238,
+          "line": 1251,
           "path": "frontend/src/App.tsx",
           "symbol": "SidebarPage"
         }
@@ -1513,7 +1513,7 @@
       ],
       "sources": [
         {
-          "line": 1243,
+          "line": 1256,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -1533,7 +1533,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 1242,
+          "line": 1255,
           "path": "frontend/src/App.tsx",
           "symbol": "WorkspaceSurface"
         }
@@ -2582,7 +2582,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 899,
+          "line": 907,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain_get"
         }
@@ -2604,7 +2604,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 862,
+          "line": 870,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_critic_rejection_get"
         }
@@ -2626,7 +2626,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 592,
+          "line": 598,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden_get"
         }
@@ -2648,7 +2648,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 875,
+          "line": 883,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement_get"
         }
@@ -2670,7 +2670,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 886,
+          "line": 894,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales_get"
         }
@@ -2692,7 +2692,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 492,
+          "line": 498,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "list_worldgen_runs"
         }
@@ -2714,7 +2714,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 504,
+          "line": 510,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "get_worldgen_run"
         }
@@ -2736,7 +2736,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 904,
+          "line": 912,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_worldgen_drill"
         }
@@ -4149,7 +4149,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 735,
+          "line": 741,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_catalog_price_agentic"
         }
@@ -4171,7 +4171,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 891,
+          "line": 899,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain"
         }
@@ -4193,7 +4193,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 810,
+          "line": 818,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_cold_chain_agentic"
         }
@@ -4215,7 +4215,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 855,
+          "line": 863,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_critic_rejection"
         }
@@ -4237,7 +4237,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 773,
+          "line": 780,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_expiry_risk_agentic"
         }
@@ -4259,7 +4259,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 512,
+          "line": 518,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden"
         }
@@ -4281,7 +4281,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 597,
+          "line": 603,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_golden_agentic"
         }
@@ -4303,7 +4303,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 554,
+          "line": 560,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_inventory_exception"
         }
@@ -4325,7 +4325,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 867,
+          "line": 875,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement"
         }
@@ -4347,7 +4347,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 644,
+          "line": 650,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_procurement_agentic"
         }
@@ -4369,7 +4369,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 518,
+          "line": 524,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_recall"
         }
@@ -4391,7 +4391,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 880,
+          "line": 888,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales"
         }
@@ -4413,7 +4413,7 @@
       "relationships": [],
       "sources": [
         {
-          "line": 690,
+          "line": 696,
           "path": "src/shelfwise_backend/routes_scenarios.py",
           "symbol": "demo_sales_agentic"
         }
@@ -4868,17 +4868,17 @@
           "symbol": "create_tenant_fact_store"
         },
         {
-          "line": 549,
+          "line": 556,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_model_run_registry"
         },
         {
-          "line": 559,
+          "line": 566,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_evaluation_registry"
         },
         {
-          "line": 568,
+          "line": 575,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_prompt_registry"
         },
@@ -5065,17 +5065,17 @@
           "symbol": "create_tenant_fact_store"
         },
         {
-          "line": 551,
+          "line": 558,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_model_run_registry"
         },
         {
-          "line": 561,
+          "line": 568,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_evaluation_registry"
         },
         {
-          "line": 570,
+          "line": 577,
           "path": "src/shelfwise_mlops/registry.py",
           "symbol": "create_prompt_registry"
         },
@@ -5770,6 +5770,28 @@
       "worker": "WorkerLoopService"
     },
     {
+      "entrypoint": "shelfwise_backend.adaptive_attribution:build_attributed_trace",
+      "id": "workflow:adaptive_failure_attribution",
+      "kind": "workflow",
+      "name": "Adaptive Failure Attribution",
+      "note": "Disabled-by-default structured one-class monitoring over existing ShelfWise trace receipts.",
+      "relationships": [],
+      "sources": [
+        {
+          "line": 66,
+          "path": "src/shelfwise_backend/adaptive_attribution.py",
+          "symbol": "build_attributed_trace"
+        }
+      ],
+      "status": "verified",
+      "verification_nodeids": [
+        "tests/test_adaptive_attribution.py::test_disabled_flag_preserves_original_trace_contract",
+        "tests/test_adaptive_attribution.py::test_failed_model_run_becomes_safe_attributed_trace_when_enabled",
+        "tests/test_adaptive_attribution.py::test_post_model_orchestration_failure_is_captured_without_raw_exception",
+        "tests/test_adaptive_attribution.py::test_verified_successes_calibrate_and_locate_a_deviation"
+      ]
+    },
+    {
       "entrypoint": "shelfwise_backend.cascade:run_catalog_price_check",
       "id": "workflow:catalog_price_check",
       "kind": "workflow",
@@ -6107,7 +6129,7 @@
       ]
     }
   ],
-  "fingerprint": "sha256:4572676304541c4f4e3fb104515af9195c8fa10a4c3620c4ccaa597f2bd5ca43",
+  "fingerprint": "sha256:5e0a4aa76d4f89e93365463cb52231e76daeef0e3830d8a0d5918b33e152a048",
   "generator": "shelfwise_capabilities",
   "schema_version": "1.0"
 }

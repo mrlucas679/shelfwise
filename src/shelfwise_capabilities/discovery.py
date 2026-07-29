@@ -179,6 +179,33 @@ def _discover_workflows(root: Path) -> list[WorkflowCapability]:
                 entrypoint=f"shelfwise_backend.cascade:{function_name}",
             )
         )
+    attribution_path = root / "src/shelfwise_backend/adaptive_attribution.py"
+    attribution_functions = _function_locations(attribution_path)
+    attribution_entrypoint = "build_attributed_trace"
+    if attribution_entrypoint in attribution_functions:
+        capabilities.append(
+            WorkflowCapability(
+                id="workflow:adaptive_failure_attribution",
+                name="Adaptive Failure Attribution",
+                status=CapabilityStatus.VERIFIED,
+                sources=[
+                    _source(
+                        root,
+                        attribution_path,
+                        attribution_functions[attribution_entrypoint],
+                        attribution_entrypoint,
+                    )
+                ],
+                entrypoint=(
+                    "shelfwise_backend.adaptive_attribution:"
+                    f"{attribution_entrypoint}"
+                ),
+                note=(
+                    "Disabled-by-default structured one-class monitoring over existing "
+                    "ShelfWise trace receipts."
+                ),
+            )
+        )
     return capabilities
 
 

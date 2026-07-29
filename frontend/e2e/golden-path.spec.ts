@@ -129,6 +129,20 @@ test('every populated simulation workspace opens from the navigation rail', asyn
   }
 })
 
+test('operations exposes optional attribution through the existing trace registry', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Simulation', exact: true }).click()
+  await page.getByRole('button', { name: 'Operations simulation' }).click()
+
+  const operations = page.getByRole('main', { name: 'Operations workspace' })
+  await expect(operations).toBeVisible()
+  await expect(
+    operations.getByText(/Attribution (warming up|normal|suspicious)/).first(),
+  ).toBeVisible()
+})
+
 test('approving the seeded golden decision clears the queue and logs the outcome', async ({
   page,
 }) => {
